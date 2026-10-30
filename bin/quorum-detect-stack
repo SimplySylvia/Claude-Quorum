@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# Detect a repo's stack and its fast verification commands. Prints JSON:
+#
+#   { "root": "...", "stacks": ["node", ...], "profile": "node", "package_manager": "pnpm",
+#     "monorepo": "nx" | "turbo" | null,
+#     "commands": { "build": "...", "typecheck": "...", "lint": "...", "test": "...", "dev": "..." },
+#     "sources": { "test": "package.json scripts.test", ... },
+#     "skip_paths": ["pnpm-lock.yaml", "dist/", ...] }
+#
+# A command is null when nothing in the repo defines it; init-pipeline then asks the user. Detection only reads
+# files; it never runs the repo's tools. Bash 3.2 compatible.
+#
+#   quorum-detect-stack [DIR]      (default: the repo root from quorum-active-task --root)
+set -euo pipefail
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+ROOT=${1:-$("$HERE/quorum-active-task" --root)}
+[ -d "$ROOT" ] || { echo "quorum-detect-stack: not a directory: $ROOT" >&2; exit 1; }
+cd "$ROOT"
+
+stacks=""; profile=""; pm="null"; mono="null"
+c_build=""; c_typecheck=""; c_lint=""; c_test=""; c_dev=""
+s_build=""; s_typecheck=""; s_lint=""; s_test=""; s_dev=""
+skip=""
+
+add_stack() { stacks="$stacks $1"; [ -n "$profile" ] || profile=$1; }
+add_skip() { for p in "$@"; do case " $skip " in *" $p "*) ;; *) skip="$skip $p" ;; esac; done; }
+# set_cmd NAME COMMAND SOURCE: first definition wins
+set_cmd() {
+  local cur; eval "cur=\${c_$1}"
+  [ -z "$cur" ] || return 0
+  eval "c_$1=\$2; s_$1=\$3"
+}
+has() { [ -e "$1" ]; }
+grep_q() { grep -Eq "$1" "$2" 2>/dev/null; }
+
+# ---------------------------------------------------------------- Node
+if has package.json; then
+  add_stack node
+  if has pnpm-lock.yaml; then pm=pnpm
+  elif has yarn.lock; then pm=yarn
+  elif has bun.lockb || has bun.lock; then pm=bun
+  elif has package-lock.json; then pm=npm
+  else
+    declared=$(jq -r '.packageManager // empty' package.json 2>/dev/null | sed 's/@.*//')
+    case "$declared" in pnpm|yarn|bun|npm) pm=$declared ;; *) pm=npm ;; esac
+  fi
+  script() { jq -r --arg k "$1" '.scripts[$k] // empty' package.json 2>/dev/null; }
+  first_script() { for k in "$@"; do if [ -n "$(script "$k")" ]; then printf '%s\n' "$k"; return 0; fi; done; return 1; }
+  if k=$(first_script build); then set_cmd build "$pm run $k" "package.json scripts.$k"; fi
+  if k=$(first_script typecheck type-check tsc check-types types); then set_cmd typecheck "$pm run $k" "package.json scripts.$k"; fi
+  if k=$(first_script lint); then set_cmd lint "$pm run $k" "package.json scripts.$k"; fi
+  if k=$(first_script test test:unit); then
+    # npm's placeholder test script fails on purpose; don't treat it as a real suite
+    case "$(script "$k")" in *"no test specified"*) ;; *) set_cmd test "$pm run $k" "package.json scripts.$k" ;; esac
+  fi
+  if k=$(first_script dev start); then set_cmd dev "$pm run $k" "package.json scripts.$k"; fi
+  if [ -z "$c_typecheck" ] && has tsconfig.json; then
+    case $pm in npm) x="npx" ;; pnpm) x="pnpm exec" ;; yarn) x="yarn" ;; bun) x="bunx" ;; esac
+    set_cmd typecheck "$x tsc --noEmit" "tsconfig.json (no typecheck script)"
+  fi
+  if has nx.json; then mono=nx; elif has turbo.json; then mono=turbo; fi
+  add_skip package-lock.json pnpm-lock.yaml yarn.lock bun.lockb bun.lock node_modules/ dist/ build/ .next/ coverage/ "*.snap"
+fi
+
+# ---------------------------------------------------------------- Python
+if has pyproject.toml || has setup.py || has setup.cfg || has requirements.txt; then
+  add_stack python
+  if has uv.lock; then run="uv run"; [ "$pm" != null ] || pm=uv
+  elif has poetry.lock; then run="poetry run"; [ "$pm" != null ] || pm=poetry
+  else run="python -m"; [ "$pm" != null ] || pm=pip
+  fi
+  pyfiles="pyproject.toml setup.cfg requirements.txt requirements-dev.txt"
+  mentions() { for f in $pyfiles; do grep_q "$1" "$f" && return 0; done; return 1; }
+  if mentions 'pytest' || has pytest.ini || has conftest.py || has tests/conftest.py; then set_cmd test "$run pytest" "pytest configured"; fi
+  if mentions '\[tool\.ruff' || has ruff.toml || has .ruff.toml; then set_cmd lint "$run ruff check ." "ruff configured"; fi
+  if mentions '\[tool\.mypy' || has mypy.ini; then set_cmd typecheck "$run mypy ." "mypy configured"
+  elif has pyrightconfig.json || mentions '\[tool\.pyright'; then set_cmd typecheck "$run pyright" "pyright configured"; fi
+  add_skip uv.lock poetry.lock __pycache__/ .venv/ dist/ build/ "*.egg-info/" .pytest_cache/ .mypy_cache/
+fi
+
+# ---------------------------------------------------------------- Go
+if has go.mod; then
+  add_stack go
+  set_cmd build "go build ./..." "go.mod"
+  set_cmd typecheck "go vet ./..." "go.mod"
+  if has .golangci.yml || has .golangci.yaml || has .golangci.toml; then set_cmd lint "golangci-lint run" "golangci-lint configured"; fi
+  set_cmd test "go test ./..." "go.mod"
+  add_skip go.sum vendor/
+fi
+
+# ---------------------------------------------------------------- Rust
+if has Cargo.toml; then
+  add_stack rust
+  set_cmd build "cargo build" "Cargo.toml"
+  set_cmd typecheck "cargo check" "Cargo.toml"
+  set_cmd lint "cargo clippy -- -D warnings" "Cargo.toml"
+  set_cmd test "cargo test" "Cargo.toml"
+  add_skip Cargo.lock target/
+fi
+
+# ---------------------------------------------------------------- JVM
+if has gradlew || has build.gradle || has build.gradle.kts; then
+  add_stack jvm
+  if has gradlew; then g="./gradlew"; else g="gradle"; fi
+  set_cmd build "$g build -x test" "Gradle"
+  set_cmd lint "$g check -x test" "Gradle"
+  set_cmd test "$g test" "Gradle"
+  add_skip build/ .gradle/ "gradle/wrapper/"
+elif has pom.xml; then
+  add_stack jvm
+  if has mvnw; then m="./mvnw"; else m="mvn"; fi
+  set_cmd build "$m -q -DskipTests package" "Maven"
+  set_cmd test "$m -q test" "Maven"
+  add_skip target/
+fi
+
+# ---------------------------------------------------------------- Makefile (fills gaps only)
+if has Makefile; then
+  target() { grep -Eq "^$1:" Makefile; }
+  for name in build typecheck lint test dev; do
+    if target "$name"; then set_cmd "$name" "make $name" "Makefile target $name"; fi
+  done
+  [ -n "$profile" ] || add_stack make
+fi
+
+[ -n "$profile" ] || profile=generic
+case "$profile" in make) profile=generic ;; esac
+
+json_or_null() { if [ -n "$1" ]; then jq -n --arg v "$1" '$v'; else echo null; fi; }
+list_json() { # space-separated words -> JSON array; globbing off so "*.snap" stays literal
+  if [ -z "$1" ]; then echo '[]'; return; fi
+  ( set -f; for w in $1; do printf '%s\n' "$w"; done ) | jq -R . | jq -s .
+}
+null_or_str() { if [ "$1" = null ]; then echo null; else jq -n --arg v "$1" '$v'; fi; }
+
+jq -n \
+  --arg root "$ROOT" \
+  --argjson stacks "$(list_json "$stacks")" \
+  --arg profile "$profile" \
+  --argjson pm "$(null_or_str "$pm")" \
+  --argjson mono "$(null_or_str "$mono")" \
+  --argjson build "$(json_or_null "$c_build")" --argjson typecheck "$(json_or_null "$c_typecheck")" \
+  --argjson lint "$(json_or_null "$c_lint")" --argjson test "$(json_or_null "$c_test")" \
+  --argjson dev "$(json_or_null "$c_dev")" \
+  --argjson sbuild "$(json_or_null "$s_build")" --argjson stypecheck "$(json_or_null "$s_typecheck")" \
+  --argjson slint "$(json_or_null "$s_lint")" --argjson stest "$(json_or_null "$s_test")" \
+  --argjson sdev "$(json_or_null "$s_dev")" \
+  --argjson skip "$(list_json "$skip")" \
+  '{root: $root, stacks: $stacks, profile: $profile, package_manager: $pm, monorepo: $mono,
+    commands: {build: $build, typecheck: $typecheck, lint: $lint, test: $test, dev: $dev},
+    sources: ({build: $sbuild, typecheck: $stypecheck, lint: $slint, test: $stest, dev: $sdev} | with_entries(select(.value != null))),
+    skip_paths: $skip}'

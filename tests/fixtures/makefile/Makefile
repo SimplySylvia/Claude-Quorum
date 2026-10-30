@@ -1,0 +1,6 @@
+build:
+	@echo build
+lint:
+	@echo lint
+test:
+	@echo test
