@@ -1,6 +1,6 @@
 {
   "name": "quorum",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Multi-agent verification pipeline: fresh-context reviewers, a verifier vote, a security pass, a blind user test, and hooks that block \"done\" until the repo's checks pass. Scales checking to each task's risk tier and turns repeated mistakes into review rules.",
   "author": { "name": "Sylvia Hart" },
   "license": "MIT",
