@@ -1,0 +1,5 @@
+[
+  {"region": "east", "customer": "Acme, Inc.", "amount": 120},
+  {"region": "west", "customer": "Globex", "amount": 75},
+  {"region": "east", "customer": "Initech \"North\"", "amount": 30}
+]
