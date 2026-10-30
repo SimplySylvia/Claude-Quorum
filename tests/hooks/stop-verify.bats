@@ -120,3 +120,14 @@ st() { "$BIN/quorum-state" --task demo get "$1"; }
   [ "${lines[1]}" = '^quorum:builder$' ]
   [[ "${lines[2]}" == *"/hooks/stop-verify.sh" ]]
 }
+
+@test "pending findings: the main session may stop, the builder still may not" {
+  touch .fail
+  "$BIN/quorum-state" --task demo set status IN_REVIEW
+  "$BIN/quorum-state" --task demo push pending_findings "[IMPORTANT] blind test: export — Pattern Category: Data loss — last row dropped"
+  run stop
+  [ "$status" -eq 0 ]
+  [ "$(st stop_blocks)" = "0" ]
+  run bash -c "echo '{\"hook_event_name\":\"SubagentStop\",\"agent_type\":\"quorum:builder\"}' | '$HOOKS/stop-verify.sh'"
+  [ "$status" -eq 2 ]
+}

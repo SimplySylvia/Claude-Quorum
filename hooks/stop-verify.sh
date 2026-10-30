@@ -2,7 +2,9 @@
 # Stop and SubagentStop hook: block "done" until the repo's fast checks pass.
 #
 # 1. Exit 0 if stop_hook_enabled is off, the repo has no .claude/hooks/verify-completion.sh, there is no active
-#    task, or the task's status isn't BUILDING, IN_REVIEW, or ESCALATED.
+#    task, or the task's status isn't BUILDING, IN_REVIEW, or ESCALATED. Also exit 0 for the main session (Stop)
+#    while the task has pending_findings: those failures are already queued for the builder, and its
+#    SubagentStop check still has to pass.
 # 2. Run verify-completion.sh with a timeout (verify_timeout_s, default 300).
 # 3. On failure, count it in stop_blocks and exit 2 with the failing output, so Claude keeps working.
 # 4. Loop guard: on the 3rd failure in a row, let the stop through, save the status in escalated_from, set
@@ -15,7 +17,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 BIN="$HERE/../bin"
 MAX_BLOCKS=3
 
-cat >/dev/null 2>&1 || true   # the hook input isn't needed; the loop guard keeps its own count
+input=$(cat 2>/dev/null || true)
+event=$(printf '%s' "$input" | jq -r '.hook_event_name // "Stop"' 2>/dev/null || echo Stop)
 
 case "$(printf '%s' "${CLAUDE_PLUGIN_OPTION_STOP_HOOK_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')" in
   false|0|no|off) exit 0 ;;
@@ -30,6 +33,7 @@ task=$("$BIN/quorum-active-task" 2>/dev/null) || exit 0
 state() { "$BIN/quorum-state" --task "$task" "$@"; }
 status=$(state get status 2>/dev/null) || exit 0
 case "$status" in BUILDING|IN_REVIEW|ESCALATED) ;; *) exit 0 ;; esac
+if [ "$event" = Stop ] && [ -n "$(state get pending_findings 2>/dev/null)" ]; then exit 0; fi
 
 timeout_s=${CLAUDE_PLUGIN_OPTION_VERIFY_TIMEOUT_S:-300}
 case "$timeout_s" in ''|*[!0-9]*) timeout_s=300 ;; esac
