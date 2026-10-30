@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Manage section 6 (Learned Rules) of the repo's REVIEW.md.
+#
+#   quorum-learned-rule list              print the current rules, one per line
+#   quorum-learned-rule add "RULE" [SRC]  append "- RULE (SRC)" to section 6; exit 3 if an identical rule exists
+#
+# The rule must be one line. Only section 6 is touched; everything else in REVIEW.md is kept byte for byte.
+# Bash 3.2 compatible.
+set -euo pipefail
+
+die() { echo "quorum-learned-rule: $*" >&2; exit 1; }
+HERE=$(cd "$(dirname "$0")" && pwd)
+ROOT=$("$HERE/quorum-active-task" --root)
+FILE="$ROOT/REVIEW.md"
+[ -f "$FILE" ] || die "no REVIEW.md in $ROOT (run /quorum:init-pipeline)"
+grep -q '^## 6\. Learned Rules' "$FILE" || die "REVIEW.md has no '## 6. Learned Rules' section"
+
+rules() {
+  awk '/^## 6\. Learned Rules/ { in6 = 1; next } in6 && /^## / { exit } in6 && /^- / { sub(/^- /, ""); print }' "$FILE"
+}
+norm() { printf '%s' "$1" | sed -E 's/ \([^)]*\)$//' | tr '[:upper:]' '[:lower:]' | tr -s ' '; }
+
+case "${1:-}" in
+  list) rules ;;
+  add)
+    rule=${2:-}; src=${3:-}
+    [ -n "$rule" ] || die "add needs a rule"
+    case "$rule" in *$'\n'*) die "a rule must be one line" ;; esac
+    rule=$(printf '%s' "$rule" | sed -E 's/^- //; s/[[:space:]]+$//')
+    want=$(norm "$rule")
+    while IFS= read -r r; do
+      if [ "$(norm "$r")" = "$want" ]; then echo "quorum-learned-rule: already in REVIEW.md: $r" >&2; exit 3; fi
+    done < <(rules)
+    line="- $rule"; [ -z "$src" ] || line="$line ($src)"
+    tmp=$(mktemp "$FILE.XXXXXX")
+    # Insert after the last line of section 6 that isn't blank (its last rule, or its heading/comment).
+    awk -v line="$line" '
+      { lines[NR] = $0 }
+      /^## 6\. Learned Rules/ { start = NR }
+      start && NR > start && /^## / && !end { end = NR }
+      END {
+        if (!end) end = NR + 1
+        last = start
+        for (i = start + 1; i < end; i++) if (lines[i] !~ /^[ \t]*$/) last = i
+        for (i = 1; i <= NR; i++) { print lines[i]; if (i == last) print line }
+      }' "$FILE" > "$tmp"
+    mv "$tmp" "$FILE"
+    printf '%s\n' "$line" ;;
+  *) die "usage: quorum-learned-rule list | add \"RULE\" [SOURCE]" ;;
+esac
