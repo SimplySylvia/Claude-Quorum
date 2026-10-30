@@ -6,6 +6,21 @@
           { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/session-laws.sh", "timeout": 10 }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/stop-verify.sh", "timeout": 1800 }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "^quorum:builder$",
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/stop-verify.sh", "timeout": 1800 }
+        ]
+      }
     ]
   }
 }

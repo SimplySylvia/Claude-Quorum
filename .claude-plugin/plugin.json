@@ -11,7 +11,7 @@
     "max_rounds": { "type": "number", "title": "Max review rounds", "description": "Hard cap on review-loop rounds before a task is HALTED.", "default": 3, "min": 1, "max": 10 },
     "nit_cap": { "type": "number", "title": "Nit cap", "description": "Most [NIT] findings kept per review pass.", "default": 2, "min": 0, "max": 10 },
     "stop_hook_enabled": { "type": "boolean", "title": "Stop-hook checks", "description": "Run the repo's verify-completion.sh when Claude or the builder finishes during a task.", "default": true },
-    "verify_timeout_s": { "type": "number", "title": "Check timeout (seconds)", "description": "Timeout for verify-completion.sh.", "default": 300, "min": 10, "max": 3600 },
+    "verify_timeout_s": { "type": "number", "title": "Check timeout (seconds)", "description": "Timeout for verify-completion.sh (the hook itself times out at 1800).", "default": 300, "min": 10, "max": 1700 },
     "security_on_medium": { "type": "boolean", "title": "Security pass for MEDIUM", "description": "Also run the security reviewer for MEDIUM-risk tasks (it always runs for HIGH).", "default": false },
     "blind_block_dirs": { "type": "string", "title": "Blind test: blocked folders", "description": "Comma-separated folders the blind user may not read.", "default": "src,app,lib,packages,Source,Content" },
     "blind_block_exts": { "type": "string", "title": "Blind test: blocked file types", "description": "Comma-separated file extensions the blind user may not read.", "default": "ts,tsx,js,jsx,py,rs,go,cpp,h,java,kt,rb" }
