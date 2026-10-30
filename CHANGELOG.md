@@ -24,4 +24,12 @@ copy with `/plugin marketplace update`.
 - Stop and SubagentStop hook (builder only) that blocks "done" while a task is `BUILDING`, `IN_REVIEW`, or
   `ESCALATED` and its checks fail. After 3 failures in a row it lets the stop through, marks the task `ESCALATED`,
   and warns you; the next pass restores the previous status. Checks time out after `verify_timeout_s`.
+- `/quorum:spec-and-eval`: names the task, classifies its risk tier, writes `rd.md` (with a one-step rollback plan)
+  and `eval.md` (runnable checks and edge cases), creates `state.md`, and for UI work writes a self-contained
+  `mockup.html` and stops for sign-off. `--redesign <slug>` restarts a `HALTED` task, keeping its history.
+- `/quorum:build`: records mockup sign-off, creates `feat/<slug>` or `fix/<slug>`, records `base_sha`, and runs
+  the new `builder` agent.
+- `/quorum:simplify-diff`: removes debug output, dead code, and unrelated changes from the task's diff, re-runs
+  the checks, and commits.
+- `quorum-branch`: default branch, task branch creation, the diff range to review, and round SHAs.
 - bats tests for the helpers and hooks, fixture repos for each stack, and CI that runs them with shellcheck and `claude plugin validate --strict`.
