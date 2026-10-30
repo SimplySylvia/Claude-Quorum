@@ -5,6 +5,11 @@ copy with `/plugin marketplace update`.
 
 ## Unreleased
 
+### Added
+
+- README animations of the Swiss cheese layers, a task moving through the stages, and the review loop, in
+  light and dark versions (`assets/`).
+
 ### Fixed
 
 - `/quorum:review-loop` kept only the capped findings in `survivors.md`, losing the voter's `DROP` lines that

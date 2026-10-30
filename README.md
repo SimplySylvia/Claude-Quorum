@@ -35,7 +35,16 @@ has one mechanism for each:
   one-line rule in the repo's `REVIEW.md`, which every future review reads.
 
 The idea underneath is the [Swiss cheese model](https://pmc.ncbi.nlm.nih.gov/articles/PMC1117770/): no single check
-is perfect, so stack several different ones whose holes sit in different places.
+is perfect, so stack several different ones whose holes sit in different places. Each dot below is a kind of defect;
+it travels right until a layer has no hole in its path. The orange one is the case the model warns about, which is
+why every task still carries a rollback plan.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/swiss-cheese-dark.gif">
+    <img src="assets/swiss-cheese-light.gif" alt="Animation: six defense layers (Stop hook, reviewers, voter, security pass, blind test, human gate), each stopping a different kind of defect, with one defect escaping where the holes line up" width="880">
+  </picture>
+</p>
 
 ## Quick start
 
@@ -63,7 +72,14 @@ Every command is user-only: Claude never starts a review loop on its own.
 ## How it works
 
 A task moves through stages 0 to 7. Each layer catches defects the others miss, and the risk tier decides how
-many layers a task gets.
+many layers a task gets. The animation follows a real test run on the repo's fixture app, including two planted bugs:
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/stages-dark.gif">
+    <img src="assets/stages-light.gif" alt="Animation: one task moving through the stages, from bootstrap to the human gate, with red frames where a layer sent work back" width="880">
+  </picture>
+</p>
 
 | Stage | Command | What happens |
 |---|---|---|
@@ -80,6 +96,18 @@ many layers a task gets.
 | **LOW** | Copy, docs, isolated tests, code behind an off flag | 1 | — | — | Not needed if green |
 | **MEDIUM** | User-facing workflows, API endpoints, state logic | 2 | Optional | Yes | Focused |
 | **HIGH** | Auth, money, destructive migrations, security boundaries | 2 | Yes, blocking | Yes | Required sign-off |
+
+### The review loop
+
+Fresh reviewers look only at the new lines, the voter drops false alarms, and the builder fixes each surviving
+bug class everywhere it appears. Round 1 below finds a problem and loops through the builder; round 2 converges.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/review-loop-dark.gif">
+    <img src="assets/review-loop-light.gif" alt="Animation: the review loop. Reviewers in parallel, the verifier-voter, a check for remaining IMPORTANT findings, and either CONVERGED, HALTED after the last round, or the builder and another round" width="520">
+  </picture>
+</p>
 
 ### Agents
 
@@ -158,7 +186,8 @@ A repo can override the block lists in `.claude/quorum.json`, which helps in mon
 | `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `stop-verify.sh` |
 | `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state` (on the Bash PATH while the plugin is enabled) |
 | `tests/` | bats tests for every hook and helper, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
-| `evals/` | `claude plugin eval` suite: risk tiering, finding format, nit cap, blind-mode source reads |
+| `evals/` | `claude plugin eval` suite: risk tiering, reviewer findings, voter false-alarm drops, blind-mode source reads, a near-miss |
+| `assets/` | The README's animations, in light and dark versions |
 | [`CHANGELOG.md`](CHANGELOG.md) · [`LICENSE`](LICENSE) | Release notes · MIT license |
 
 ## Development
