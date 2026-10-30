@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Parse review findings in Quorum's format (REVIEW.md section 2, plan section 3.4) from a file or stdin.
+#
+# A finding starts at the beginning of a line with a tag, then its file:line, then for [IMPORTANT] a Pattern
+# Category; the lines after it (until the next finding, a heading, or a blank line followed by a non-indented
+# line) are its body:
+#
+#   [IMPORTANT] app/report.py:42 — Pattern Category: Unescaped CSV fields
+#   Mechanism: a customer name with a comma splits into two columns.
+#
+#   quorum-findings summary [FILE]          "Summary: 1 IMPORTANT, 2 NIT, 0 PRE-EXISTING"
+#   quorum-findings count TAG [FILE]        number of findings with TAG (IMPORTANT, NIT, PRE-EXISTING)
+#   quorum-findings important [FILE]        the [IMPORTANT] findings with their bodies, for the builder
+#   quorum-findings categories [FILE]       distinct Pattern Categories of [IMPORTANT] findings, one per line
+#   quorum-findings cap N [FILE]            all findings, keeping only the first N [NIT]s
+#   quorum-findings check [FILE]            exit 1 and list problems if an [IMPORTANT] lacks file:line or category
+#
+# Lines starting with anything else (for example "DROP" lines from the verifier-voter) are not findings.
+set -euo pipefail
+
+die() { echo "quorum-findings: $*" >&2; exit 1; }
+cmd=${1:-}; shift || true
+
+# Normalize into records: TAG<TAB>header line<TAB>body (body lines joined with \037)
+records() {
+  awk '
+    function flush() { if (tag != "") { print tag "\t" head "\t" body }; tag = ""; head = ""; body = "" }
+    /^\[(IMPORTANT|NIT|PRE-EXISTING)\]/ {
+      flush()
+      tag = $0; sub(/^\[/, "", tag); sub(/\].*$/, "", tag)
+      head = $0; next
+    }
+    /^#/ || /^(DROP|KEEP|Summary:)/ { flush(); next }
+    tag != "" {
+      if ($0 ~ /^[ \t]*$/) { blank = 1; next }
+      if (blank && $0 !~ /^[ \t]/ && $0 !~ /^(Mechanism|Why|Fix|Evidence|Pattern Category):/) { flush(); blank = 0; next }
+      blank = 0
+      body = (body == "" ? $0 : body "\037" $0)
+    }
+    END { flush() }
+  ' "${1:--}"
+}
+
+src() { if [ -n "${1:-}" ]; then [ -f "$1" ] || die "no such file: $1"; printf '%s' "$1"; fi; }
+
+case "$cmd" in
+  summary)
+    r=$(records "$(src "${1:-}")")
+    i=$(printf '%s\n' "$r" | grep -c '^IMPORTANT	' || true)
+    n=$(printf '%s\n' "$r" | grep -c '^NIT	' || true)
+    p=$(printf '%s\n' "$r" | grep -c '^PRE-EXISTING	' || true)
+    if [ "$i$n$p" = "000" ]; then echo "Summary: 0 issues found. Ready to land."
+    else echo "Summary: $i IMPORTANT, $n NIT, $p PRE-EXISTING"; fi ;;
+
+  count)
+    tag=${1:-}; shift || true
+    case "$tag" in IMPORTANT|NIT|PRE-EXISTING) ;; *) die "count needs IMPORTANT, NIT, or PRE-EXISTING" ;; esac
+    records "$(src "${1:-}")" | grep -c "^$tag	" || true ;;
+
+  important)
+    records "$(src "${1:-}")" | awk -F '\t' '$1 == "IMPORTANT" { if (n++) print ""; print $2; m = split($3, b, "\037"); for (i = 1; i <= m; i++) if (b[i] != "") print b[i] }' ;;
+
+  categories)
+    records "$(src "${1:-}")" | awk -F '\t' '$1 == "IMPORTANT" && match($2, /Pattern Category:[ ]*/) { c = substr($2, RSTART + RLENGTH); sub(/[ \t]+$/, "", c); if (!(c in seen)) { seen[c] = 1; print c } }' ;;
+
+  cap)
+    n=${1:-}; shift || true
+    printf '%s' "$n" | grep -Eq '^[0-9]+$' || die "cap needs a number"
+    records "$(src "${1:-}")" | awk -F '\t' -v cap="$n" '
+      $1 == "NIT" && ++nits > cap { next }
+      { if (k++) print ""; print $2; m = split($3, b, "\037"); for (i = 1; i <= m; i++) if (b[i] != "") print b[i] }' ;;
+
+  check)
+    bad=$(records "$(src "${1:-}")" | awk -F '\t' '
+      { h = $2 }
+      h !~ /^\[[A-Z-]+\] [^ ]+:[0-9]+/ { print "missing file:line: " h; next }
+      $1 == "IMPORTANT" && h !~ /Pattern Category:[ ]*[^ ]/ { print "missing Pattern Category: " h }')
+    if [ -n "$bad" ]; then printf '%s\n' "$bad" >&2; exit 1; fi ;;
+
+  *) die "usage: quorum-findings summary|count TAG|important|categories|cap N|check [FILE]" ;;
+esac

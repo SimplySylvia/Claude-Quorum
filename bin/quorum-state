@@ -9,6 +9,7 @@
 #   quorum-state [--task SLUG] push KEY VALUE        append to a list (round_shas, pending_findings)
 #   quorum-state [--task SLUG] last KEY              last list item (exit 1 if the list is empty)
 #   quorum-state [--task SLUG] clear KEY             empty a list, or set a scalar to null
+#   quorum-state [--task SLUG] log < TEXT            append TEXT (stdin) to the body, the human-readable round log
 #
 # Without --task, the slug comes from quorum-active-task. The frontmatter is rewritten in canonical key order;
 # the body after the closing --- is kept as is. Values may not contain tabs or newlines. Bash 3.2 compatible.
@@ -30,7 +31,7 @@ task=""
 if [ "${1:-}" = "--task" ]; then
   task=${2:-}; [ -n "$task" ] || die "--task needs a slug"; shift 2
 fi
-cmd=${1:-}; [ -n "$cmd" ] || die "missing command (path, init, get, set, incr, push, last, clear)"; shift
+cmd=${1:-}; [ -n "$cmd" ] || die "missing command (path, init, get, set, incr, push, last, clear, log)"; shift
 
 ROOT=$("$HERE/quorum-active-task" --root)
 if [ -z "$task" ]; then
@@ -200,6 +201,13 @@ case "$cmd" in
       awk -F '\t' -v k="$key" '{ if ($1 == "S" && $2 == k) { print "S\t" k "\tnull"; f = 1 } else print } END { if (!f) print "S\t" k "\tnull" }' "$recs" > "$recs.new"
     fi
     write_state "$recs.new" ;;
+
+  log)
+    need_file
+    text=$(cat)
+    [ -n "$text" ] || die "log needs text on stdin"
+    [ -z "$(tail -c 1 "$FILE")" ] || printf '\n' >> "$FILE"
+    printf '\n%s\n' "$text" >> "$FILE" ;;
 
   *) die "unknown command: $cmd" ;;
 esac

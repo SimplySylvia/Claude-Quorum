@@ -112,3 +112,14 @@ STATE
   run "$BIN/quorum-state" get status
   [ "$status" -eq 1 ]
 }
+
+@test "log appends to the body and leaves the frontmatter alone" {
+  "$BIN/quorum-state" --task demo init LOW
+  printf '## Round 1\nSummary: 0 issues found.\n' | "$BIN/quorum-state" log
+  echo "second" | "$BIN/quorum-state" log
+  run "$BIN/quorum-state" get status; [ "$output" = "BUILDING" ]
+  grep -q '^## Round 1$' .tasks/demo/state.md
+  [ "$(tail -n 1 .tasks/demo/state.md)" = "second" ]
+  run bash -c "printf '' | '$BIN/quorum-state' log"
+  [ "$status" -eq 1 ]
+}
