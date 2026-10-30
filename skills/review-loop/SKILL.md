@@ -11,6 +11,9 @@ fixes. Your job is to give each of them exactly the right inputs, keep the recor
 
 Work on the active task (`quorum-active-task`) from the repo root. Use `quorum-state`, `quorum-branch`, and
 `quorum-findings` (on your PATH) for state, ranges, and counting; never hand-edit `state.md` frontmatter.
+
+Don't run git commands that change the working tree, index, or history here (`stash`, `reset`, `checkout`, `commit`,
+`rebase`); agents make the commits. Read-only git (`diff`, `log`, `status`, `show`) is fine.
 Settings: `max_rounds` = ${user_config.max_rounds}, `nit_cap` = ${user_config.nit_cap}. If either still reads as a
 `${user_config…}` placeholder, the user hasn't set it: use the defaults, `max_rounds` 3 and `nit_cap` 2.
 
@@ -27,7 +30,8 @@ Keep each round's files in `.tasks/<slug>/review/round-<N>/`.
 
 If `quorum-state get pending_findings` lists anything (from `/quorum:blind-test`), fix those before reviewing:
 
-1. Write the items, one per block, to `.tasks/<slug>/review/pending-<n>.md`.
+1. Write the items, one per block, to `.tasks/<slug>/review/pending-<n>.md`. These come from the running app, so they
+   have no `file:line`; don't run `quorum-findings check` on them. The builder finds the cause.
 2. `quorum-branch record` (so the next review sees only the builder's changes).
 3. Start the builder (step 4 below) with that file as its findings. Then `quorum-state clear pending_findings`.
 
