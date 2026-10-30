@@ -1,0 +1,3 @@
+- **Core Logic / State / API:** Swallowed exceptions, `null` reaching code that assumes a value (missing `Optional` or null checks), resources not closed (no try-with-resources / `use`), thread-safety of shared mutable state, breaking a public API.
+- **Data / Persistence / Auth:** Missing authorization on an endpoint, unvalidated input, SQL or JPQL built by string concatenation, lazy-loading outside a transaction, destructive migrations without a rollback.
+- **Config / Docs:** Misrouted environment variables or Spring profiles, documentation that no longer matches behavior.

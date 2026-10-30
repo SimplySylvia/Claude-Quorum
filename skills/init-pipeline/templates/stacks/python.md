@@ -1,0 +1,4 @@
+- **Core Logic / State / API:** Bare `except:` or broad `except Exception` that hides failures, mutable default arguments, `None` reaching code that assumes a value, blocking calls inside `async` code, breaking a public function signature or API response shape.
+- **Data / Persistence / Auth:** Missing authorization checks, unvalidated input (no schema or model validation), SQL built with f-strings or `%`, `pickle`/`yaml.load` on untrusted data, destructive migrations without a downgrade.
+- **Resources:** Files, connections, or sessions opened without a context manager; unbounded reads into memory.
+- **Config / Docs:** Misrouted environment variables, type hints that lie, documentation that no longer matches behavior.

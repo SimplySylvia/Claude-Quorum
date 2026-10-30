@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Print a new REVIEW.md from the template, with section 3 (failure modes) filled from stack profiles and
+# section 4 (paths to skip) from detected paths.
+#
+#   quorum-render-review [--profile NAME]... [--skip PATH]...
+#   quorum-detect-stack | quorum-render-review --from-detect
+#
+# Profiles: node, python, go, rust, jvm, generic (default generic). With several profiles, each gets a labeled
+# block. Skip paths ending in / are build output; other plain names are lockfiles; *.snap is covered by the
+# template's snapshot rule. Bash 3.2 compatible.
+set -euo pipefail
+
+die() { echo "quorum-render-review: $*" >&2; exit 1; }
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+T="$HERE/../skills/init-pipeline/templates"
+[ -f "$T/REVIEW.md" ] || die "missing template: $T/REVIEW.md"
+
+profiles=""; skips=""
+add_profile() {
+  [ -f "$T/stacks/$1.md" ] || die "unknown profile: $1 (node, python, go, rust, jvm, generic)"
+  case " $profiles " in *" $1 "*) ;; *) profiles="$profiles $1" ;; esac
+}
+add_skip() { case "$1" in *[[:space:]]*|'') die "invalid skip path: '$1'" ;; esac; skips="$skips $1"; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --profile) [ $# -ge 2 ] || die "--profile needs a name"; add_profile "$2"; shift 2 ;;
+    --skip) [ $# -ge 2 ] || die "--skip needs a path"; add_skip "$2"; shift 2 ;;
+    --from-detect)
+      json=$(cat)
+      for p in $(printf '%s' "$json" | jq -r '.stacks[]' | grep -v '^make$' || true); do add_profile "$p"; done
+      for s in $(printf '%s' "$json" | jq -r '.skip_paths[]'); do add_skip "$s"; done
+      shift ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+[ -n "$profiles" ] || profiles=" generic"
+
+label() { case "$1" in node) echo "Node / TypeScript" ;; python) echo Python ;; go) echo Go ;; rust) echo Rust ;; jvm) echo "JVM (Java / Kotlin)" ;; *) echo General ;; esac; }
+
+failure_modes() {
+  # shellcheck disable=SC2086  # profiles is a space-separated list of safe names
+  set -- $profiles
+  if [ $# -eq 1 ]; then cat "$T/stacks/$1.md"; return; fi
+  first=1
+  for p in "$@"; do
+    [ $first -eq 1 ] || echo
+    first=0
+    echo "**$(label "$p"):**"
+    cat "$T/stacks/$p.md"
+  done
+}
+
+skip_paths() {
+  locks=""; dirs=""; other=""
+  set -f
+  for s in $skips; do
+    case "$s" in
+      *.snap) ;;
+      */) case " $dirs " in *" $s "*) ;; *) dirs="$dirs $s" ;; esac ;;
+      *\**) case " $other " in *" $s "*) ;; *) other="$other $s" ;; esac ;;
+      *) case " $locks " in *" $s "*) ;; *) locks="$locks $s" ;; esac ;;
+    esac
+  done
+  join() { local out=""; for w in $1; do out="$out${out:+, }\`$w\`"; done; printf '%s' "$out"; }
+  if [ -n "$locks" ]; then echo "- Lockfiles ($(join "$locks"))"; fi
+  if [ -n "$dirs" ]; then echo "- Generated bundles and build output ($(join "$dirs"))"; fi
+  if [ -n "$other" ]; then echo "- Other generated files ($(join "$other"))"; fi
+  if [ -z "$locks$dirs$other" ]; then echo "- Generated files and build output (none detected yet; add paths here)"; fi
+  set +f
+}
+
+fm=$(mktemp); sp=$(mktemp); trap 'rm -f "$fm" "$sp"' EXIT
+failure_modes > "$fm"
+skip_paths > "$sp"
+label_text=$(for p in $profiles; do label "$p"; done | paste -sd, - | sed 's/,/, /g')
+
+awk -v fm="$fm" -v sp="$sp" -v prof="$label_text" '
+  $0 == "{{FAILURE_MODES}}" { while ((getline l < fm) > 0) print l; next }
+  $0 == "{{SKIP_PATHS}}" { while ((getline l < sp) > 0) print l; next }
+  { gsub(/\{\{PROFILE\}\}/, prof); print }
+' "$T/REVIEW.md"

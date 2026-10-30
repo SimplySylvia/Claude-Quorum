@@ -1,0 +1,5 @@
+- **Core Logic / State / API:** Unhandled promise rejections and missing `await`, swallowed errors in `catch`, `null`/`undefined` reaching code typed as non-null (`!`, `as` casts), race conditions between concurrent async calls, breaking an exported API or a request/response shape.
+- **Data / Persistence / Auth:** Missing authorization on a route or resolver, unvalidated request input (no schema check), SQL or command built by string concatenation, secrets or tokens logged, destructive migrations without a rollback.
+- **UI / Frontend:** Missing loading/error/empty states, effects with missing dependencies or no cleanup, state updates after unmount, broken keyboard navigation or focus, layout diverging from an approved `mockup.html`.
+- **Config / Build:** Server-only env vars or secrets bundled into client code, `any` that hides a real type error, dependency added to the wrong package in a monorepo.
+- **Config / Docs:** Misrouted environment variables, package scripts or docs that no longer match what the code does.

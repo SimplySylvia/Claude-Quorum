@@ -1,0 +1,4 @@
+- **Core Logic / State / API:** Ignored `err` returns, errors wrapped without `%w`, nil pointer or nil map writes, goroutine leaks (no cancellation via `context`), data races on shared state, `defer` inside loops, breaking an exported API.
+- **Data / Persistence / Auth:** Missing authorization checks, unvalidated input, SQL built with `fmt.Sprintf`, unclosed `rows`/response bodies, destructive migrations without a rollback.
+- **Concurrency:** Unbuffered channels that can block forever, `sync.WaitGroup` misuse, missing mutex around shared maps.
+- **Config / Docs:** Misrouted environment variables, documentation that no longer matches behavior.

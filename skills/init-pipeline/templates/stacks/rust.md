@@ -1,0 +1,4 @@
+- **Core Logic / State / API:** `unwrap()`/`expect()` on fallible values in non-test code, panics reachable from input, integer overflow or `as` casts that truncate, `unsafe` blocks without a stated invariant, breaking a public API or semver.
+- **Data / Persistence / Auth:** Missing authorization checks, unvalidated input, SQL built with `format!`, destructive migrations without a rollback.
+- **Concurrency / Async:** Holding a lock across `.await`, blocking calls inside async tasks, `Send`/`Sync` assumptions that don't hold.
+- **Config / Docs:** Misrouted environment variables, feature flags that change behavior silently, documentation that no longer matches behavior.

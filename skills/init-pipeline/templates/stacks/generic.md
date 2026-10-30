@@ -1,0 +1,4 @@
+- **Core Logic / State / API:** Unhandled null/error states, silent failures, unbounded loops/arrays, race conditions in async state, breaking backward compatibility.
+- **Data / Persistence / Auth:** Missing authorization checks, unvalidated user input, destructive schema changes without rollback paths.
+- **UI / Frontend:** Broken keyboard navigation, missing loading/error/empty states, layout diverging from an approved `mockup.html`.
+- **Config / Docs:** Misrouted environment variables, documentation that lies about actual CLI/code behavior.
