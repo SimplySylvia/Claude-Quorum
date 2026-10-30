@@ -1,13 +1,15 @@
 <div align="center">
 
-# 🧀 Quorum
+<img src=".claude-plugin/icon.png" alt="Quorum icon" width="96">
+
+# Quorum
 
 **A multi-agent verification pipeline for Claude Code: fresh-context reviewers, a verifier vote, a blind user
 test, and hooks that won't let "done" mean anything less than passing checks.**
 
 <p>
   <a href="https://code.claude.com/docs/en/plugins-reference"><img src="https://img.shields.io/badge/Claude_Code-plugin-D97757?logo=claude&logoColor=white" alt="Claude Code plugin"></a>
-  <a href="#status"><img src="https://img.shields.io/badge/status-in_development-orange" alt="Status: in development"></a>
+  <a href=".claude-plugin/plugin.json"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FSimplySylvia%2FClaude-Quorum%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=6b4fd8" alt="Version"></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/hooks-bash-4EAA25?logo=gnubash&logoColor=white" alt="Hooks: bash"></a>
   <a href="https://github.com/SimplySylvia/Claude-Quorum/actions/workflows/ci.yml"><img src="https://github.com/SimplySylvia/Claude-Quorum/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="#development"><img src="https://img.shields.io/badge/evals-claude_plugin_eval-6E56CF" alt="Evals"></a>
@@ -15,13 +17,9 @@ test, and hooks that won't let "done" mean anything less than passing checks.**
 </p>
 
 [Quick start](#quick-start) · [How it works](#how-it-works) · [What it sets up](#what-it-sets-up-in-your-repo) ·
-[Configuration](#configuration) · [Development](#development)
+[Configuration](#configuration) · [Development](#development) · [Known limits](#known-limits)
 
 </div>
-
-> [!IMPORTANT]
-> **Quorum is being built.** This README describes the designed behavior. Nothing below works until the
-> matching phase lands; see [Status](#status).
 
 ## Why
 
@@ -179,12 +177,23 @@ CI runs all three on every push and pull request, on Linux and on macOS (system 
 
 ### Evals
 
+The suite in `evals/` runs against the `tests/e2e/sales-app` fixture, which `evals/_fixture/make.sh` copies into
+each run's workspace and bootstraps for Quorum.
+
+| Case | Checks |
+|---|---|
+| `risk-tier-low`, `-medium`, `-high` | `spec-and-eval` picks the right tier and writes runnable checks |
+| `reviewer-finds-bug` | `code-reviewer` finds a planted requirement violation, with `file:line` and a Pattern Category |
+| `voter-drops-false-alarm` | `verifier-voter` keeps the real bug and drops a factually wrong finding |
+| `blind-user-no-source` | `blind-user` reaches its goal through the CLI without ever hitting the source guard |
+| `nearmiss-no-auto-review-loop` | An ordinary "look at my commit" request never starts a Quorum command |
+
 ```bash
-claude plugin eval .                          # real model calls; compares against a no-plugin baseline
+# Real model calls; Bash runs inside Claude Code's sandbox. --ablation none skips the no-plugin baseline.
+claude plugin eval . --scaffold --trust-plugin --ablation none --model sonnet -j 4 --allow-tools Bash Write Edit
 ```
 
-Evals run nightly or on release tags because they cost tokens. Run them after any change to a skill's
-instructions or an agent's prompt.
+Run them after any change to a skill's instructions or an agent's prompt.
 
 ### Trying a local build
 
@@ -198,18 +207,16 @@ claude plugin install quorum@quorum
 Bump `version` in `.claude-plugin/plugin.json` when you change a skill, agent, or hook, and move the `Unreleased`
 notes in [`CHANGELOG.md`](CHANGELOG.md) under the new version. Users pick it up with `/plugin marketplace update`.
 
-## Status
+## Known limits
 
-| Phase | What | State |
-|---|---|---|
-| 0 | Platform spike: can a skill start plugin agents in parallel? | Done: yes |
-| 1 | Manifests, CI, `quorum-active-task`, `quorum-state`, the laws | Done |
-| 2 | `init-pipeline`, stack detection, `stop-verify.sh` | Done |
-| 3 | `spec-and-eval`, `build`, `simplify-diff` | Done |
-| 4 | Review loop: builder, reviewers, voter | Done |
-| 5 | Security pass, blind test, source guard | Done |
-| 6 | `codify-lesson`, Stage 7 summary | Done |
-| 7 | Evals, docs, release | Not started |
+- **Claude Code asks before writing `.claude/hooks/`.** `init-pipeline` writes the check script there, and
+  Claude Code treats `.claude/` as protected, so expect one approval prompt.
+- **The blind guard is a safeguard, not a sandbox.** It blocks reading commands on source paths, but running a
+  script that reads source (`python3 peek.py`) gets through, because running code is how a user runs the app.
+- **Every agent uses your session's model.** Two reviewers, a voter, and a builder for up to 3 rounds adds up on
+  MEDIUM and HIGH tasks; LOW tasks run one reviewer.
+- **`verify-completion.sh` should stay fast.** The Stop hook runs it whenever Claude or the builder finishes
+  during a task. Put slow suites in a task's `eval.md`.
 
 ## License
 
