@@ -35,9 +35,8 @@ bash_cmd() { call Bash "$(jq -n --arg c "$1" '{command: $c}')" "${2-quorum:blind
   [ "$status" -eq 2 ]
 }
 
-@test "docs, task files, and data are readable" {
+@test "docs and data are readable" {
   run call Read '{"file_path":"README.md"}';           [ "$status" -eq 0 ]
-  run call Read '{"file_path":".tasks/demo/rd.md"}';   [ "$status" -eq 0 ]
   run call Read '{"file_path":"data/sales.json"}';     [ "$status" -eq 0 ]
 }
 
@@ -46,10 +45,9 @@ bash_cmd() { call Bash "$(jq -n --arg c "$1" '{command: $c}')" "${2-quorum:blind
   run call Write '{"file_path":"src/x.ts","content":""}';                          [ "$status" -eq 2 ]
 }
 
-@test "Grep and Glob are blocked except under .tasks" {
+@test "Grep and Glob are blocked for the blind user" {
   run call Grep '{"pattern":"def"}';                        [ "$status" -eq 2 ]
   run call Glob '{"pattern":"**/*.py"}';                    [ "$status" -eq 2 ]
-  run call Grep '{"pattern":"x","path":".tasks/demo"}';     [ "$status" -eq 0 ]
 }
 
 @test "Bash: reading commands on source are blocked" {
@@ -102,4 +100,20 @@ bash_cmd() { call Bash "$(jq -n --arg c "$1" '{command: $c}')" "${2-quorum:blind
 @test "hooks.json wires every file-reading tool to this hook" {
   run jq -r '.hooks.PreToolUse[0].matcher' "$HOOKS/hooks.json"
   [ "$output" = "Read|Grep|Glob|Bash|Edit|Write|NotebookEdit" ]
+}
+
+@test "the blind-user agent can't read task files or the repo's review notes; README stays readable" {
+  echo "# rules" > REVIEW.md; echo "# notes" > CLAUDE.md
+  run call Read '{"file_path":".tasks/demo/rd.md"}';                       [ "$status" -eq 2 ]
+  run bash_cmd "cat .tasks/demo/review/round-1/survivors.md";               [ "$status" -eq 2 ]
+  run call Grep '{"pattern":"x","path":".tasks/demo"}';                    [ "$status" -eq 2 ]
+  run bash_cmd "cat REVIEW.md";                                             [ "$status" -eq 2 ]
+  run call Read '{"file_path":"CLAUDE.md"}';                               [ "$status" -eq 2 ]
+  run call Read '{"file_path":"README.md"}';                               [ "$status" -eq 0 ]
+}
+
+@test "lockfile-only blind mode still lets the orchestrator use .tasks" {
+  touch .tasks/.blind-mode-active
+  run call Read '{"file_path":".tasks/demo/rd.md"}' "";                    [ "$status" -eq 0 ]
+  run call Grep '{"pattern":"x","path":".tasks/demo"}' "";                 [ "$status" -eq 0 ]
 }

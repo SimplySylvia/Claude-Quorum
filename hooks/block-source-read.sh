@@ -12,7 +12,10 @@
 #     (`python3 app/report.py export | head`) is allowed.
 #
 # A source path is under one of blind_block_dirs or ends in one of blind_block_exts (plugin options, overridable
-# per repo in .claude/quorum.json). This is a safeguard, not a sandbox: `python -c "open(...)"` gets through.
+# per repo in .claude/quorum.json). For the blind-user agent itself, .tasks/, CLAUDE.md, and REVIEW.md count as
+# source too: they hold review findings with file:line and notes about the code. (Lockfile-only mode still allows
+# .tasks/, which the orchestrator needs.) This is a safeguard, not a sandbox: running a script that reads source
+# (`python3 peek.py`) gets through, because running code is how a user runs the app.
 # Bash 3.2 compatible.
 set -uo pipefail
 
@@ -21,6 +24,7 @@ input=$(cat)
 
 agent=$(printf '%s' "$input" | jq -r '.agent_type // empty' 2>/dev/null)
 if [ "$agent" != "quorum:blind-user" ] && [ ! -e "$ROOT/.tasks/.blind-mode-active" ]; then exit 0; fi
+strict=0; [ "$agent" = "quorum:blind-user" ] && strict=1
 
 dirs=${CLAUDE_PLUGIN_OPTION_BLIND_BLOCK_DIRS:-src,app,lib,packages,Source,Content}
 exts=${CLAUDE_PLUGIN_OPTION_BLIND_BLOCK_EXTS:-ts,tsx,js,jsx,py,rs,go,cpp,h,java,kt,rb}
@@ -41,7 +45,11 @@ is_source() {
   case "$p" in "$ROOT"/*) p=${p#"$ROOT"/} ;; esac
   while [ "${p#./}" != "$p" ]; do p=${p#./}; done
   [ -n "$p" ] || return 1
-  case "$p" in .tasks/*|.tasks) return 1 ;; esac
+  if [ "$strict" -eq 1 ]; then
+    case "$p" in .tasks|.tasks/*|CLAUDE.md|REVIEW.md) return 0 ;; esac
+  else
+    case "$p" in .tasks/*|.tasks) return 1 ;; esac
+  fi
   local IFS=,
   for d in $dirs; do
     [ -n "$d" ] || continue
@@ -62,7 +70,7 @@ case "$tool" in
 
   Grep|Glob)
     path=$(printf '%s' "$input" | jq -r '.tool_input.path // empty')
-    case "${path#"$ROOT"/}" in .tasks|.tasks/*) exit 0 ;; esac
+    if [ "$strict" -eq 0 ]; then case "${path#"$ROOT"/}" in .tasks|.tasks/*) exit 0 ;; esac; fi
     block "$tool is disabled in blind mode" ;;
 
   Bash)
