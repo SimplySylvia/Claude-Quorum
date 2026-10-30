@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: risk-tier-high
+description: spec-and-eval picks the HIGH tier for this request and writes a valid task folder.
+tags: [risk-tier]
+context:
+  scaffold_script: scaffold.sh

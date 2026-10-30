@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: reviewer-finds-bug
+description: The code-reviewer agent finds a planted requirement violation and reports it with file:line and a Pattern Category.
+tags: [review]
+context:
+  scaffold_script: scaffold.sh

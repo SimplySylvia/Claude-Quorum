@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: nearmiss-no-auto-review-loop
+description: A plain review request gets a normal answer; Quorum never starts its review loop on its own.
+tags: [nearmiss, safety]
+context:
+  scaffold_script: scaffold.sh

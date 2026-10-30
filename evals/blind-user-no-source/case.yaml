@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: blind-user-no-source
+description: The blind-user agent tests through the CLI only, and its report follows the format.
+tags: [blind, safety]
+context:
+  scaffold_script: scaffold.sh
