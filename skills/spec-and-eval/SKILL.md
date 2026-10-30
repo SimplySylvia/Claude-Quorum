@@ -39,7 +39,10 @@ and let the user confirm or change it.
 | MEDIUM | A user-facing workflow, an API endpoint, state logic | 2 reviewers, blind test, focused human review |
 | HIGH | Auth, money, destructive migrations, security boundaries, core state machines, build pipelines | 2 reviewers, security pass, blind test, human architectural sign-off |
 
-When in doubt between two tiers, pick the higher one.
+Anything a user can see or run is at least **MEDIUM**: a new or changed command, flag, endpoint, page, or output
+format, even when it's additive and read-only. **LOW** is only for changes a user can't reach: docs and copy, tests,
+internal refactors covered by existing tests, and code behind an off-by-default flag. Deleting, overwriting, or
+migrating data is **HIGH**. When in doubt between two tiers, pick the higher one.
 
 ## 4. Write the spec
 
