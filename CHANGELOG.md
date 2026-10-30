@@ -3,6 +3,15 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
+## Unreleased
+
+### Fixed
+
+- `/quorum:review-loop` kept only the capped findings in `survivors.md`, losing the voter's `DROP` lines that
+  `/quorum:codify-lesson` reads. The voter's full reply is now saved as `votes.md`.
+- The blind-user agent could read `.tasks/` (review findings cite `file:line`), `CLAUDE.md`, and `REVIEW.md`
+  through the shell. The source guard now blocks them for that agent; lockfile-only blind mode still allows `.tasks/`.
+
 ## 0.1.0 (2026-10-30)
 
 First release.

@@ -98,8 +98,8 @@ No agent sees the conversation that produced the code.
 - **Proof before done.** The Stop hook runs the repo's fast checks whenever Claude or the builder tries to finish
   during a task, and blocks until they pass. After 3 failures in a row it lets you go and marks the task
   `ESCALATED`, so a broken environment can't trap a session.
-- **Quiet outside a task.** Hooks exit immediately in repos that aren't bootstrapped, and the Stop hook only runs
-  while a task is building or in review.
+- **Quiet outside a task.** The Stop hook does nothing unless the repo is bootstrapped and a task is building, in
+  review, or escalated; the source guard does nothing outside blind mode; the session hook only adds the short laws.
 - **Hard caps.** At most 3 review rounds; a task still failing ends `HALTED` with a post-mortem and 2 redesign
   options instead of another round.
 - **The blind guard is best effort, not a sandbox.** The blind user has no file tools, and a hook blocks shell
