@@ -14,9 +14,9 @@ A lesson is only learned once it changes what the next review checks. Work from 
 Use `$ARGUMENTS` if the user described it. Otherwise look at the most recent task (the active one, or the newest
 folder in `.tasks/`):
 
-- `state.md`'s round log, and `.tasks/<slug>/review/round-*/survivors.md`: a **Pattern Category** that came back
+- `state.md`'s round log, and `.tasks/<slug>/review/round-*/survivors.md` (kept findings): a **Pattern Category** that came back
   in more than one round, or that the builder had to fix in several places.
-- `## Dropped` sections in `survivors.md`: the **same false alarm** dropped more than once, by the same reason.
+- `## Dropped` sections in `votes.md` (the voter's full reply): the **same false alarm** dropped more than once, by the same reason.
 - `.tasks/<slug>/blind/`: a blocker a reviewer should have caught.
 - Corrections the user made in this conversation.
 

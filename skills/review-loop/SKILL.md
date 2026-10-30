@@ -62,10 +62,12 @@ Let N = `quorum-state get round` + 1. Stop the loop if N > max_rounds (see step 
    > Task: `<slug>`. Candidate findings: `.tasks/<slug>/review/round-<N>/candidates.md`. Read `REVIEW.md` and
    > `.tasks/<slug>/rd.md`, check each finding against the code, and vote.
 
-   Save its reply verbatim to `round-<N>/survivors.md`, then `quorum-findings cap <nit_cap> survivors.md` back over it.
-   Run `quorum-findings check survivors.md`; if it fails, ask the voter once to fix the format.
+   Save its reply verbatim to `round-<N>/votes.md` (it keeps the `## Dropped` lines, which `/quorum:codify-lesson`
+   reads). Then `quorum-findings cap <nit_cap> votes.md > survivors.md`: the kept findings, nits capped. Run
+   `quorum-findings check survivors.md`; if it fails, ask the voter once to fix the format.
 6. **Log the round:** pipe a short block to `quorum-state log`:
-   `## Round <N> (<RANGE>)`, the `quorum-findings summary` line, the Pattern Categories, and the dropped count.
+   `## Round <N> (<RANGE>)`, the `quorum-findings summary` line, the Pattern Categories, and the number of `DROP`
+   lines in `votes.md`.
 7. **Route:**
    - `quorum-findings count IMPORTANT survivors.md` is 0 → `quorum-state set status CONVERGED`, go to step 6.
    - N = max_rounds → go to step 5 (HALTED).
