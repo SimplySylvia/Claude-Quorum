@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Resolve, set, or clear the active Quorum task.
+#
+#   quorum-active-task            print the active slug (exit 1 if none)
+#   quorum-active-task --set S    write S to .tasks/.active (the task folder must exist)
+#   quorum-active-task --clear    remove .tasks/.active
+#   quorum-active-task --root     print the repo root Quorum uses
+#
+# Resolution order: a feat/<slug> or fix/<slug> branch whose .tasks/<slug>/ exists, then .tasks/.active.
+# Bash 3.2 compatible (macOS default).
+set -euo pipefail
+
+die() { echo "quorum-active-task: $*" >&2; exit 1; }
+
+repo_root() {
+  if [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "$CLAUDE_PROJECT_DIR" ]; then
+    printf '%s\n' "$CLAUDE_PROJECT_DIR"
+  elif git rev-parse --show-toplevel >/dev/null 2>&1; then
+    git rev-parse --show-toplevel
+  else
+    pwd
+  fi
+}
+
+valid_slug() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$'; }
+
+ROOT=$(repo_root)
+TASKS="$ROOT/.tasks"
+
+case "${1:-}" in
+  --root)
+    printf '%s\n' "$ROOT"; exit 0 ;;
+  --set)
+    slug=${2:-}
+    [ -n "$slug" ] || die "--set needs a slug"
+    valid_slug "$slug" || die "invalid slug: $slug"
+    [ -d "$TASKS/$slug" ] || die "no task folder: .tasks/$slug"
+    printf '%s\n' "$slug" > "$TASKS/.active"
+    exit 0 ;;
+  --clear)
+    rm -f "$TASKS/.active"; exit 0 ;;
+  "") ;;
+  *) die "unknown argument: $1" ;;
+esac
+
+branch=$(git -C "$ROOT" branch --show-current 2>/dev/null || true)
+case "$branch" in
+  feat/*|fix/*)
+    slug=${branch#*/}
+    if valid_slug "$slug" && [ -d "$TASKS/$slug" ]; then
+      printf '%s\n' "$slug"; exit 0
+    fi ;;
+esac
+
+if [ -f "$TASKS/.active" ]; then
+  slug=$(head -n 1 "$TASKS/.active" | tr -d '[:space:]')
+  if [ -n "$slug" ] && valid_slug "$slug" && [ -d "$TASKS/$slug" ]; then
+    printf '%s\n' "$slug"; exit 0
+  fi
+fi
+
+echo "quorum-active-task: no active task (use a feat/<slug> or fix/<slug> branch, or run /quorum:spec-and-eval)" >&2
+exit 1
