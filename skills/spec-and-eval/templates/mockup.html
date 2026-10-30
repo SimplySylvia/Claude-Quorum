@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: {{TITLE}}</title>
+<style>
+  /* Self-contained: no external fonts, scripts, or images. Grayscale, so the review is about layout and flow. */
+  :root { --ink: #1d1d1f; --muted: #6b6b70; --line: #d6d6d6; --bg: #fafafa; --panel: #fff; --accent: #4a4a4a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; color: var(--ink); background: var(--bg); }
+  .note { background: #eee; border-bottom: 1px solid var(--line); padding: 8px 16px; font-size: 13px; color: var(--muted); }
+  main { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  button { font: inherit; padding: 6px 14px; border: 1px solid var(--accent); border-radius: 6px; background: var(--panel); }
+  button.primary { background: var(--accent); color: #fff; }
+  .state { border: 1px dashed var(--line); border-radius: 6px; padding: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="note">Mockup for <b>{{SLUG}}</b>. Not the real app. Shows layout, copy, and the loading, empty, and error states.</div>
+<main>
+  <!-- Build the screen here. Include every state the requirements mention: default, loading, empty, error. -->
+</main>
+</body>
+</html>

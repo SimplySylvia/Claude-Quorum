@@ -65,6 +65,9 @@ confirm before writing (skip with `--yes`).
 ## 6. Write
 
 Write the files, `chmod +x .claude/hooks/verify-completion.sh`, and `mkdir -p .tasks`. Don't commit; the user decides.
+Claude Code treats `.claude/` as a protected folder and asks before writing there; tell the user to expect that
+prompt. If the write is refused, don't write the other files either: a half-set-up repo is worse than none. Say
+what's left to do.
 
 ## 7. Dry-run the checks
 
