@@ -158,7 +158,7 @@ A repo can override the block lists in `.claude/quorum.json`, which helps in mon
 | `skills/` | `init-pipeline`, `spec-and-eval`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `codify-lesson`, and the model-invocable `pipeline-laws` |
 | `agents/` | `builder`, `code-reviewer`, `verifier-voter`, `security-reviewer`, `blind-user` |
 | `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `stop-verify.sh` |
-| `bin/` | `quorum-detect-stack`, `quorum-active-task`, `quorum-state` (on the Bash PATH while the plugin is enabled) |
+| `bin/` | `quorum-detect-stack`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state` (on the Bash PATH while the plugin is enabled) |
 | `tests/` | bats tests for every hook and helper, and fixture repos per stack |
 | `evals/` | `claude plugin eval` suite: risk tiering, finding format, nit cap, blind-mode source reads |
 | [`CHANGELOG.md`](CHANGELOG.md) · [`LICENSE`](LICENSE) | Release notes · MIT license |
@@ -204,7 +204,7 @@ notes in [`CHANGELOG.md`](CHANGELOG.md) under the new version. Users pick it up 
 |---|---|---|
 | 0 | Platform spike: can a skill start plugin agents in parallel? | Done: yes |
 | 1 | Manifests, CI, `quorum-active-task`, `quorum-state`, the laws | Done |
-| 2 | `init-pipeline`, stack detection, `stop-verify.sh` | Not started |
+| 2 | `init-pipeline`, stack detection, `stop-verify.sh` | Done |
 | 3 | `spec-and-eval`, `build`, `simplify-diff` | Not started |
 | 4 | Review loop: builder, reviewers, voter | Not started |
 | 5 | Security pass, blind test, source guard | Not started |

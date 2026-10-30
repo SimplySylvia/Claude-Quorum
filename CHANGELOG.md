@@ -16,4 +16,12 @@ copy with `/plugin marketplace update`.
 - SessionStart hook that adds Quorum's three universal laws to every session and suggests `/quorum:init-pipeline`
   in repos without a `REVIEW.md`.
 - `pipeline-laws` skill: the full laws and a map of which stage comes next.
-- bats tests for the helpers and the hook, and CI that runs them with shellcheck and `claude plugin validate --strict`.
+- `/quorum:init-pipeline`: detects the stack, confirms the fast checks with you, adds a Verification Commands
+  section to `CLAUDE.md`, writes `REVIEW.md` with failure modes for Node, Python, Go, Rust, JVM, or a general
+  profile, generates `.claude/hooks/verify-completion.sh`, dry-runs it, and gitignores `.tasks/`. `--yes` accepts
+  the detected commands.
+- `quorum-detect-stack`, `quorum-render-review`, and `quorum-render-verify` helpers behind it.
+- Stop and SubagentStop hook (builder only) that blocks "done" while a task is `BUILDING`, `IN_REVIEW`, or
+  `ESCALATED` and its checks fail. After 3 failures in a row it lets the stop through, marks the task `ESCALATED`,
+  and warns you; the next pass restores the previous status. Checks time out after `verify_timeout_s`.
+- bats tests for the helpers and hooks, fixture repos for each stack, and CI that runs them with shellcheck and `claude plugin validate --strict`.
