@@ -7,7 +7,7 @@ test, and hooks that won't let "done" mean anything less than passing checks.**
 
 <p>
   <a href="https://code.claude.com/docs/en/plugins-reference"><img src="https://img.shields.io/badge/Claude_Code-plugin-D97757?logo=claude&logoColor=white" alt="Claude Code plugin"></a>
-  <a href="docs/implementation-plan.md"><img src="https://img.shields.io/badge/status-in_development-orange" alt="Status: in development"></a>
+  <a href="#status"><img src="https://img.shields.io/badge/status-in_development-orange" alt="Status: in development"></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/hooks-bash-4EAA25?logo=gnubash&logoColor=white" alt="Hooks: bash"></a>
   <a href="#development"><img src="https://img.shields.io/badge/evals-claude_plugin_eval-6E56CF" alt="Evals"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
@@ -19,9 +19,8 @@ test, and hooks that won't let "done" mean anything less than passing checks.**
 </div>
 
 > [!IMPORTANT]
-> **Quorum is being built.** This README describes the designed behavior in
-> [`docs/implementation-plan.md`](docs/implementation-plan.md). Nothing below works until the matching phase of
-> the plan lands; see [Status](#status).
+> **Quorum is being built.** This README describes the designed behavior. Nothing below works until the
+> matching phase lands; see [Status](#status).
 
 ## Why
 
@@ -82,10 +81,6 @@ many layers a task gets.
 | **LOW** | Copy, docs, isolated tests, code behind an off flag | 1 | — | — | Not needed if green |
 | **MEDIUM** | User-facing workflows, API endpoints, state logic | 2 | Optional | Yes | Focused |
 | **HIGH** | Auth, money, destructive migrations, security boundaries | 2 | Yes, blocking | Yes | Required sign-off |
-
-The full design, with every status, hook, and agent input, is in
-[`docs/implementation-plan.md`](docs/implementation-plan.md). The original architecture is in
-[`docs/claude_code_verification_pipeline_blueprint.md`](docs/claude_code_verification_pipeline_blueprint.md).
 
 ### Agents
 
@@ -165,7 +160,6 @@ A repo can override the block lists in `.claude/quorum.json`, which helps in mon
 | `bin/` | `quorum-detect-stack`, `quorum-active-task`, `quorum-state` (on the Bash PATH while the plugin is enabled) |
 | `tests/` | bats tests for every hook and helper, and fixture repos per stack |
 | `evals/` | `claude plugin eval` suite: risk tiering, finding format, nit cap, blind-mode source reads |
-| `docs/` | [Blueprint](docs/claude_code_verification_pipeline_blueprint.md) and [implementation plan](docs/implementation-plan.md) |
 | [`CHANGELOG.md`](CHANGELOG.md) · [`LICENSE`](LICENSE) | Release notes · MIT license |
 
 ## Development
