@@ -123,3 +123,11 @@ STATE
   run bash -c "printf '' | '$BIN/quorum-state' log"
   [ "$status" -eq 1 ]
 }
+
+@test "works when the system temp dir isn't writable (Bash sandbox)" {
+  "$BIN/quorum-state" --task demo init LOW
+  TMPDIR=/nonexistent-dir run "$BIN/quorum-state" set status IN_REVIEW
+  [ "$status" -eq 0 ]
+  run "$BIN/quorum-state" get status; [ "$output" = "IN_REVIEW" ]
+  [ -z "$(ls -A .tasks | grep quorum-state || true)" ]
+}

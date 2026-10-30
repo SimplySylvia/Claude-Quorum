@@ -128,7 +128,9 @@ validate_scalar() { # key value
 }
 
 # ---------------------------------------------------------------- commands
-recs=$(mktemp); trap 'rm -f "$recs" "$recs.new"' EXIT
+# Scratch files live in .tasks/, which is always writable (Claude Code's Bash sandbox can block the system temp dir).
+mkdir -p "$ROOT/.tasks"
+recs=$(mktemp "$ROOT/.tasks/.quorum-state.XXXXXX"); trap 'rm -f "$recs" "$recs.new"' EXIT
 
 case "$cmd" in
   path)

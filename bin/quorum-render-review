@@ -71,7 +71,9 @@ skip_paths() {
   set +f
 }
 
-fm=$(mktemp); sp=$(mktemp); trap 'rm -f "$fm" "$sp"' EXIT
+# The system temp dir can be blocked by Claude Code's Bash sandbox; fall back to the current directory.
+tmpf() { mktemp 2>/dev/null || mktemp "./.quorum-review.XXXXXX"; }
+fm=$(tmpf); sp=$(tmpf); trap 'rm -f "$fm" "$sp"' EXIT
 failure_modes > "$fm"
 skip_paths > "$sp"
 label_text=$(for p in $profiles; do label "$p"; done | paste -sd, - | sed 's/,/, /g')
