@@ -36,6 +36,18 @@ copy with `/plugin marketplace update`.
   sends surviving findings to the builder by Pattern Category, for up to `max_rounds`. Ends `CONVERGED`, or
   `HALTED` with a post-mortem and two redesign options. LOW tasks get the Stage 7 summary and end `READY`.
 - `code-reviewer` and `verifier-voter` agents.
+- `/quorum:blind-test`: for MEDIUM and HIGH tasks, runs the new `security-reviewer` (HIGH, or MEDIUM with
+  `security_on_medium`), then the new `blind-user` agent, which tries the task's goal through the running app
+  with no access to the source. Problems go to `pending_findings` for `/quorum:review-loop` to fix first; a
+  second failing run ends `HALTED`. A clean run prints the Stage 7 summary and ends `AWAITING-HUMAN`.
+- PreToolUse source guard: in blind mode (the `quorum:blind-user` agent, or while `.tasks/.blind-mode-active`
+  exists) blocks reads of source files and folders through Read, Grep, Glob, and reading shell commands, while
+  still allowing the app to run. Block lists are plugin options, overridable in `.claude/quorum.json`.
+- `/quorum:codify-lesson`: proposes one rule from a task's repeated findings, false alarms, or blind-test
+  blockers, and writes it to `REVIEW.md` section 6 only after you confirm. `quorum-learned-rule` adds and lists
+  those rules.
+- The Stop hook lets the main session stop while a task has pending findings (they're queued for the builder,
+  whose own check still applies).
 - `quorum-findings`: counts findings by tag, applies the nit cap, and extracts `[IMPORTANT]` findings and their
   Pattern Categories. `quorum-state log` appends to a task's round log.
 - `quorum-branch`: default branch, task branch creation, the diff range to review, and round SHAs.
