@@ -31,5 +31,12 @@ copy with `/plugin marketplace update`.
   the new `builder` agent.
 - `/quorum:simplify-diff`: removes debug output, dead code, and unrelated changes from the task's diff, re-runs
   the checks, and commits.
+- `/quorum:review-loop`: starts fresh-context `code-reviewer` agents in parallel (one for LOW, two personas for
+  MEDIUM and HIGH) on only the new lines, has the `verifier-voter` drop false alarms and enforce the nit cap, and
+  sends surviving findings to the builder by Pattern Category, for up to `max_rounds`. Ends `CONVERGED`, or
+  `HALTED` with a post-mortem and two redesign options. LOW tasks get the Stage 7 summary and end `READY`.
+- `code-reviewer` and `verifier-voter` agents.
+- `quorum-findings`: counts findings by tag, applies the nit cap, and extracts `[IMPORTANT]` findings and their
+  Pattern Categories. `quorum-state log` appends to a task's round log.
 - `quorum-branch`: default branch, task branch creation, the diff range to review, and round SHAs.
 - bats tests for the helpers and hooks, fixture repos for each stack, and CI that runs them with shellcheck and `claude plugin validate --strict`.

@@ -158,7 +158,7 @@ A repo can override the block lists in `.claude/quorum.json`, which helps in mon
 | `skills/` | `init-pipeline`, `spec-and-eval`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `codify-lesson`, and the model-invocable `pipeline-laws` |
 | `agents/` | `builder`, `code-reviewer`, `verifier-voter`, `security-reviewer`, `blind-user` |
 | `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `stop-verify.sh` |
-| `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state` (on the Bash PATH while the plugin is enabled) |
+| `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state` (on the Bash PATH while the plugin is enabled) |
 | `tests/` | bats tests for every hook and helper, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
 | `evals/` | `claude plugin eval` suite: risk tiering, finding format, nit cap, blind-mode source reads |
 | [`CHANGELOG.md`](CHANGELOG.md) · [`LICENSE`](LICENSE) | Release notes · MIT license |
@@ -206,7 +206,7 @@ notes in [`CHANGELOG.md`](CHANGELOG.md) under the new version. Users pick it up 
 | 1 | Manifests, CI, `quorum-active-task`, `quorum-state`, the laws | Done |
 | 2 | `init-pipeline`, stack detection, `stop-verify.sh` | Done |
 | 3 | `spec-and-eval`, `build`, `simplify-diff` | Done |
-| 4 | Review loop: builder, reviewers, voter | Not started |
+| 4 | Review loop: builder, reviewers, voter | Done |
 | 5 | Security pass, blind test, source guard | Not started |
 | 6 | `codify-lesson`, Stage 7 summary | Not started |
 | 7 | Evals, docs, release | Not started |
