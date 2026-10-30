@@ -1,0 +1,76 @@
+---
+name: blind-test
+description: Run Quorum's last automated layers on a CONVERGED MEDIUM or HIGH task. A security-only review (HIGH, or MEDIUM with security_on_medium), then a blind user who can't read the source tries the task's goal through the running app. Problems go back to /quorum:review-loop; a clean run prints the final summary and waits for your review.
+disable-model-invocation: true
+---
+
+# Security pass and blind test
+
+Work on the active task (`quorum-active-task`) from the repo root. You orchestrate: you don't test the app or
+review the code yourself, and you never give the blind user anything from the source.
+
+Don't run git commands that change the working tree, index, or history here (`stash`, `reset`, `checkout`, `commit`,
+`rebase`); agents make the commits. Read-only git (`diff`, `log`, `status`, `show`) is fine.
+
+## 0. Preconditions
+
+- Status must be `CONVERGED`. Otherwise say which command comes next and stop.
+- Risk (`quorum-state get risk`): LOW tasks don't get a blind test; their summary came from `/quorum:review-loop`.
+- `quorum-state set status BLIND-TEST`. Keep this run's files in `.tasks/<slug>/blind/`, numbered by run
+  (`run=$(quorum-state incr blind_runs)`).
+
+## 1. Security pass
+
+Run it when the risk is HIGH, or MEDIUM and `${user_config.security_on_medium}` is `true` (if that reads as a
+placeholder, it's off). Start `quorum:security-reviewer` with:
+
+> Task `<slug>`. Review the diff range `<base_sha>..HEAD` for exploitable vulnerabilities. Read `REVIEW.md`,
+> `CLAUDE.md`, and `.tasks/<slug>/rd.md` first.
+
+Save its reply verbatim to `blind/security-<run>.md`. Every finding in it blocks.
+
+## 2. Blind test
+
+1. Read the **user goal for the blind test** from `rd.md` and the dev/start command and entry point from
+   `CLAUDE.md`. If `rd.md` has no goal, write one from the requirements: one sentence, what a user would try.
+2. Turn on blind mode: `touch .tasks/.blind-mode-active`. Whatever happens next, remove it at the end (step 5).
+3. If the app is a server, start it in the background with its dev command, logging to `blind/server-<run>.log`,
+   and wait until it answers. Use local, temporary, or synthetic data only; never production or shared databases.
+   A CLI needs no start.
+4. Start `quorum:blind-user` with only this (no file names from the source, no hints about the implementation):
+
+   > Goal: <goal>. Start here: <URL or command>. You're a first-time user; reach the goal through the app.
+
+   Save its report verbatim to `blind/blind-<run>.md`.
+5. **Tear down, always:** stop the server if you started one, and `rm -f .tasks/.blind-mode-active`.
+
+## 3. Route
+
+Collect the blocking problems: every `[IMPORTANT]` from the security pass, and every `BLOCKER:` line from the
+blind test (friction doesn't block).
+
+- **None:** go to the summary (step 4).
+- **Some, and `blind_runs` is 1:** push each one to `pending_findings` as one line, for example
+  `quorum-state push pending_findings "[IMPORTANT] blind test: export data/empty.json — Pattern Category: User-facing failure — printed a traceback; expected a header row"`.
+  Then `quorum-state set status IN_REVIEW` and tell the user to run `/quorum:review-loop`, which fixes them
+  first, reviews the fix, and returns here.
+- **Some, and `blind_runs` is 2 or more:** the fixes aren't converging. `quorum-state set status HALTED`,
+  `quorum-active-task --clear`, and `quorum-state log` a post-mortem with two redesign options, as
+  `/quorum:review-loop` does. Tell the user to run `/quorum:spec-and-eval --redesign <slug>`.
+
+`quorum-state log` a short block for this run either way: the security summary line, the blind test result, and
+the blockers.
+
+## 4. Stage 7 summary
+
+1. **Verification proof:** run `bash .claude/hooks/verify-completion.sh` and the `eval.md` task checks; show they
+   pass. If they don't, say so and stop without changing the status.
+2. **Risk tier**, the review rounds, and the blind-test runs.
+3. **Rollback plan:** the one step from `rd.md`.
+4. **Changes:** `git diff --stat <base_sha>..HEAD` and `git log --oneline <base_sha>..HEAD`.
+5. **Verdict:** "Waiting for your review." Name the files most worth a human's time and why. For HIGH, say an
+   architectural sign-off is required.
+6. Friction from the blind test, and non-blocking review findings, to consider separately.
+
+Then `quorum-state set status AWAITING-HUMAN` and `quorum-active-task --clear`. Suggest `/quorum:codify-lesson`
+if any bug or false alarm in this task is worth remembering.
