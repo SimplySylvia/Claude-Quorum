@@ -9,6 +9,7 @@ test, and hooks that won't let "done" mean anything less than passing checks.**
   <a href="https://code.claude.com/docs/en/plugins-reference"><img src="https://img.shields.io/badge/Claude_Code-plugin-D97757?logo=claude&logoColor=white" alt="Claude Code plugin"></a>
   <a href="#status"><img src="https://img.shields.io/badge/status-in_development-orange" alt="Status: in development"></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/hooks-bash-4EAA25?logo=gnubash&logoColor=white" alt="Hooks: bash"></a>
+  <a href="https://github.com/SimplySylvia/Claude-Quorum/actions/workflows/ci.yml"><img src="https://github.com/SimplySylvia/Claude-Quorum/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="#development"><img src="https://img.shields.io/badge/evals-claude_plugin_eval-6E56CF" alt="Evals"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
 </p>
@@ -169,12 +170,12 @@ A repo can override the block lists in `.claude/quorum.json`, which helps in mon
 Hooks read JSON on stdin, so tests feed fixture hook input and check the exit code:
 
 ```bash
-bats tests/                                   # every hook and bin/ helper
+bats -r tests/                                # every hook and bin/ helper
 shellcheck hooks/*.sh bin/*                   # lint the shell
 claude plugin validate --strict .             # manifest, paths, marketplace; warnings fail
 ```
 
-CI runs all three on every push and pull request.
+CI runs all three on every push and pull request, on Linux and on macOS (system bash 3.2).
 
 ### Evals
 
@@ -201,8 +202,8 @@ notes in [`CHANGELOG.md`](CHANGELOG.md) under the new version. Users pick it up 
 
 | Phase | What | State |
 |---|---|---|
-| 0 | Platform spike: can a skill start plugin agents in parallel? | Not started |
-| 1 | Manifests, CI, `quorum-active-task`, `quorum-state`, the laws | Not started |
+| 0 | Platform spike: can a skill start plugin agents in parallel? | Done: yes |
+| 1 | Manifests, CI, `quorum-active-task`, `quorum-state`, the laws | Done |
 | 2 | `init-pipeline`, stack detection, `stop-verify.sh` | Not started |
 | 3 | `spec-and-eval`, `build`, `simplify-diff` | Not started |
 | 4 | Review loop: builder, reviewers, voter | Not started |

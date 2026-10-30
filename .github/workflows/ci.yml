@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: bats + shellcheck (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS runs the scripts under its system bash 3.2, the oldest bash Quorum supports.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y bats shellcheck jq
+      - name: Install tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install bats-core shellcheck jq
+      - name: shellcheck
+        run: shellcheck hooks/*.sh bin/*
+      - name: bats
+        run: bats -r tests/
+
+  validate:
+    name: claude plugin validate --strict
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Validate plugin and marketplace
+        run: claude plugin validate --strict .
