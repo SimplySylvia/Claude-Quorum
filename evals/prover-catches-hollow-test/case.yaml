@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: prover-catches-hollow-test
+description: "The prover runs a fail-before-fix row in a worktree, reports it FAIL because the new test passes on the old code, and leaves the working tree alone."
+tags: [proof]
+context:
+  scaffold_script: scaffold.sh

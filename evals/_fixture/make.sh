@@ -2,6 +2,7 @@
 # Seed an eval workspace (the current directory) with the sales-app fixture, bootstrapped for Quorum.
 #   make.sh [--task SLUG RISK STATUS]   also create a task folder with state.md and make it active
 #   make.sh [--bug]                     also commit a runtime-only bug: export ignores DATA_FILE
+#   make.sh [--bug --hollow-fix]        then fix it, with a test that passes on the buggy code too
 # Runs from a case's scaffold script, outside the agent's sandbox, with a minimal environment.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -67,6 +68,34 @@ PY
       git commit -qam "Add export command"
       base=$(git merge-base HEAD main)
       [ -z "${slug:-}" ] || "$bin/quorum-state" --task "$slug" set base_sha "$base" ;;
+    --hollow-fix)
+      # After --bug: fix export to honor DATA_FILE, with a test that only runs the default file, so it passes on
+      # the buggy code too.
+      shift
+      sed -i.bak 's/for row in load(DEFAULT_DATA):/for row in load(path):/' app/report.py && rm -f app/report.py.bak
+      cat > tests/test_export.py <<'PY'
+import contextlib
+import io
+import os
+import sys
+import unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
+import report  # noqa: E402
+
+
+class ExportTest(unittest.TestCase):
+    def test_export_uses_data_file(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            report.main(["report.py", "export", "data/sales.json"])
+        self.assertIn("Globex", out.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()
+PY
+      git add -A && git commit -qm "Fix export to read DATA_FILE" ;;
     *) echo "make.sh: unknown argument $1" >&2; exit 1 ;;
   esac
 done

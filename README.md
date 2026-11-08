@@ -195,7 +195,7 @@ A repo can override the block lists in `.claude/quorum.json`, which helps in mon
 | `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `stop-verify.sh` |
 | `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state` (on the Bash PATH while the plugin is enabled) |
 | `tests/` | bats tests for every hook and helper, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
-| `evals/` | `claude plugin eval` suite: risk tiering, reviewer findings, voter false-alarm drops, blind-mode source reads, a near-miss |
+| `evals/` | `claude plugin eval` suite: risk tiering, one case per agent, voter false-alarm drops, blind-mode source reads, a near-miss |
 | `assets/` | The README's animations, in light and dark versions |
 | [`CHANGELOG.md`](CHANGELOG.md) · [`LICENSE`](LICENSE) | Release notes · MIT license |
 
@@ -220,7 +220,17 @@ each run's workspace and bootstraps for Quorum.
 
 | Case | Checks |
 |---|---|
-| `risk-tier-low`, `-medium`, `-high` | `spec-and-eval` picks the right tier and writes runnable checks |
+| `risk-tier-low`, `-medium`, `-high` | `spec-and-eval` picks the right tier and writes runnable checks; the MEDIUM case also gets a `**Docs:**` requirement for its new command |
+| `researcher-finds-precedent` | `researcher` cites the repo's code, compares options, and cites the Python docs |
+| `spec-reviewer-feasibility` | The Feasibility Critic catches a spec citing a helper and a make target that don't exist |
+| `spec-improver-flags-vague` | The Spec Improver rewrites a vague requirement and asks for a docs decision |
+| `prover-catches-hollow-test` | `prover` runs a fail-before-fix row in a worktree, reports it FAIL, and leaves the tree alone |
+| `test-adequacy-hollow-test` | The Test Adequacy Hunter reports a regression test that passes on the old code |
+| `pattern-auditor-duplicate-helper` | `pattern-auditor` reports a new helper that duplicates an existing one |
+| `docs-auditor-stale-readme` | `docs-auditor` reports docs that still name a renamed command |
+| `a11y-auditor-diff` | `a11y-auditor` reports WCAG A/AA failures in a new page, by criterion |
+| `friction-triager-sorts` | `friction-triager` sorts blind-test friction into caused, data gap, and unrelated |
+| `pr-writer-drops-setup` | `pr-writer` lists the setup commit to drop and doesn't claim a skipped check |
 | `reviewer-finds-bug` | `code-reviewer` finds a planted requirement violation, with `file:line` and a Pattern Category |
 | `voter-drops-false-alarm` | `verifier-voter` keeps the real bug and drops a factually wrong finding |
 | `blind-user-no-source` | `blind-user` reaches its goal through the CLI without ever hitting the source guard |
@@ -228,7 +238,7 @@ each run's workspace and bootstraps for Quorum.
 
 ```bash
 # Real model calls; Bash runs inside Claude Code's sandbox. --ablation none skips the no-plugin baseline.
-claude plugin eval . --scaffold --trust-plugin --ablation none --model sonnet -j 4 --allow-tools Bash Write Edit
+claude plugin eval . --scaffold --trust-plugin --ablation none --model sonnet -j 4 --allow-tools Bash Write Edit WebSearch WebFetch
 ```
 
 Run them after any change to a skill's instructions or an agent's prompt.

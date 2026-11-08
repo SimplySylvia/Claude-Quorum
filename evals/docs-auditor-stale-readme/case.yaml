@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: docs-auditor-stale-readme
+description: "The docs auditor reports README.md and CLAUDE.md lines that still name a renamed command."
+tags: [review]
+context:
+  scaffold_script: scaffold.sh

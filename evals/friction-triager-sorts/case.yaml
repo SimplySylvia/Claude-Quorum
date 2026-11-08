@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: friction-triager-sorts
+description: "The friction triager marks the change's bug CAUSED with the code line, the thin sample data DATA-GAP, and the README note UNRELATED."
+tags: [blind]
+context:
+  scaffold_script: scaffold.sh

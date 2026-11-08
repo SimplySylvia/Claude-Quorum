@@ -31,6 +31,12 @@ copy with `/plugin marketplace update`.
 - `/quorum:pr-draft` and the `pr-writer` agent: a PR description from the spec, state log, and proof, plus the
   commits that must not ship.
 
+### Tests
+
+- An eval case for each new agent and persona, on the sales-app fixture (`make.sh --hollow-fix` adds a fix whose
+  test passes on the old code). The risk-tier cases now allow the `Agent` tool and pass `--no-research`, and the
+  MEDIUM case checks for a `**Docs:**` requirement.
+
 ## 0.1.1 (2026-10-30)
 
 ### Added

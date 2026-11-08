@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: test-adequacy-hollow-test
+description: "The Test Adequacy Hunter reports a regression test that passes on the buggy code."
+tags: [review]
+context:
+  scaffold_script: scaffold.sh

@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: pattern-auditor-duplicate-helper
+description: "The pattern auditor reports a new helper that duplicates an existing one, citing the existing helper."
+tags: [review]
+context:
+  scaffold_script: scaffold.sh

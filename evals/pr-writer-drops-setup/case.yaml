@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: pr-writer-drops-setup
+description: "The PR writer lists the local setup commit to drop and doesn't claim a check the proof shows as skipped."
+tags: [ship]
+context:
+  scaffold_script: scaffold.sh

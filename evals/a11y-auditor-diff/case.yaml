@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: a11y-auditor-diff
+description: "In diff mode, the a11y auditor reports WCAG A/AA failures in a new page: an image with no alt text, an unlabeled input, and a clickable div."
+tags: [review]
+context:
+  scaffold_script: scaffold.sh
