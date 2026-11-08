@@ -20,6 +20,8 @@ Open the cited `file:line` and read enough around it to judge. Then vote:
 - **KEEP** otherwise. Keep a real bug even if the reviewer described it badly; rewrite its Mechanism line to be
   accurate. Merge duplicates (two reviewers, one bug) into one finding.
 - If a kept finding is tagged wrong, retag it (for example a bug that predates the change is `[PRE-EXISTING]`).
+- Copy any `## Needs a human` sections (from the accessibility or docs auditor) through unchanged, after the kept
+  findings and before `## Dropped`. Those items are questions for a person, not findings to vote on.
 
 ## Output
 First the kept findings, in exactly the reviewers' format, starting with a summary line of what you kept. Then a

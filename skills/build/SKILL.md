@@ -40,7 +40,12 @@ The builder's SubagentStop hook keeps it working until `.claude/hooks/verify-com
 
 ## 5. Report
 
-Show the builder's report (changes, commits, check output). Then run the `eval.md` task checks yourself and show
-the results; if any fail, say which, and offer to start the builder again with the failures.
+Show the builder's report (changes, commits, check output). Then start `quorum:prover`:
+
+> Task `<slug>`. Run `bash .claude/hooks/verify-completion.sh` and every row in `.tasks/<slug>/eval.md`. Read
+> `CLAUDE.md` first.
+
+Save its reply verbatim to `.tasks/<slug>/proof-build.md` and show it. If any row fails, say which, and offer to
+start the builder again with the failures.
 
 The next steps are `/quorum:simplify-diff`, then `/quorum:review-loop`.

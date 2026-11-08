@@ -8,7 +8,8 @@
 <!-- One or two sentences: what the user can do after this change that they couldn't before. -->
 
 ## Requirements
-<!-- Numbered, testable statements. Each one should map to a check in eval.md. -->
+<!-- Numbered, testable statements. Each one should map to a check in eval.md. For a new feature, docs to create
+     or update are requirements too, starting with **Docs:** and naming the file. -->
 1.
 
 ## Non-goals

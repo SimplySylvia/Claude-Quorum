@@ -1,6 +1,6 @@
 ---
 name: blind-test
-description: Run Quorum's last automated layers on a CONVERGED MEDIUM or HIGH task. A security-only review (HIGH, or MEDIUM with security_on_medium), then a blind user who can't read the source tries the task's goal through the running app. Problems go back to /quorum:review-loop; a clean run prints the final summary and waits for your review.
+description: Run Quorum's last automated layers on a CONVERGED MEDIUM or HIGH task. A security-only review (HIGH, or MEDIUM with security_on_medium), then a blind user who can't read the source tries the task's goal through the running app, plus a live WCAG 2.2 check for UI changes and a triage of the friction it reports. Problems go back to /quorum:review-loop; a clean run prints the final summary and waits for your review.
 disable-model-invocation: true
 ---
 
@@ -33,7 +33,7 @@ Save its reply verbatim to `blind/security-<run>.md`. Every finding in it blocks
 
 1. Read the **user goal for the blind test** from `rd.md` and the dev/start command and entry point from
    `CLAUDE.md`. If `rd.md` has no goal, write one from the requirements: one sentence, what a user would try.
-2. Turn on blind mode: `touch .tasks/.blind-mode-active`. Whatever happens next, remove it at the end (step 5).
+2. Turn on blind mode: `touch .tasks/.blind-mode-active`. Whatever happens next, remove it at the end (sub-step 5 below).
 3. If the app is a server, start it in the background with its dev command, logging to `blind/server-<run>.log`,
    and wait until it answers. Use local, temporary, or synthetic data only; never production or shared databases.
    A CLI needs no start.
@@ -42,14 +42,31 @@ Save its reply verbatim to `blind/security-<run>.md`. Every finding in it blocks
    > Goal: <goal>. Start here: <URL or command>. You're a first-time user; reach the goal through the app.
 
    Save its report verbatim to `blind/blind-<run>.md`.
-5. **Tear down, always:** stop the server if you started one, and `rm -f .tasks/.blind-mode-active`.
+5. Turn off blind mode: `rm -f .tasks/.blind-mode-active`. Do this even if the blind user failed or errored.
+6. **Accessibility, for UI changes** (`rd.md` says "UI change: yes", or `git diff --name-only <base_sha>..HEAD`
+   changes markup, components, or styles). With the app still running, start `quorum:a11y-auditor`:
 
-## 3. Route
+   > Mode: live. Task `<slug>`. Start here: <URL>. Check the screens in this goal: <goal>. Read `CLAUDE.md`,
+   > `REVIEW.md`, and `.tasks/<slug>/rd.md` first.
 
-Collect the blocking problems: every `[IMPORTANT]` from the security pass, and every `BLOCKER:` line from the
-blind test (friction doesn't block).
+   Save its reply verbatim to `blind/a11y-<run>.md`. A CLI-only change skips this step.
+7. **Tear down, always:** stop the server if you started one, and check `.tasks/.blind-mode-active` is gone.
 
-- **None:** go to the summary (step 4).
+## 3. Triage friction
+
+If the blind report has any `FRICTION:` lines, start `quorum:friction-triager`:
+
+> Task `<slug>`. Diff range `<base_sha>..HEAD`. Blind report: `.tasks/<slug>/blind/blind-<run>.md`. Sort every
+> friction item and draft follow-ups.
+
+Save its reply verbatim to `blind/triage-<run>.md`.
+
+## 4. Route
+
+Collect the blocking problems: every `[IMPORTANT]` from the security pass and the accessibility pass, every
+`BLOCKER:` line from the blind test, and every `CAUSED` item from the triage. Other friction doesn't block.
+
+- **None:** go to the summary (step 5).
 - **Some, and `blind_runs` is 1:** push each one to `pending_findings` as one line, for example
   `quorum-state push pending_findings "[IMPORTANT] blind test: export data/empty.json — Pattern Category: User-facing failure — printed a traceback; expected a header row"`.
   Then `quorum-state set status IN_REVIEW` and tell the user to run `/quorum:review-loop`, which fixes them
@@ -58,19 +75,22 @@ blind test (friction doesn't block).
   `quorum-active-task --clear`, and `quorum-state log` a post-mortem with two redesign options, as
   `/quorum:review-loop` does. Tell the user to run `/quorum:spec-and-eval --redesign <slug>`.
 
-`quorum-state log` a short block for this run either way: the security summary line, the blind test result, and
-the blockers.
+`quorum-state log` a short block for this run either way: the security and accessibility summary lines, the blind
+test result, the blockers, and the triage counts.
 
-## 4. Stage 7 summary
+## 5. Stage 7 summary
 
-1. **Verification proof:** run `bash .claude/hooks/verify-completion.sh` and the `eval.md` task checks; show they
-   pass. If they don't, say so and stop without changing the status.
+1. **Verification proof:** start `quorum:prover` on all of `eval.md` (as in `/quorum:build` step 5), save its
+   reply verbatim to `.tasks/<slug>/proof-final.md`, and show it. If anything fails, say so and stop without
+   changing the status.
 2. **Risk tier**, the review rounds, and the blind-test runs.
 3. **Rollback plan:** the one step from `rd.md`.
 4. **Changes:** `git diff --stat <base_sha>..HEAD` and `git log --oneline <base_sha>..HEAD`.
 5. **Verdict:** "Waiting for your review." Name the files most worth a human's time and why. For HIGH, say an
    architectural sign-off is required.
-6. Friction from the blind test, and non-blocking review findings, to consider separately.
+6. To consider separately: the triage's RELATED and DATA-GAP items with its follow-up drafts (offer to file
+   them where the user tracks work, and file nothing without a yes), the accessibility pass's "Needs a human"
+   list, and non-blocking review findings.
 
-Then `quorum-state set status AWAITING-HUMAN` and `quorum-active-task --clear`. Suggest `/quorum:codify-lesson`
-if any bug or false alarm in this task is worth remembering.
+Then `quorum-state set status AWAITING-HUMAN` and `quorum-active-task --clear`. Suggest `/quorum:pr-draft`, and
+`/quorum:codify-lesson` if any bug or false alarm in this task is worth remembering.

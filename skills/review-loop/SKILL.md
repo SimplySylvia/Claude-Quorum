@@ -43,20 +43,27 @@ Let N = `quorum-state get round` + 1. Stop the loop if N > max_rounds (see step 
 2. `RANGE=$(quorum-branch range)`. If `git diff --quiet $RANGE` (nothing new to review) and N > 1, the previous
    round's findings were not fixed; treat that as a failed round.
 3. **Start the reviewers in one message, in parallel** (they must not see each other or you). Risk tier from
-   `quorum-state get risk`:
-   - LOW: one `quorum:code-reviewer`, persona **Logic & Edge-Case Hunter**.
-   - MEDIUM, HIGH: two `quorum:code-reviewer`s, **Logic & Edge-Case Hunter** and **Architecture, Security & Drift
-     Hunter**.
+   `quorum-state get risk`, changed files from `git diff --name-only <RANGE>`:
 
-   Each gets only this prompt (fill in the values), never your own notes or the builder's report:
+   | Reviewer | Persona or mode | When | Saved as |
+   |---|---|---|---|
+   | `quorum:code-reviewer` | **Logic & Edge-Case Hunter** | always | `logic.md` |
+   | `quorum:code-reviewer` | **Architecture, Security & Drift Hunter** | MEDIUM, HIGH | `architecture.md` |
+   | `quorum:pattern-auditor` | (none) | MEDIUM, HIGH | `patterns.md` |
+| `quorum:docs-auditor` | (none) | MEDIUM, HIGH, or any tier when the range changes docs | `docs.md` |
+   | `quorum:code-reviewer` | **Test Adequacy Hunter** | the range changes tests (paths with `test`, `spec`, `__tests__`, `e2e`, `cypress`) | `tests.md` |
+   | `quorum:a11y-auditor` | mode **diff** | the range changes UI (markup, components, styles: for example `.tsx`, `.jsx`, `.vue`, `.svelte`, `.html`, `.css`) | `a11y.md` |
 
-   > Persona: <persona>. Task: `<slug>`. Review the diff range `<RANGE>` (`git diff <RANGE>`) in this repo.
-   > Read `REVIEW.md`, `CLAUDE.md`, `.tasks/<slug>/rd.md`, and `.tasks/<slug>/eval.md`. This is round <N>
-   > <for N > 1: "; earlier rounds already reviewed the rest of the branch, so review only these lines and their
-   > immediate callers">.
+   Each gets only this prompt (fill in the values; leave out the persona line for the pattern and docs auditors), never your
+   own notes or the builder's report:
 
-4. Save each reviewer's reply **verbatim** to `round-<N>/<persona-slug>.md` (`logic.md`, `architecture.md`), and
-   both together to `round-<N>/candidates.md`.
+   > Persona: <persona, or "Mode: diff" for the a11y auditor>. Task: `<slug>`. Review the diff range `<RANGE>`
+   > (`git diff <RANGE>`) in this repo. Read `REVIEW.md`, `CLAUDE.md`, `.tasks/<slug>/rd.md`, and
+   > `.tasks/<slug>/eval.md`. This is round <N> <for N > 1: "; earlier rounds already reviewed the rest of the
+   > branch, so review only these lines and their immediate callers">.
+
+4. Save each reviewer's reply **verbatim** to `round-<N>/<file>` from the table, and all of them together to
+   `round-<N>/candidates.md`.
 5. **Vote.** Start `quorum:verifier-voter` with:
 
    > Task: `<slug>`. Candidate findings: `.tasks/<slug>/review/round-<N>/candidates.md`. Read `REVIEW.md` and
@@ -106,18 +113,22 @@ Tell the user to pick one and run `/quorum:spec-and-eval --redesign <slug>`.
 
 ## 6. CONVERGED
 
-- **MEDIUM or HIGH:** say the review loop converged after N rounds, list the non-blocking findings, and that the
-  next step is `/quorum:blind-test`.
+- **MEDIUM or HIGH:** say the review loop converged after N rounds, list the non-blocking findings and any
+  "Needs a human" items, and that the next step is `/quorum:blind-test`.
 - **LOW:** print the **Stage 7 summary** below, then `quorum-state set status READY` and
   `quorum-active-task --clear`.
 
 ### Stage 7 summary
 
-1. **Verification proof:** run `bash .claude/hooks/verify-completion.sh` and the `eval.md` task checks now; show
-   that they pass (if they don't, say so and don't mark the task READY).
+1. **Verification proof:** start `quorum:prover` on all of `eval.md` (as in `/quorum:build` step 5), save its
+   reply verbatim to `.tasks/<slug>/proof-final.md`, and show it. If anything fails, say so and don't mark the
+   task READY.
 2. **Risk tier**, and the rounds it took.
 3. **Rollback plan:** the one step from `rd.md`.
 4. **Changes:** `git diff --stat <base_sha>..HEAD` and `git log --oneline <base_sha>..HEAD`.
 5. **Verdict:** LOW: "Ready to merge." MEDIUM/HIGH (from `/quorum:blind-test`): "Waiting for your review", with
    the files most worth reading.
-6. Non-blocking findings (`[NIT]`, `[PRE-EXISTING]`) to consider separately.
+6. Non-blocking findings (`[NIT]`, `[PRE-EXISTING]`) and any "Needs a human" items (accessibility, docs outside
+   the repo), to consider separately.
+
+After a LOW summary, suggest `/quorum:pr-draft`.

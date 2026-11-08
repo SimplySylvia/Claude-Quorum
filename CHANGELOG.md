@@ -3,6 +3,34 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
+## Unreleased
+
+### Added
+
+- `researcher` agent: before the spec, finds repo precedent and compares two or three approaches using the
+  official docs for the versions the repo pins, with sources. Runs for MEDIUM and HIGH tasks in
+  `/quorum:spec-and-eval` (`--research` for LOW, `--no-research` to skip).
+- `spec-reviewer` agent, with Feasibility Critic and Spec Improver personas, reviews `rd.md` and `eval.md` against
+  the code before any build. `[IMPORTANT]` spec findings are fixed before `/quorum:build`.
+- `prover` agent: runs `verify-completion.sh` and every `eval.md` row (fail-before-fix rows in a temporary
+  worktree) and reports each with its output. `/quorum:build` and both Stage 7 summaries use it, saving
+  `proof-build.md` and `proof-final.md`.
+- `pattern-auditor` agent: a review-loop reviewer for MEDIUM and HIGH tasks that flags reinvented helpers, broken
+  conventions, and broken repo rules, citing the precedent each one breaks.
+- `docs-auditor` agent: a review-loop reviewer for MEDIUM and HIGH tasks (and any task that changes docs) that
+  finds internal docs the change made wrong or left missing, and lists linked docs outside the repo for a human.
+  The Spec Improver also checks that the spec names docs to update.
+- `/quorum:spec-and-eval` asks, for a new feature, whether the task should create or update docs, offering the
+  places the repo documents similar features. Chosen docs become `**Docs:**` requirements with eval rows; a no
+  becomes a non-goal the docs auditor respects.
+- `a11y-auditor` agent: WCAG 2.2 A and AA. Diff mode runs in the review loop when UI files change; live mode runs
+  in `/quorum:blind-test` with axe and a keyboard pass. Lists what needs a human.
+- Test Adequacy Hunter persona for `code-reviewer`, used when the diff changes tests.
+- `friction-triager` agent: sorts blind-test friction into caused, related, data gap, and unrelated. Caused items
+  block like blind-test blockers; the others come with follow-up drafts.
+- `/quorum:pr-draft` and the `pr-writer` agent: a PR description from the spec, state log, and proof, plus the
+  commits that must not ship.
+
 ## 0.1.1 (2026-10-30)
 
 ### Added

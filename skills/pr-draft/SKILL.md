@@ -1,0 +1,32 @@
+---
+name: pr-draft
+description: Draft the pull request for a finished Quorum task. The PR writer turns the spec, state log, proof, and diff into a description in the repo's PR style, and lists commits that must not ship (such as a local setup commit). Saves it to .tasks/<slug>/pr.md; never pushes or opens the PR. Run when a task is READY or AWAITING-HUMAN.
+disable-model-invocation: true
+argument-hint: "[slug]"
+---
+
+# Draft the PR
+
+Use the slug in `$ARGUMENTS`, or `quorum-active-task`. If neither gives one, use the newest task under `.tasks/`
+whose status is `READY` or `AWAITING-HUMAN`, and say which. Work from the repo root.
+
+Don't run git commands that change the working tree, index, or history here, and don't push or create the PR.
+
+1. **Check the status.** `quorum-state --task <slug> get status` must be `READY` or `AWAITING-HUMAN`. Otherwise
+   say which command comes next (`pipeline-laws` has the stage map) and stop.
+2. **Check the proof.** `.tasks/<slug>/proof-final.md` must exist and say `Result: ALL PASS`. If it's missing or
+   anything failed, say so and stop: a PR shouldn't claim checks that didn't pass.
+3. **Run the writer.** Start `quorum:pr-writer` with:
+
+   > Task `<slug>`. Base commit `<quorum-state get base_sha>`. Draft the PR title and description, and list any
+   > commits that must not ship. Read `CLAUDE.md`, `.tasks/<slug>/rd.md`, `state.md`, `proof-final.md`, and
+   > `.tasks/<slug>/blind/` if it exists.
+
+4. **Save and show.** Save its reply verbatim to `.tasks/<slug>/pr.md`, and the description alone (everything
+   after the `---` line) to `.tasks/<slug>/pr-body.md`. Show the reply.
+5. **Next steps for the user,** without running them:
+   - If commits are listed under "Drop before merging", give the exact command to remove them (for example
+     `git rebase --onto <sha> <sha>^`, or an interactive rebase they run themselves), and say to rerun the fast
+     checks afterwards.
+   - The push and create commands that fit the repo (for example `git push -u origin <branch>` and
+     `gh pr create --title "<title>" --body-file .tasks/<slug>/pr-body.md`).
