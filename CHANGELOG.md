@@ -36,7 +36,9 @@ copy with `/plugin marketplace update`.
   two reviewers).
 - README: the Swiss cheese animation is now an animated SVG in the same style, at 19 KB instead of about 960 KB. It
   shows seven layers, including spec review and checks and proof, moves smoothly, and holds still for viewers who
-  ask for reduced motion. The tier cards correct the reviewer counts (MEDIUM and HIGH get 4 to 6, not 2).
+  ask for reduced motion.
+- README: the stages animation is also an animated SVG now, following one task through every stage, including the
+  two times a stage sends work back. With that, every README visual comes from `assets/src/diagrams.py`. The tier cards correct the reviewer counts (MEDIUM and HIGH get 4 to 6, not 2).
 - README reorganized: reference tables (agents, configuration, repository layout) are collapsible, guardrails and
   known limits are one line each, and development material moved to the new `CONTRIBUTING.md`.
 

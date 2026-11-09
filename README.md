@@ -73,13 +73,13 @@ Every command is user-only: Claude never starts a review loop on its own.
 
 ## How it works
 
-A task moves through stages 0 to 7, and each stage catches defects the others miss. This run on the repo's fixture
-app has two planted bugs; red frames are a stage sending work back:
+A task moves through stages 0 to 7, and each stage catches defects the others miss. Here a task on the repo's
+fixture app carries two planted bugs; a red stage is one sending the work back:
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/stages-dark.gif">
-    <img src="assets/stages-light.gif" alt="Animation: one task moving through the stages, from bootstrap to the human gate, with red frames where a layer sent work back" width="880">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/stages-dark.svg">
+    <img src="assets/stages-light.svg" alt="Animation: one task moving through the stages. Bootstrap, spec and eval, and build pass. Review round 1 finds that export ignores DATA_FILE and sends it back to the builder; round 2 converges. The blind test finds that a comma in a customer name splits a CSV row and sends it back to the review loop, which fixes it; the second blind test passes. The lesson becomes a REVIEW.md rule, and the task waits at the human gate." width="880">
   </picture>
 </p>
 

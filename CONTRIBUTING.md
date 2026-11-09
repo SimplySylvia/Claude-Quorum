@@ -59,16 +59,17 @@ claude plugin install quorum@quorum
 
 ## Diagrams
 
-The README's Swiss cheese animation, agent map, review loop, and risk-tier cards are SVGs drawn by
-`assets/src/diagrams.py`, in a light and a dark version each. After changing the layers, which agents a command
-starts, how a review round works, or what a tier gets, update the lists in that script and run it:
+Every visual in the README is an SVG drawn by `assets/src/diagrams.py`, in a light and a dark version: the Swiss
+cheese and stages animations, the agent map, the review loop, and the risk-tier cards. After changing the layers or
+stages, which agents a command starts, how a review round works, or what a tier gets, update the lists in that script
+and run it:
 
 ```bash
 python3 assets/src/diagrams.py
 ```
 
-The Swiss cheese animation is plain CSS keyframes, so it plays in a README image and stays still for viewers who
-ask for reduced motion. The stages GIF in `assets/` isn't generated from this repo.
+The two animations are plain CSS keyframes, so they play in a README image and show their final frame, without
+motion, to viewers who ask for reduced motion.
 
 ## Releasing
 

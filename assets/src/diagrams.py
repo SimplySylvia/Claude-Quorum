@@ -5,6 +5,7 @@
 - assets/risk-tiers-*.svg: which layers each risk tier gets.
 - assets/review-loop-*.svg: one round of the review loop and where it can end.
 - assets/swiss-cheese-*.svg: an animation of the layers, each catching the defect the others let through.
+- assets/stages-*.svg: an animation of one task moving through the stages, with the stages that send work back.
 
 Run it again after adding, renaming, or rewiring an agent, or changing what a tier gets:
     python3 assets/src/diagrams.py
@@ -456,10 +457,122 @@ def draw_cheese(theme):
                  "rollback plan is for")
 
 
+# One MEDIUM task on the fixture app, with two planted bugs. Each step: (stage index, caption, sent back to stage).
+STAGES = [("0", "Bootstrap"), ("1", "Spec & eval"), ("2", "Build"), ("3–4", "Review loop"), ("5", "Security + blind"),
+          ("6", "Codify"), ("7", "Human gate")]
+STEPS = [
+    (0, "init-pipeline: Makefile found; lint and test become the fast checks", None),
+    (1, "spec-and-eval: MEDIUM, a new command; research, rd.md, eval.md, two spec reviewers", None),
+    (2, "build: the builder adds export on feat/csv-export; the prover records passing checks", None),
+    (3, "review round 1: the logic reviewer finds export ignores DATA_FILE; the voter keeps it", 2),
+    (2, "the builder fixes every place that ignores DATA_FILE; the checks pass again", None),
+    (3, "review round 2 reads only the fix: nothing IMPORTANT left, converged", None),
+    (4, "blind test: exporting \"Acme, Inc.\" splits the row in two; a blocker", 3),
+    (3, "the review loop fixes the blocker first, then reviews the fix: converged", None),
+    (4, "blind test, run 2: the goal is reached; friction is triaged into follow-ups", None),
+    (5, "codify-lesson: \"All CSV output goes through csv.writer\" joins REVIEW.md", None),
+    (6, "human gate: proof, rollback plan, and a PR description; waiting for your review", None),
+]
+
+
+def draw_stages(theme):
+    s = Svg(THEMES[theme])
+    t = THEMES[theme]
+    n = len(STAGES)
+    gap, top, bh = 14, 64, 58
+    bw = (W - 2 * LEFT - (n - 1) * gap) / n
+    cx = [LEFT + i * (bw + gap) + bw / 2 for i in range(n)]
+    step, hold = 2.4, 2.2                          # seconds per step, and on the last frame
+    cycle = len(STEPS) * step + hold
+    pct = lambda sec: f"{100 * max(0, min(sec, cycle)) / cycle:.2f}%"
+    css = ["svg .tok { transform-box: view-box; }"]
+    reduced = []
+
+    def windows(name, spans, on=1.0, fade=0.3, final=None):
+        """Opacity keyframes: visible during each (start, end) span; final is the still frame's opacity."""
+        frames = ["0% { opacity: 0; }"]
+        for a, b in spans:
+            frames += [f"{pct(a)} {{ opacity: 0; }}", f"{pct(a + fade)} {{ opacity: {on}; }}",
+                       f"{pct(b - fade)} {{ opacity: {on}; }}", f"{pct(b)} {{ opacity: 0; }}"]
+        frames.append("100% { opacity: 0; }")
+        css.append(f"@keyframes {name} {{ {' '.join(frames)} }} .{name} {{ animation: {name} {cycle}s infinite; }}")
+        reduced.append(f".{name} {{ animation: none; opacity: {final if final is not None else 0}; }}")
+
+    last = len(STEPS) - 1
+    end = cycle - 0.4
+    for i, (num, name) in enumerate(STAGES):
+        x = cx[i] - bw / 2
+        s.rect(x, top, bw, bh, "chip", r=10)
+        # done: from the end of the first step that passed this stage, to the end of the loop
+        first = next((k for k, (st, _, back) in enumerate(STEPS) if st == i and back is None), None)
+        if first is not None:
+            s.add(f'<rect class="done{i}" x="{x:.1f}" y="{top}" width="{bw:.1f}" height="{bh}" rx="10" '
+                  f'fill="{t["go"]}" fill-opacity=".1" stroke="{t["go"]}" stroke-opacity=".45" opacity="0"/>')
+            windows(f"done{i}", [((first + 1) * step - 0.3, end)], final=1)
+        act = [(k * step, (k + 1) * step + (hold if k == last else 0)) for k, (st, _, back) in enumerate(STEPS)
+               if st == i and back is None]
+        s.add(f'<rect class="act{i}" x="{x:.1f}" y="{top}" width="{bw:.1f}" height="{bh}" rx="10" fill="none" '
+              f'stroke="{t["go"]}" stroke-width="2.5" opacity="0"/>')
+        windows(f"act{i}", act, final=1 if i == STEPS[last][0] else 0)
+        red = [(k * step, (k + 1) * step) for k, (st, _, back) in enumerate(STEPS) if st == i and back is not None]
+        if red:
+            s.add(f'<rect class="red{i}" x="{x:.1f}" y="{top}" width="{bw:.1f}" height="{bh}" rx="10" '
+                  f'fill="{t["back"]}" fill-opacity=".1" stroke="{t["back"]}" stroke-width="2.5" opacity="0"/>')
+            windows(f"red{i}", red)
+        s.text(cx[i], top + 25, num, size=14, weight=700, anchor="middle")
+        s.text(cx[i], top + 43, name, size=TAG + 0.5, color="muted", anchor="middle")
+
+    # Red arcs under the boxes for the steps that send work back.
+    for k, (st, _, back) in enumerate(STEPS):
+        if back is None:
+            continue
+        x1, x2, y = cx[st], cx[back], top + bh + 4
+        s.add(f'<path class="arc{k}" d="M{x1:.1f},{y} C{x1:.1f},{y + 40} {x2:.1f},{y + 40} {x2:.1f},{y + 3}" '
+              f'fill="none" stroke="{t["back"]}" stroke-width="1.8" marker-end="url(#arrow-back)" opacity="0"/>')
+        s.add(f'<text class="arc{k}" x="{(x1 + x2) / 2:.1f}" y="{y + 44}" font-family="{FONT}" font-size="{TAG}" '
+              f'font-weight="600" fill="{t["back"]}" text-anchor="middle" opacity="0">sent back</text>')
+        windows(f"arc{k}", [(k * step + 0.6, (k + 1) * step)])
+
+    # The task: a dot that glides to each step's stage.
+    moves = []
+    for k, (st, _, _) in enumerate(STEPS):
+        a = k * step
+        moves.append(f"{pct(a - 0.6) if k else '0%'} {{ transform: translateX({cx[STEPS[k - 1][0]] - cx[0] if k else 0:.1f}px); "
+                     f"animation-timing-function: cubic-bezier(.45,0,.25,1); }}")
+        moves.append(f"{pct(a)} {{ transform: translateX({cx[st] - cx[0]:.1f}px); }}")
+    final_dx = cx[STEPS[last][0]] - cx[0]
+    moves.append(f"100% {{ transform: translateX({final_dx:.1f}px); }}")
+    css.append(f"@keyframes tokmove {{ {' '.join(moves)} }} "
+               f"@keyframes tokfade {{ 0% {{ opacity: 0; }} {pct(0.4)} {{ opacity: 1; }} {pct(end - 0.3)} {{ opacity: 1; }} "
+               f"100% {{ opacity: 0; }} }} "
+               f".tok {{ animation: tokmove {cycle}s infinite, tokfade {cycle}s infinite; }}")
+    reduced.append(f".tok {{ animation: none; transform: translateX({final_dx:.1f}px); opacity: 1; }}")
+    s.add(f'<circle class="tok" cx="{cx[0]:.1f}" cy="{top - 16}" r="8" fill="{t["go"]}" opacity="0"/>')
+    s.add(f'<circle class="tok" cx="{cx[0]:.1f}" cy="{top - 16}" r="13" fill="none" stroke="{t["go"]}" '
+          f'stroke-opacity=".35" stroke-width="2" opacity="0"/>')
+
+    # Captions, one per step.
+    cap_y = top + bh + 78
+    for k, (_, caption, back) in enumerate(STEPS):
+        a, b = k * step, (k + 1) * step + (hold if k == last else 0)
+        color = t["back"] if back is not None else t["fg"]
+        s.add(f'<text class="cap{k}" x="{W / 2}" y="{cap_y}" font-family="{FONT}" font-size="13.5" '
+              f'fill="{color}" text-anchor="middle" opacity="0"><tspan font-weight="700">Step {k + 1} of '
+              f'{len(STEPS)}:</tspan> {escape(caption)}</text>')
+        windows(f"cap{k}", [(a, b)], fade=0.25, final=1 if k == last else 0)
+    s.text(W / 2, cap_y + 26, "Teal: the stage passed · Red: a stage caught a problem and sent the work back",
+           size=TAG + 0.5, color="muted", anchor="middle")
+    css.append("@media (prefers-reduced-motion: reduce) { " + " ".join(reduced) + " }")
+    s.add("<style>" + " ".join(css) + "</style>")
+    return s.svg(int(cap_y + 40), "Animation: one task moving through Quorum's stages, from bootstrap to the human "
+                 "gate. The review loop sends a bug back to the builder, and the blind test sends a blocker back to "
+                 "the review loop, before the task reaches the human gate.")
+
+
 if __name__ == "__main__":
     for name in THEMES:
         for base, draw in (("agent-map", draw_map), ("risk-tiers", draw_tiers), ("review-loop", draw_loop),
-                           ("swiss-cheese", draw_cheese)):
+                           ("swiss-cheese", draw_cheese), ("stages", draw_stages)):
             path = os.path.join(OUT, f"{base}-{name}.svg")
             with open(path, "w") as f:
                 f.write(draw(name))
