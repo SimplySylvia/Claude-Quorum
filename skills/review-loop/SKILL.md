@@ -50,7 +50,7 @@ Let N = `quorum-state get round` + 1. Stop the loop if N > max_rounds (see step 
    | `quorum:code-reviewer` | **Logic & Edge-Case Hunter** | always | `logic.md` |
    | `quorum:code-reviewer` | **Architecture, Security & Drift Hunter** | MEDIUM, HIGH | `architecture.md` |
    | `quorum:pattern-auditor` | (none) | MEDIUM, HIGH | `patterns.md` |
-| `quorum:docs-auditor` | (none) | MEDIUM, HIGH, or any tier when the range changes docs | `docs.md` |
+   | `quorum:docs-auditor` | (none) | MEDIUM, HIGH, or any tier when the range changes docs | `docs.md` |
    | `quorum:code-reviewer` | **Test Adequacy Hunter** | the range changes tests (paths with `test`, `spec`, `__tests__`, `e2e`, `cypress`) | `tests.md` |
    | `quorum:a11y-auditor` | mode **diff** | the range changes UI (markup, components, styles: for example `.tsx`, `.jsx`, `.vue`, `.svelte`, `.html`, `.css`) | `a11y.md` |
 
