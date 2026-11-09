@@ -227,3 +227,22 @@ function tableRows(lines: string[]): string[][] {
   const rows = lines.filter(l => l.trim().startsWith('|')).map(l => l.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim()))
   return rows.filter((cells, i) => !cells.every(c => /^:?-+:?$/.test(c)) && !(i === 0 && cells[0] === '#'))
 }
+
+// The statuses where the Stop hook runs (hooks/stop-verify.sh), so a stop_blocks count still means something.
+export const isHookActive = (status: string) => ['BUILDING', 'IN_REVIEW', 'BLIND-TEST', 'ESCALATED'].includes(status)
+
+// Which proof the skills should have saved by this status: proof-build.md after /quorum:build, proof-final.md once
+// the task is READY or AWAITING-HUMAN. Empty while none is due yet.
+export function expectedProof(status: string, stage: number): string {
+  if (status === 'READY' || status === 'AWAITING-HUMAN') return 'proof-final.md'
+  return stage > STAGES.indexOf('Build') ? 'proof-build.md' : ''
+}
+
+// The round log's latest line about the checks (state.md's body), for when no proof file was saved.
+export function checksNoteFromLog(stateMd: string): string {
+  const body = stateMd.split('\n')
+  const end = body[0] === '---' ? body.indexOf('---', 1) : -1
+  const lines = body.slice(end + 1).map(l => l.trim()).filter(l => /\b(eval|checks?)\b/i.test(l) && /\b(pass(es|ed)?|fail(s|ed)?)\b/i.test(l))
+  const last = lines.at(-1) ?? ''
+  return last.length > 200 ? `${last.slice(0, 199)}…` : last
+}

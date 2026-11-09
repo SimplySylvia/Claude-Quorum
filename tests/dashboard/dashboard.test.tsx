@@ -340,6 +340,21 @@ test('checks join eval.md with the latest proof', async ($, on) => {
   await band.unmount()
 })
 
+test('a finished task with no proof file says so, shows the log, and hides stale Stop-hook blocks', async ($, on) => {
+  const files: Record<string, string> = repo('AWAITING-HUMAN')
+  files['.tasks/export-csv/state.md'] = state('AWAITING-HUMAN').replace('stop_blocks: 0', 'stop_blocks: 4')
+    + '\n## Stage 7\nAll eval checks pass on 673fa13 (fast checks 117/117). Status set to AWAITING-HUMAN.\n'
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /3 checks in eval.md, no proof saved/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /proof-final.md is missing, so \/quorum:pr-draft will stop/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /Round log: All eval checks pass on 673fa13/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /not run yet/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /Stop hook blocked/ })).toBeUndefined()
+  await pane.unmount()
+})
+
 test('the spec and blind-test stages show their own reports', async ($, on) => {
   const files: Record<string, string> = repo('DRAFT-AWAITING-VISUAL-SIGNOFF')
   files['.tasks/export-csv/spec-review/feasibility.md'] = 'Summary: 0 issues found. Ready to build.\n'

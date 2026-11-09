@@ -7,14 +7,14 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { Check, Findings, Now, QuorumAgent, Reviewer, Round, Snapshot, Stage } from '../../types'
 import {
-  ROLE_LABEL, STAGES, count, countFindings, countRequirements, evalRows, isStuck, joinChecks, list, nextStep, parseBlind,
+  ROLE_LABEL, STAGES, checksNoteFromLog, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, stageOf, stages,
 } from './task'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-2' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-3' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-2' })
 // Bumped every second while a Quorum agent runs, so the pane's running times count up.
 const clock = atom({ plugin: 'quorum', key: 'now' } as const, 0)
@@ -171,6 +171,8 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     now: await nowFor($, dir, { stage, risk, round, maxRounds, planRounds, blindRuns }, rd),
     checks: joinChecks(evalRows(evalMd), proof),
     proof,
+    expectedProof: expectedProof(status, stage),
+    checksNote: proof ? '' : checksNoteFromLog(text),
   }
 }
 
@@ -491,9 +493,17 @@ export const register: Register = (on, options) => {
             <Text bold>Checks · </Text>
             {t.proof
               ? <Text color={passed === t.checks.length ? 'success' : 'error'}>{passed} of {t.checks.length} pass</Text>
-              : <Text dimColor>{plural(taskChecks, 'check')} in eval.md, not run yet</Text>}
+              : t.expectedProof
+                ? <Text color="warning">{plural(taskChecks, 'check')} in eval.md, no proof saved</Text>
+                : <Text dimColor>{plural(taskChecks, 'check')} in eval.md, not run yet</Text>}
           </Text>
           {t.proof && <Text dimColor>{t.proof.file}{t.proof.rev ? ` at ${t.proof.rev}` : ''}</Text>}
+          {!t.proof && t.expectedProof && (
+            <Text color="warning">
+              {t.expectedProof} is missing{t.expectedProof === 'proof-final.md' ? ', so /quorum:pr-draft will stop' : ''}
+            </Text>
+          )}
+          {!t.proof && t.expectedProof && t.checksNote && <Text dimColor>Round log: {t.checksNote}</Text>}
           {t.checks.map(c => {
             const [glyph, color] = c.result ? CHECK_GLYPH[c.result] ?? ['○', 'inactive'] : ['○', 'inactive']
             return (
@@ -504,7 +514,7 @@ export const register: Register = (on, options) => {
               </Text>
             )
           })}
-          {t.stopBlocks > 0 && <Text color="warning">Stop hook blocked {plural(t.stopBlocks, 'time')} in a row</Text>}
+          {t.stopBlocks > 0 && isHookActive(t.status) && <Text color="warning">Stop hook blocked {plural(t.stopBlocks, 'time')} in a row</Text>}
           {t.pending > 0 && <Text color="warning">{plural(t.pending, 'finding')} pending for the builder</Text>}
         </Box>
 

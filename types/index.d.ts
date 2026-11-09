@@ -54,6 +54,9 @@ export type Snapshot = {
   now: Now
   checks: Check[]
   proof: Proof | null
+  // The proof the skills should have saved by now ('' while none is due), and the round log's line about the checks.
+  expectedProof: string
+  checksNote: string
 }
 
 export type QuorumAgent = {
