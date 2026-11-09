@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import {
-  countFindings, countRequirements, evalRows, isReportedPass, joinChecks, nextStep, parseBlind, parseFrontmatter, parsePr,
+  countFindings, countRequirements, evalRows, isReportedPass, isStaleProof, packedRef, joinChecks, nextStep, parseBlind, parseFrontmatter, parsePr,
   parseProof, parseSpec, prDetail, prFromUrl, prNext,
   requirementState, roleOf,
   roundReviewers, slugFromHead, stageOf, stages,
@@ -236,6 +236,15 @@ describe('task helpers', () => {
     expect(isReportedPass('All eval checks pass on 673fa13 (fast checks 117/117).')).toBe(true)
     expect(isReportedPass('All checks pass except 7b, which fails.')).toBe(false)
     expect(isReportedPass('Ran the checks.')).toBe(false)
+  })
+
+  test('reads HEAD from packed-refs and tells a stale proof', () => {
+    const sha = 'a'.repeat(40)
+    expect(packedRef(`# pack-refs with: peeled\n${sha} refs/heads/feat/x\n`, 'refs/heads/feat/x')).toBe(sha)
+    expect(packedRef(`${sha} refs/heads/main\n`, 'refs/heads/feat/x')).toBe('')
+    expect(isStaleProof('1a2b3c4', '1a2b3c4' + 'f'.repeat(33))).toBe(false)
+    expect(isStaleProof('1a2b3c4', '9'.repeat(40))).toBe(true)
+    expect(isStaleProof('1a2b3c4', '')).toBe(false)
   })
 
   test('reads a blind run and names reviewers by persona', () => {
@@ -473,6 +482,7 @@ test('a finished task shows its PR from GitHub, asking again only after the TTL 
   expect(await pane.find({ type: 'Text', text: /^PR #33807 open$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^https:\/\/github\.com\/o\/r\/pull\/33807$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^Get PR #33807 reviewed and merged$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^  #33807 open$/ })).toBeDefined()
   await pane.unmount()
 
   answer = answer.replace('OPEN', 'MERGED')
@@ -512,6 +522,25 @@ test('without gh, a finished task still says pr.md is drafted, and never claims 
   const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /^  pr\.md drafted$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /not opened/ })).toBeUndefined()
+  await pane.unmount()
+})
+
+test('a proof from before HEAD is flagged as possibly out of date', async ($, on) => {
+  const files: Record<string, string> = repo('IN_REVIEW')
+  files['.tasks/export-csv/proof-build.md'] = PROOF
+  files['.git/refs/heads/feat/export-csv'] = `1a2b3c4${'0'.repeat(33)}\n`
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^proof-build\.md at 1a2b3c4$/ })).toBeDefined()
+  await pane.unmount()
+
+  // A fix commit lands, packed this time.
+  delete files['.git/refs/heads/feat/export-csv']
+  files['.git/packed-refs'] = `${'9'.repeat(40)} refs/heads/feat/export-csv\n`
+  await $.tool.call({ tool: 'Bash', command: 'quorum-state get round' })
+  pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^proof-build\.md ran at 1a2b3c4, before HEAD \(9999999\): these results may be out of date$/ })).toBeDefined()
   await pane.unmount()
 })
 

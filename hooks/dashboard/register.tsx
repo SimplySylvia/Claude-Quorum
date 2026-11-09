@@ -7,14 +7,14 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { Check, Findings, Now, PullRequest, QuorumAgent, Reviewer, Round, Snapshot, Stage } from '../../types'
 import {
-  ROLE_LABEL, STAGES, branchFromHead, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
+  ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, stageOf, stages,
 } from './task'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-6' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-7' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-2' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
 // How long a PR lookup stands before the next refresh asks GitHub again.
@@ -54,18 +54,32 @@ const readOr = ($: EngineInterface, path: string) => $.fs.read(path).catch(() =>
 
 // The slug bin/quorum-active-task would print: a feat/ or fix/ branch with a task folder, then .tasks/.active.
 // `root` is the session's project root, the CLAUDE_PROJECT_DIR that script resolves against.
-async function activeSlug($: EngineInterface, root: string): Promise<{ slug: string; branch: string }> {
-  let head = await readOr($, `${root}/.git/HEAD`)
-  if (head === null) {
-    // A worktree: .git is a file naming the real git dir, absolute or relative to the worktree.
-    const gitdir = /^gitdir:\s*(.+)$/m.exec((await readOr($, `${root}/.git`)) ?? '')?.[1]?.trim()
-    head = gitdir ? await readOr($, gitdir.startsWith('/') ? `${gitdir}/HEAD` : `${root}/${gitdir}/HEAD`) : null
-  }
-  const branch = branchFromHead(head ?? '')
-  const fromBranch = slugFromHead(head ?? '')
-  if (fromBranch && (await $.fs.exists(`${root}/.tasks/${fromBranch}/state.md`))) return { slug: fromBranch, branch }
+async function activeSlug($: EngineInterface, root: string): Promise<{ slug: string; branch: string; head: string }> {
+  // A worktree's .git is a file naming the real git dir, absolute or relative to the worktree.
+  const pointer = /^gitdir:\s*(.+)$/m.exec((await readOr($, `${root}/.git`)) ?? '')?.[1]?.trim()
+  const gitdir = !pointer ? `${root}/.git` : pointer.startsWith('/') ? pointer : `${root}/${pointer}`
+  const headFile = (await readOr($, `${gitdir}/HEAD`)) ?? ''
+  const branch = branchFromHead(headFile)
+  const head = await headCommit($, gitdir, headFile, branch)
+  const fromBranch = slugFromHead(headFile)
+  if (fromBranch && (await $.fs.exists(`${root}/.tasks/${fromBranch}/state.md`))) return { slug: fromBranch, branch, head }
   const active = ((await readOr($, `${root}/.tasks/.active`)) ?? '').split('\n')[0]?.trim() ?? ''
-  return { slug: /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(active) ? active : '', branch }
+  return { slug: /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(active) ? active : '', branch, head }
+}
+
+// HEAD's commit: detached, the branch's loose ref, or packed-refs; a worktree's refs live in its commondir.
+async function headCommit($: EngineInterface, gitdir: string, headFile: string, branch: string): Promise<string> {
+  if (/^[0-9a-f]{40}\s*$/.test(headFile)) return headFile.trim()
+  if (!branch) return ''
+  const common = ((await readOr($, `${gitdir}/commondir`)) ?? '').trim()
+  const dirs = [gitdir, ...(common ? [common.startsWith('/') ? common : `${gitdir}/${common}`] : [])]
+  for (const dir of dirs) {
+    const loose = ((await readOr($, `${dir}/refs/heads/${branch}`)) ?? '').trim()
+    if (/^[0-9a-f]{40}$/.test(loose)) return loose
+    const packed = packedRef((await readOr($, `${dir}/packed-refs`)) ?? '', `refs/heads/${branch}`)
+    if (packed) return packed
+  }
+  return ''
 }
 
 // The files among `names` under `dir` that exist, by name.
@@ -121,7 +135,7 @@ async function nowFor($: EngineInterface, dir: string, t: Pick<Snapshot, 'stage'
 
 async function snapshot($: EngineInterface, maxRounds: number, previous: Snapshot | null): Promise<Snapshot | null> {
   const root = await $.session.root()
-  const { slug, branch } = await activeSlug($, root)
+  const { slug, branch, head } = await activeSlug($, root)
   if (!slug) return null
   const text = await readOr($, `${root}/.tasks/${slug}/state.md`)
   if (text === null) return null
@@ -181,6 +195,8 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     spec: parseSpec(rd),
     checks: joinChecks(evalRows(evalMd), proof),
     proof,
+    head,
+    isProofStale: proof !== null && isStaleProof(proof.rev, head),
     expectedProof: expectedProof(status, stage),
     checksNote: proof ? '' : checksNoteFromLog(text),
   }
@@ -227,7 +243,8 @@ function stageDetail(t: Snapshot, name: string, known: PullRequest | null): stri
         t.planApproved ? `approved ${t.planApproved}` : ''].filter(Boolean).join(', ')
     case 'Review': return t.round ? `round ${t.round} of ${t.maxRounds}` : ''
     case 'Blind test': return t.risk === 'LOW' ? 'not run for LOW' : t.blindRuns ? `${t.blindRuns} run${t.blindRuns === 1 ? '' : 's'}` : ''
-    case 'PR': return prDetail(known, t.prDrafted)
+    // The stage is already named PR: "#42 open", not "PR #42 open".
+    case 'PR': return prDetail(known, t.prDrafted).replace(/^PR #/, '#')
     default: return ''
   }
 }
@@ -599,7 +616,12 @@ export const register: Register = (on, options) => {
                 ? <Text color="warning">{plural(taskChecks, 'check')} in eval.md, no proof saved</Text>
                 : <Text dimColor>{plural(taskChecks, 'check')} in eval.md, not run yet</Text>}
           </Text>
-          {t.proof && <Text dimColor>{t.proof.file}{t.proof.rev ? ` at ${t.proof.rev}` : ''}</Text>}
+          {t.proof && !t.isProofStale && <Text dimColor>{t.proof.file}{t.proof.rev ? ` at ${t.proof.rev}` : ''}</Text>}
+          {t.proof && t.isProofStale && (
+            <Text color="warning">
+              {t.proof.file} ran at {t.proof.rev}, before HEAD ({t.head.slice(0, 7)}): these results may be out of date
+            </Text>
+          )}
           {!t.proof && t.expectedProof && (
             <Text color="warning">
               {t.expectedProof} is missing{t.expectedProof === 'proof-final.md' ? ', so /quorum:pr-draft will stop' : ''}

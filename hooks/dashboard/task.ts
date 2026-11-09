@@ -343,3 +343,15 @@ export function prNext(pr: PullRequest | null, isDrafted: boolean, fallback: str
 
 // The round log says every check passed, though no proof file was saved.
 export const isReportedPass = (note: string) => /\ball\b[^.]*\bchecks?\s+pass/i.test(note) && !/\bfail/i.test(note)
+
+// A ref's commit from a packed-refs file ("<sha> refs/heads/<branch>" lines), or ''.
+export function packedRef(packed: string, ref: string): string {
+  for (const line of packed.split('\n')) {
+    const [sha, name] = line.trim().split(/\s+/)
+    if (name === ref && /^[0-9a-f]{40}$/.test(sha ?? '')) return sha ?? ''
+  }
+  return ''
+}
+
+// A proof is stale when it ran at a commit other than HEAD (its short sha isn't HEAD's prefix).
+export const isStaleProof = (rev: string, head: string) => rev !== '' && head !== '' && !head.startsWith(rev.toLowerCase())

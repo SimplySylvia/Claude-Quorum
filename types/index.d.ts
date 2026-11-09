@@ -66,6 +66,9 @@ export type Snapshot = {
   spec: Spec | null
   checks: Check[]
   proof: Proof | null
+  // HEAD's commit, '' when it can't be read, and whether the proof ran at an older one.
+  head: string
+  isProofStale: boolean
   // The proof the skills should have saved by now ('' while none is due), and the round log's line about the checks.
   expectedProof: string
   checksNote: string
