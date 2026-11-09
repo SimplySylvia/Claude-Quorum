@@ -3,7 +3,7 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
-## Unreleased
+## 0.3.0 (2026-11-09)
 
 ### Added
 
@@ -29,6 +29,12 @@ copy with `/plugin marketplace update`.
   from reviewed specs and plans to proof, not only the review loop.
 - The tier tables in `spec-and-eval` and `pipeline-laws` gave MEDIUM and HIGH 2 reviewers; they now say 4–6
   (4–7 with security), with plan review.
+
+### Fixed
+
+- `evals/run.sh` ran the evals with the `bin/` helpers of an installed copy of Quorum when the calling session had
+  one on PATH, so helper changes went untested. It now puts the working tree's `bin/` first.
+- Plan-mode reviewers must cite `plan.md` by line, as `quorum-findings check` requires.
 
 ## 0.2.0 (2026-11-09)
 
