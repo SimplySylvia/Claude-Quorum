@@ -21,7 +21,7 @@ next command. Never start one yourself: every Quorum command is run by the user.
 
 | Status | Next command |
 |---|---|
-| (no task) | `/quorum:spec-and-eval` |
+| (no task) | `/quorum:spec-and-eval`; or, to review a branch, PR, or range without a task, `/quorum:review` |
 | `DRAFT-AWAITING-VISUAL-SIGNOFF` | The user reviews `mockup.html`, then `/quorum:plan`, which records the sign-off |
 | `PLANNING` | `/quorum:plan`: write and review `plan.md`, then approve it |
 | `BUILDING` | `/quorum:build` if no code exists yet; otherwise `/quorum:simplify-diff`, then `/quorum:review-loop` |

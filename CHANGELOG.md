@@ -7,6 +7,18 @@ copy with `/plugin marketplace update`.
 
 ### Added
 
+- **`/quorum:review`: Quorum's reviewers on any diff,** with no task, spec, plan, or bootstrap. It reviews the
+  current branch, a GitHub PR, or a git range against the PR's description or the commit messages; proposes a risk
+  tier you confirm, which picks the reviewers as the review loop does (plus the security reviewer for HIGH); runs the
+  voter; and reports the kept findings by tag and confidence, with what the voter dropped. `--comment` posts the kept
+  `[IMPORTANT]` findings as a GitHub review after you approve every comment. `--fix` has the builder fix them in one
+  commit, with the SubagentStop hook checking its work through a new `.tasks/.review-fix-active` marker. Each review
+  keeps its runs in `.tasks/review-<id>/`; without `REVIEW.md` it uses the template's general rules.
+- `quorum-state`: `kind` and `range` keys and `REVIEWING`, `FIXING`, and `REVIEWED` statuses for a review's state.
+- The reviewers, the voter, and the builder have a "Standalone review" mode for prompts with no task spec.
+- Eval case `review-standalone-finds-bug`; the near-miss case now also fails if an ordinary request starts
+  `/quorum:review`, `/quorum:plan`, or `/quorum:pr-draft`.
+
 - **Choose the models for a task's agents at runtime.** `/quorum:spec-and-eval` asks which model the reviewers use
   (the spec, plan, code, accessibility, and security reviewers, and the voter) and which the helpers use (the PR
   writer and the friction triager). The choices come from the models Claude Code offers at the time, not a list in

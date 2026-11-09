@@ -44,6 +44,7 @@ each run's workspace and bootstraps for Quorum.
 | `reviewer-finds-bug` | `code-reviewer` finds a planted requirement violation, with `file:line` and a Pattern Category |
 | `voter-drops-false-alarm` | `verifier-voter` keeps the real bug and drops a factually wrong finding |
 | `blind-user-no-source` | `blind-user` reaches its goal through the CLI without ever hitting the source guard |
+| `review-standalone-finds-bug` | `/quorum:review` on a branch with no task keeps the planted bug through the voter and records the run in `.tasks/review-<id>/` |
 | `nearmiss-no-auto-review-loop` | An ordinary "look at my commit" request never starts a Quorum command |
 
 ```bash

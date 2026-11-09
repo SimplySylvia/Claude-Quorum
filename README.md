@@ -80,6 +80,15 @@ Then, in the repo you want to protect:
 
 Every command is user-only: Claude never starts a review loop on its own.
 
+To try Quorum's reviewers first, no setup needed, review a branch or pull request you already have:
+
+```
+/quorum:review                 # this branch against the default branch
+/quorum:review 123             # a GitHub PR; add --comment to post the findings on it, after you approve them
+```
+
+See [Reviewing any diff](#reviewing-any-diff).
+
 ## How it works
 
 A task moves through stages 0 to 8, and each stage catches defects the others miss. Here a task on the repo's
@@ -133,6 +142,28 @@ new lines.
     <img src="assets/review-loop-light.svg" alt="One round of the review loop: pick the diff range (the whole branch in round 1, then only new lines), reviewers in parallel (logic always; architecture, patterns, and docs for MEDIUM/HIGH; tests and accessibility when those change), then the verifier-voter. With nothing IMPORTANT left, the task converges: LOW goes to the prover and READY, MEDIUM/HIGH to the blind test. Otherwise, after round 3 it halts for a redesign; before that, the builder fixes every instance of each Pattern Category and the next round starts. Blind-test blockers enter at the builder." width="640">
   </picture>
 </p>
+
+## Reviewing any diff
+
+`/quorum:review` runs the review loop's reviewers and voter on a diff that isn't a Quorum task: the current
+branch, a pull request (`123` or its URL), or a git range (`main..HEAD`). It needs no spec, no plan, and no
+bootstrap.
+
+- **Intent instead of a spec.** The reviewers judge the change against the PR's description, or the commit
+  messages for a branch or range, and the code.
+- **The same reviewers, by tier.** It proposes a risk tier from what the diff changes and you confirm it (or pass
+  `--tier`), which picks the reviewers exactly as the review loop does, plus the security reviewer for HIGH. One
+  round, then the voter.
+- **Without `REVIEW.md`,** reviewers follow the template's general rules, and the report suggests
+  `/quorum:init-pipeline` for rules tailored to the repo.
+- **`--comment`** turns the kept `[IMPORTANT]` findings into a GitHub review: inline comments where the line is in
+  the PR's diff, the rest in its summary. It shows you every comment and posts nothing without your yes.
+- **`--fix`** has the builder fix the kept findings in one commit. The Stop hook checks its work as it does in a
+  task, so it needs `verify-completion.sh`; then it offers a review of the fix.
+
+Each review keeps its runs in `.tasks/review-<id>/` (`review-pr-123`, `review-feat-csv-export`), apart from any
+task, so running it again on the same PR reuses its model choice. On a Quorum task's own branch it sends you to
+`/quorum:review-loop`, which checks the code against the task's spec and plan.
 
 ## The dashboard
 
@@ -290,7 +321,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 |---|---|
 | `.claude-plugin/plugin.json` | Plugin manifest, including the `userConfig` options |
 | `.claude-plugin/marketplace.json` | Marketplace manifest (lists this repo as its only plugin) |
-| `skills/` | `init-pipeline`, `spec-and-eval`, `plan`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `pr-draft`, `codify-lesson`, and the model-invocable `pipeline-laws` |
+| `skills/` | `init-pipeline`, `spec-and-eval`, `plan`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `pr-draft`, `codify-lesson`, `review`, and the model-invocable `pipeline-laws` |
 | `agents/` | `researcher`, `spec-reviewer`, `planner`, `builder`, `prover`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `verifier-voter`, `security-reviewer`, `blind-user`, `friction-triager`, `pr-writer` |
 | `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `stop-verify.sh`, `record-pr.sh`, and `dashboard/`, the dashboard's hooks module |
 | `types/` | The type contract for the values the dashboard keeps in the session |

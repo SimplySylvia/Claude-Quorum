@@ -5,59 +5,17 @@ sketches. Each item says why it matters, which mostly comes from comparing Quoru
 the same job (Superpowers, Compound Engineering, and Anthropic's `code-review`, `feature-dev`, and
 `pr-review-toolkit`), as of November 2026.
 
-## 1. `/quorum:review`: Quorum's reviewers on any diff
+## 1. `/quorum:review`: what's left
 
-**Why.** Today the only way to get Quorum's reviewers is the whole pipeline: bootstrap the repo, write a spec and a
-plan, build. Most people first want a review of a PR they already have, which is the job Anthropic's `code-review`
-plugin gets 430k installs for. Quorum's review is stronger (separate personas, a voter that opens every cited line,
-learned rules in `REVIEW.md`, confidence scores), so a no-setup entry point is the best way to show it, and to lead
-people to the rest of the pipeline.
+The command itself shipped (see `CHANGELOG.md`, Unreleased). Still to do:
 
-**What it does.**
-
-```
-/quorum:review                    # the current branch against its merge base
-/quorum:review 123                # a GitHub PR, by number or URL
-/quorum:review main..HEAD         # any range git understands
-/quorum:review --comment 123      # also post the kept findings as inline PR comments
-/quorum:review --fix              # hand the kept [IMPORTANT] findings to the builder, one commit
-/quorum:review --tier HIGH        # pick the reviewer set instead of inferring it
-/quorum:review --models           # choose the reviewer model again
-```
-
-1. **Resolve the range.** No argument: `git merge-base HEAD <default branch>`..HEAD. A PR: `gh pr diff`, or fetch
-   its head and use the merge base. Refuse an empty range.
-2. **Pick the reviewers.** Reuse the review loop's table as is: the Logic Hunter always; Architecture, patterns, and
-   docs for MEDIUM and HIGH; Test Adequacy when tests change; a11y when UI changes; security for HIGH. With no
-   `--tier`, infer one from the diff with the spec skill's rule ("anything a user can see or run is at least
-   MEDIUM"), say what it chose and why, and let the user change it.
-3. **No spec, no plan.** The reviewers' prompts say there's no `rd.md` or `plan.md`; review against the PR's title
-   and description (or the commit messages) as the stated intent, and skip plan drift. `REVIEW.md` is optional: if
-   the repo has none, use the template's sections 1, 2, and 5, and suggest `/quorum:init-pipeline` at the end.
-4. **Vote, cap, and check** with the same `verifier-voter`, `quorum-findings cap`, and `quorum-findings check` as
-   the review loop. One round only: no builder, no re-review, unless `--fix`.
-5. **Report.** The summary line, the kept findings sorted by tag and then confidence, the `## Needs a human`
-   items, and a count of what the voter dropped (and why, one line each, so a user can say "that drop was wrong").
-
-**Where it keeps files.** `.tasks/review-<short-sha-or-pr>/`, gitignored like the rest: `candidates.md`,
-`votes.md`, `survivors.md`, and a small `state.md` (`kind: review`, the range, the tier, the models) so the
-dashboard can show it. `quorum-state` needs a `kind` key, and `init` must allow a state with no `rd.md`.
-
-**`--comment`.** Post each kept finding with `gh api repos/{owner}/{repo}/pulls/{n}/comments` on its
-`file:line`, and one summary comment. A finding whose line isn't in the PR's diff goes in the summary instead.
-Never post without showing the comments first and getting a yes; never post `[NIT]`s unless asked.
-
-**`--fix`.** Needs a clean working tree and a branch that isn't the default one. Starts `quorum:builder` with
-`survivors.md` exactly as the review loop does; the SubagentStop hook makes it pass `verify-completion.sh`, so it
-needs a bootstrapped repo. Without one, say so and stop.
-
-**Open questions.**
-
-- Should a review on a Quorum task's own branch refuse, and point to `/quorum:review-loop`, so the two never mix
-  their round files? (Probably yes.)
-- Is one round enough for `--fix`, or should it offer a second review of the fix commit? (Start with one.)
-- Evals: a case that reviews the fixture app's planted bug with no `.tasks/` at all; a near-miss case that an
-  ordinary "review my PR" request doesn't start it (every Quorum command stays user-only).
+- **The dashboard doesn't show reviews.** A review is never the active task, so the pane and status line ignore
+  it. Show the newest review in `REVIEWING` or `FIXING` (its reviewers, then the voter, as for a review round),
+  without hiding an active task.
+- **The diagrams.** `assets/src/diagrams.py`'s agent map has a band per command; add one for `/quorum:review`.
+- **Run its eval** (`evals/run.sh --case review-standalone-finds-bug`) and a `--comment` eval against a fake `gh`.
+- **`/quorum:codify-lesson` from a review.** It reads a task's round files; let it read a review's `run-<N>/`
+  files too, so a false alarm in a PR review can become a rule.
 
 ## 2. `/quorum:run`: the whole pipeline, stopping only where a person must decide
 

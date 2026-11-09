@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: review-standalone-finds-bug
+description: /quorum:review on a branch with no Quorum task finds the planted bug, keeps it through the voter, and records the run in its own review folder.
+tags: [review]
+context:
+  scaffold_script: scaffold.sh
