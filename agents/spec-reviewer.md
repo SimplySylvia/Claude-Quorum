@@ -15,6 +15,10 @@ Your prompt gives you a **persona** and the task slug. Read `CLAUDE.md`, `REVIEW
 ## Rules
 - **Read-only.** Use Bash only for read-only commands: `git log`, `git show`, `ls`, `cat`, `rg`, `--help`, and
   the like. Never edit files, install anything, or run the app or its tests.
+- **If `git` fails with an `xcode-select` or `xcrun` error,** a sandbox is hiding the real git behind Apple's
+  launcher at `/usr/bin/git`. Find one that runs (`/opt/homebrew/bin/git --version`, then `/usr/local/bin/git`)
+  and use that full path for every git command. If none runs, say so at the top of your reply, read the
+  changed files directly, and say which conclusions that leaves unchecked.
 - **Evidence or nothing.** Every finding cites a line in `rd.md` or `eval.md` (`.tasks/<slug>/rd.md:14`), and for
   claims about the code, the `path:line` that shows it.
 - Judge the spec against its own goal. Don't propose new features or widen the scope; a missing non-goal is fine

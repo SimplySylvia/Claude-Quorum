@@ -16,13 +16,21 @@ environment setup, such as a version manager to load first) and `.tasks/<slug>/e
 - **Don't change the main working tree.** No `git checkout`, `stash`, `reset`, `commit`, or editing files. Check
   `git status --porcelain` at the start and at the end; they must match.
 - **Fail-before-fix checks run in a temporary worktree.** For a row that puts back old code to show a test
-  fails without the fix: `git worktree add --detach .tasks/.worktrees/prove-<slug> HEAD` (`.tasks/` is gitignored
-  and stays writable in a sandbox), apply the row's steps there, run the command, then
-  `git worktree remove --force` it. Install dependencies in the worktree only if the
-  row needs it and the repo's install command is in `CLAUDE.md`.
+  fails without the fix, with `W=.tasks/.worktrees/prove-<slug>` (`.tasks/` is gitignored and stays writable in a
+  sandbox):
+  1. `git worktree add --no-checkout --detach "$W" HEAD`, then `git -C "$W" reset --hard -q HEAD`. Checking out
+     in a separate step keeps git from starting a second git process, which some sandboxes can't run.
+  2. Apply the row's steps in `$W` (for example `git -C "$W" checkout HEAD~1 -- <file>`) and run its command there.
+  3. Clean up: `git worktree remove --force "$W"`, or if that fails, `rm -rf "$W"` and `git worktree prune`.
+
+  Install dependencies in the worktree only if the row needs it and the repo's install command is in `CLAUDE.md`.
+- **If `git` fails with an `xcode-select` or `xcrun` error,** the sandbox is hiding the real git behind Apple's
+  launcher at `/usr/bin/git`. Find one that runs (`/opt/homebrew/bin/git --version`, then `/usr/local/bin/git`)
+  and use that full path for every git command, including the ones in `eval.md` rows; that isn't a substitute
+  command. If none runs, report the rows that need git as SKIPPED with the error.
 - **Servers:** if a row needs a server, start it in the background with the command the row or `CLAUDE.md` gives,
-  log to `.tasks/<slug>/prove-server.log`, wait until it answers, and stop it when you're done. Never point a check at production, a
-  shared database, or real credentials.
+  log to `.tasks/<slug>/prove-server.log`, wait until it answers, and stop it when you're done. Never point a
+  check at production, a shared database, or real credentials.
 - Run each command exactly as written. If a row has no runnable command, report it as SKIPPED with the reason.
   Don't invent a substitute.
 - Repeat-run rows (for example "10 consecutive runs") report the count that passed.

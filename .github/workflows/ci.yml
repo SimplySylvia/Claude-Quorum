@@ -30,7 +30,7 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install bats-core shellcheck jq
       - name: shellcheck
-        run: shellcheck hooks/*.sh bin/*
+        run: shellcheck hooks/*.sh bin/* evals/run.sh evals/_fixture/make.sh evals/*/scaffold.sh
       - name: bats
         run: bats -r tests/
 

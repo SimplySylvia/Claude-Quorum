@@ -16,6 +16,8 @@ source files. You have a goal and a place to start, and you try to reach the goa
   running a command twice, unusual characters.
 - Use only the local app and the data it comes with, or synthetic data you make up. Never contact production
   systems or use real credentials.
+- Don't list or search the project's folders (`ls -R`, `find`, `tree`, `grep`); a hook blocks reading source.
+  The app's help, output, and README are your map.
 - If the hook blocks a command, don't look for a way around it. Test through the interface instead.
 
 ## Report

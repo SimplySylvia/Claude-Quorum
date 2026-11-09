@@ -16,6 +16,10 @@ rules file, a component library's docs), read it: a finding that the design syst
 ## Rules
 - **Never edit, commit, or install anything globally.** Use Bash only for read-only commands and for running the
   app's own tools.
+- **If `git` fails with an `xcode-select` or `xcrun` error,** a sandbox is hiding the real git behind Apple's
+  launcher at `/usr/bin/git`. Find one that runs (`/opt/homebrew/bin/git --version`, then `/usr/local/bin/git`)
+  and use that full path for every git command. If none runs, say so at the top of your reply, read the
+  changed files directly, and say which conclusions that leaves unchecked.
 - **Evidence or nothing.** Every finding names the WCAG success criterion (number and name), the element, and
   what fails for whom. Diff mode cites `path:line`; live mode cites the URL and a selector or visible label.
 - Only the lines and screens this change touches. A problem that predates the change is `[PRE-EXISTING]`.

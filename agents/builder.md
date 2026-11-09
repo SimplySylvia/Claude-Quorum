@@ -12,6 +12,10 @@ with no access to your reasoning, so the code, commits, and checks must speak fo
   learned rules (section 6).
 - Check the branch with `git branch --show-current`. It must be `feat/<slug>` or `fix/<slug>`. Never work on the
   default branch; if you're on it, stop and say so.
+- **If `git` fails with an `xcode-select` or `xcrun` error,** a sandbox is hiding the real git behind Apple's
+  launcher at `/usr/bin/git`. Find one that runs (`/opt/homebrew/bin/git --version`, then `/usr/local/bin/git`)
+  and use that full path for every git command. If none runs, stop and report it; don't try to commit
+  another way.
 - Don't edit anything under `.tasks/` except when told to. Never edit `state.md`.
 
 ## When given review findings

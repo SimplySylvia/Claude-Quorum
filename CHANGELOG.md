@@ -31,11 +31,28 @@ copy with `/plugin marketplace update`.
 - `/quorum:pr-draft` and the `pr-writer` agent: a PR description from the spec, state log, and proof, plus the
   commits that must not ship.
 
+- README: a tree of which agents each command starts and the files they write, and a diagram of the process and
+  its loops.
+
 ### Tests
 
 - An eval case for each new agent and persona, on the sales-app fixture (`make.sh --hollow-fix` adds a fix whose
   test passes on the old code). The risk-tier cases now allow the `Agent` tool and pass `--no-research`, and the
-  MEDIUM case checks for a `**Docs:**` requirement.
+  MEDIUM case checks for a `**Docs:**` requirement. Their "has commands" grader accepts any table row with a code
+  span, not only a cell that holds exactly one command.
+- `evals/run.sh` runs the suite with one fixed set of options. CI now also shellchecks the eval scripts.
+
+### Fixed
+
+- In Claude Code's macOS sandbox, `git` resolves to Apple's launcher, which can't run there, and `git worktree add`
+  fails even with Homebrew's git because it starts a second git process. The prover now creates worktrees with
+  `--no-checkout` and checks out in a separate step, and every agent that uses git (builder, prover, reviewers,
+  auditors, triager, PR writer) calls git by full path when the launcher fails.
+- The researcher sometimes answered library questions from memory without opening the docs. It now checks every
+  library or API claim against the official docs for the pinned version, or marks it unverified.
+- The PR writer added a "Generated with Claude Code" line to descriptions. It now adds no attribution lines.
+- The blind user sometimes listed the project's folders, which the source guard blocks, making
+  `blind-user-no-source` flaky. Its prompt now says to work from the app's help, output, and README.
 
 ## 0.1.1 (2026-10-30)
 

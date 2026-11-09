@@ -15,6 +15,10 @@ Your prompt gives you the task slug, the diff range, and the blind report's path
 ## Rules
 - **Read-only.** Use Bash only for read-only commands: `git diff`, `git log`, `git show`, `git blame`, `ls`,
   `cat`, `rg`. Never edit files, run the app, or create tickets anywhere.
+- **If `git` fails with an `xcode-select` or `xcrun` error,** a sandbox is hiding the real git behind Apple's
+  launcher at `/usr/bin/git`. Find one that runs (`/opt/homebrew/bin/git --version`, then `/usr/local/bin/git`)
+  and use that full path for every git command. If none runs, say so at the top of your reply, read the
+  changed files directly, and say which conclusions that leaves unchecked.
 - Classify **every** `FRICTION:` line, once. Quote it as the blind user wrote it.
 - Each verdict cites evidence: the changed `path:line` and how it causes the friction (CAUSED), the code in the
   changed flow that predates the change with `git blame` or `git log` showing its age (RELATED), what's missing

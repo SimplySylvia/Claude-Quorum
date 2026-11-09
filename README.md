@@ -130,6 +130,67 @@ bug class everywhere it appears. Round 1 below finds a problem and loops through
 
 No agent sees the conversation that produced the code.
 
+### How the agents work together
+
+Each command starts the agents below, in this order; the right column is the file each one leaves in
+`.tasks/<slug>/`. You run every command yourself; agents never start one.
+
+```
+/quorum:init-pipeline          no agents: CLAUDE.md section, REVIEW.md, verify-completion.sh
+/quorum:spec-and-eval
+├── researcher                 MEDIUM/HIGH, or --research               → research.md
+├── (you pick an approach; the spec is written)                         → rd.md, eval.md
+└── in parallel
+    ├── spec-reviewer · Feasibility Critic                              → spec-review/feasibility.md
+    └── spec-reviewer · Spec Improver                                   → spec-review/improver.md
+/quorum:build
+├── builder                    can't finish until the checks pass       → commits on feat/<slug>
+└── prover                                                              → proof-build.md
+/quorum:simplify-diff          no agents
+/quorum:review-loop            up to 3 rounds, each on the new lines only
+├── in parallel
+│   ├── code-reviewer · Logic & Edge-Case Hunter       always                       → review/round-<n>/logic.md
+│   ├── code-reviewer · Architecture, Security & Drift MEDIUM/HIGH                  → architecture.md
+│   ├── pattern-auditor                                MEDIUM/HIGH                  → patterns.md
+│   ├── docs-auditor                                   MEDIUM/HIGH, or docs changed → docs.md
+│   ├── code-reviewer · Test Adequacy Hunter           tests changed                → tests.md
+│   └── a11y-auditor · diff mode                       UI changed                   → a11y.md
+├── verifier-voter             keeps or drops each finding              → votes.md, survivors.md
+├── builder                    fixes each surviving Pattern Category, then the next round
+└── prover                     LOW, once converged                      → proof-final.md
+/quorum:blind-test             MEDIUM/HIGH, once converged
+├── security-reviewer          HIGH (MEDIUM with security_on_medium)    → blind/security-<n>.md
+├── blind-user                 can't read the source                    → blind/blind-<n>.md
+├── a11y-auditor · live mode   UI changed                               → blind/a11y-<n>.md
+├── friction-triager           when the blind user reports friction     → blind/triage-<n>.md
+└── prover                     no blockers                              → proof-final.md
+/quorum:pr-draft
+└── pr-writer                                                           → pr.md, pr-body.md
+/quorum:codify-lesson          no agents: one rule in REVIEW.md
+```
+
+The same flow as a process, with the loops that send work back:
+
+```mermaid
+flowchart TD
+  spec["spec-and-eval: researcher, then the spec"] --> specrev["spec-reviewer ×2"]
+  specrev -->|IMPORTANT findings fixed| build["build: builder, then prover"]
+  build --> simplify["simplify-diff"]
+  simplify --> round["review round: reviewers in parallel"]
+  round --> voter["verifier-voter"]
+  voter -->|IMPORTANT survives, rounds left| fix["builder fixes the Pattern Categories"]
+  fix --> round
+  voter -->|IMPORTANT survives after round 3| halted["HALTED: post-mortem and two redesigns"]
+  halted -->|"spec-and-eval --redesign"| spec
+  voter -->|nothing IMPORTANT| converged["CONVERGED"]
+  converged -->|LOW| ready["prover, then READY"]
+  converged -->|MEDIUM or HIGH| blind["blind-test: security pass, blind user, live a11y, triage"]
+  blind -->|blockers or CAUSED friction| round
+  blind -->|clean| human["prover, then AWAITING-HUMAN"]
+  ready --> pr["pr-draft: pr-writer"]
+  human --> pr
+```
+
 ## Guardrails
 
 - **Proof before done.** The Stop hook runs the repo's fast checks whenever Claude or the builder tries to finish
@@ -237,11 +298,17 @@ each run's workspace and bootstraps for Quorum.
 | `nearmiss-no-auto-review-loop` | An ordinary "look at my commit" request never starts a Quorum command |
 
 ```bash
-# Real model calls; Bash runs inside Claude Code's sandbox. --ablation none skips the no-plugin baseline.
-claude plugin eval . --scaffold --trust-plugin --ablation none --model sonnet -j 4 --allow-tools Bash Write Edit WebSearch WebFetch
+evals/run.sh                                   # the whole suite
+evals/run.sh --case prover-catches-hollow-test # one case; any other `claude plugin eval` option works too
 ```
 
-Run them after any change to a skill's instructions or an agent's prompt.
+Every run makes real model calls on your Claude account, so CI doesn't run them. Run them after any change to a
+skill's instructions or an agent's prompt.
+
+**macOS note.** Claude Code's sandbox can't stat Homebrew's files, so PATH lookups fall back to Apple's
+`/usr/bin/git` launcher, which the sandbox can't run either. Every agent that uses git handles this: it calls git by
+full path when the launcher fails. The prover also creates worktrees with `--no-checkout`, so git doesn't start a
+second git process.
 
 ### Trying a local build
 

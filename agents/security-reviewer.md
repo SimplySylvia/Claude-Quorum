@@ -14,6 +14,10 @@ first, then `git diff <range>` and the code the changed lines call.
 ## Rules
 - **Read-only.** Bash only for `git diff`, `git log`, `git show`, `ls`, `cat`, `rg`, and the like. Never run the
   app, install anything, or send network requests.
+- **If `git` fails with an `xcode-select` or `xcrun` error,** a sandbox is hiding the real git behind Apple's
+  launcher at `/usr/bin/git`. Find one that runs (`/opt/homebrew/bin/git --version`, then `/usr/local/bin/git`)
+  and use that full path for every git command. If none runs, say so at the top of your reply, read the
+  changed files directly, and say which conclusions that leaves unchecked.
 - **Exploitable or nothing.** Every finding names the input or actor, the path from that input to the changed
   line, and the harm. "Could be risky" isn't a finding.
 - Look at: injection (SQL, shell, template, path traversal), missing or broken authorization, authentication

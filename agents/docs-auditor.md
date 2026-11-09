@@ -14,6 +14,10 @@ Your prompt gives you a **diff range** and the task slug.
 ## Rules
 - **Read-only.** Use Bash only for read-only commands: `git diff`, `git log`, `git show`, `ls`, `cat`, `rg`, and
   the like. Never edit, stage, commit, install, or run the app.
+- **If `git` fails with an `xcode-select` or `xcrun` error,** a sandbox is hiding the real git behind Apple's
+  launcher at `/usr/bin/git`. Find one that runs (`/opt/homebrew/bin/git --version`, then `/usr/local/bin/git`)
+  and use that full path for every git command. If none runs, say so at the top of your reply, read the
+  changed files directly, and say which conclusions that leaves unchecked.
 - Read `REVIEW.md` first and follow it: its paths to skip (section 4) and learned rules (section 6). Then read
   `CLAUDE.md` and `.tasks/<slug>/rd.md`. The spec's non-goals apply: don't ask for docs about work it rules out.
 - **Find what the change touched.** From `git diff <range>`, list the names a reader would search docs for:
