@@ -18,10 +18,10 @@ set -euo pipefail
 die() { echo "quorum-state: $*" >&2; exit 1; }
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-ORDER="slug risk status round base_sha round_shas stop_blocks signoff pending_findings blind_runs escalated_from"
+ORDER="slug risk status round base_sha round_shas stop_blocks signoff plan_rounds plan_approved pending_findings blind_runs escalated_from"
 LISTS=" round_shas pending_findings "
-COUNTERS=" round stop_blocks blind_runs "
-STATUSES=" DRAFT-AWAITING-VISUAL-SIGNOFF BUILDING IN_REVIEW CONVERGED BLIND-TEST READY AWAITING-HUMAN HALTED ESCALATED "
+COUNTERS=" round stop_blocks plan_rounds blind_runs "
+STATUSES=" DRAFT-AWAITING-VISUAL-SIGNOFF PLANNING BUILDING IN_REVIEW CONVERGED BLIND-TEST READY AWAITING-HUMAN HALTED ESCALATED "
 RISKS=" LOW MEDIUM HIGH "
 
 is_in() { case "$2" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
@@ -145,7 +145,8 @@ case "$cmd" in
     mkdir -p "$(dirname "$FILE")"
     {
       printf -- '---\nslug: %s\nrisk: %s\nstatus: %s\nround: 0\nbase_sha: null\nround_shas: []\nstop_blocks: 0\n' "$task" "$risk" "$status"
-      printf -- 'signoff: null\npending_findings: []\nblind_runs: 0\nescalated_from: null\n---\n# %s\n' "$task"
+      printf -- 'signoff: null\nplan_rounds: 0\nplan_approved: null\npending_findings: []\nblind_runs: 0\n'
+      printf -- 'escalated_from: null\n---\n# %s\n' "$task"
     } > "$FILE" ;;
 
   get)
@@ -168,7 +169,7 @@ case "$cmd" in
 
   incr)
     key=${1:-}; [ -n "$key" ] || die "incr needs a key"; need_file
-    is_in "$key" "$COUNTERS" || die "$key is not a counter (round, stop_blocks, blind_runs)"
+    is_in "$key" "$COUNTERS" || die "$key is not a counter (round, stop_blocks, plan_rounds, blind_runs)"
     cur=$("$0" --task "$task" get "$key"); cur=${cur:-0}
     printf '%s' "$cur" | grep -Eq '^[0-9]+$' || die "$key is not an integer: $cur"
     new=$((cur + 1))

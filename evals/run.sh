@@ -5,6 +5,10 @@
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
+# Test this working tree's bin/ helpers, not an installed copy of Quorum that the calling session put on PATH.
+PATH="$root/bin:$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '/plugins/cache/quorum/' | paste -sd: -)"
+export PATH
+
 cd "$root"
 exec claude plugin eval . \
   --scaffold --trust-plugin --ablation none \

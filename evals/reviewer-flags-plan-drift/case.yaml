@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: reviewer-flags-plan-drift
+description: "In a code review, the reviewer flags code that wrote its own formatter where the approved plan said to reuse money(), with no deviation recorded."
+tags: [review]
+context:
+  scaffold_script: scaffold.sh

@@ -6,7 +6,7 @@
     {
       "name": "quorum",
       "source": "./",
-      "description": "Multi-agent verification pipeline: fresh-context reviewers, a verifier vote, a blind user test, and hooks that block \"done\" until checks pass."
+      "description": "A spec-to-pull-request verification pipeline: reviewed specs and plans, fresh-context code review with a verifier vote, a blind user test, and hooks that block \"done\" until checks pass."
     }
   ]
 }

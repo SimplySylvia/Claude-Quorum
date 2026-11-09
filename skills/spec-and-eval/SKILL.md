@@ -1,6 +1,6 @@
 ---
 name: spec-and-eval
-description: Start a Quorum task. Classifies the risk tier, researches the approach (MEDIUM/HIGH), writes the requirements (rd.md) and runnable checks (eval.md), has two spec reviewers check them against the code, creates the task's state.md, and for UI work writes a mockup and stops for sign-off. With --redesign <slug>, restarts a HALTED task from a redesign option. Run before writing any code.
+description: Start a Quorum task. Classifies the risk tier, researches the approach (MEDIUM/HIGH), writes the requirements (rd.md) and runnable checks (eval.md), has two spec reviewers check them against the code, creates the task's state.md, and for UI work writes a mockup for sign-off. With --redesign <slug>, restarts a HALTED task from a redesign option. Run before writing any code; /quorum:plan comes next.
 disable-model-invocation: true
 argument-hint: "<what to build> [--research | --no-research] | --redesign <slug>"
 ---
@@ -35,9 +35,9 @@ and let the user confirm or change it.
 
 | Tier | Typical changes | Gets |
 |---|---|---|
-| LOW | Copy or style tweak, docs, an isolated test, new code behind an off-by-default flag | 1 reviewer; no human line review if green |
-| MEDIUM | A user-facing workflow, an API endpoint, state logic | 2 reviewers, blind test, focused human review |
-| HIGH | Auth, money, destructive migrations, security boundaries, core state machines, build pipelines | 2 reviewers, security pass, blind test, human architectural sign-off |
+| LOW | Copy or style tweak, docs, an isolated test, new code behind an off-by-default flag | Plan and code review by 1 reviewer, plus 1 per tests, UI, or docs touched; no human line review if green |
+| MEDIUM | A user-facing workflow, an API endpoint, state logic | Research; plan and code review by 4–6 reviewers; blind test; focused human review |
+| HIGH | Auth, money, destructive migrations, security boundaries, core state machines, build pipelines | Research; plan and code review by 4–7 reviewers, including security; blocking security pass; blind test; human architectural sign-off |
 
 Anything a user can see or run is at least **MEDIUM**: a new or changed command, flag, endpoint, page, or output
 format, even when it's additive and read-only. **LOW** is only for changes a user can't reach: docs and copy, tests,
@@ -50,7 +50,7 @@ Do this for MEDIUM and HIGH tasks, and for LOW when `$ARGUMENTS` contains `--res
 `--no-research`.
 
 1. `quorum-state --task <slug> init <RISK> <STATUS>`, where STATUS is `DRAFT-AWAITING-VISUAL-SIGNOFF` for a UI
-   change and `BUILDING` otherwise. Then `quorum-active-task --set <slug>`.
+   change and `PLANNING` otherwise. Then `quorum-active-task --set <slug>`.
 2. Start `quorum:researcher` with the request in your own words, without internal names you don't need, and
    nothing from production data:
 
@@ -105,9 +105,9 @@ Do this for MEDIUM and HIGH tasks, and for LOW when `$ARGUMENTS` contains `--res
 
 If the change alters UI, write a self-contained `mockup.html` from the template: no external fonts, scripts, or
 images. Show the default, loading, empty, and error states the requirements mention. Then **stop**: tell the user
-to open `.tasks/<slug>/mockup.html`, and that `/quorum:build` will ask them to confirm sign-off.
+to open `.tasks/<slug>/mockup.html`, and that `/quorum:plan` will ask them to confirm sign-off before planning.
 
-Otherwise, the next step is `/quorum:build`.
+Otherwise, the next step is `/quorum:plan`.
 
 ## Redesign
 
@@ -118,6 +118,6 @@ Otherwise, the next step is `/quorum:build`.
 2. Keep the history: move `state.md` to the first free `state.halted-<n>.md`.
 3. Rewrite `rd.md` (and `eval.md` if the checks change) for the chosen design. Keep the same risk tier unless the
    user changes it. Then review the new spec as in step 6; write its `quorum-state log` block after the init in step 4.
-4. `quorum-state --task <slug> init <RISK> BUILDING` (this starts with a fresh round count, round SHAs, and
-   findings), then `quorum-active-task --set <slug>`. `base_sha` is set again by `/quorum:build`.
-5. The next step is `/quorum:build`.
+4. `quorum-state --task <slug> init <RISK> PLANNING` (this starts with a fresh round count, round SHAs, plan
+   rounds, and findings), then `quorum-active-task --set <slug>`. `base_sha` is set again by `/quorum:build`.
+5. The next step is `/quorum:plan`: the old `plan.md` was for the design that halted, so it's planned again.

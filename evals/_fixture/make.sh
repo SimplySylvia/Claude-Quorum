@@ -3,6 +3,7 @@
 #   make.sh [--task SLUG RISK STATUS]   also create a task folder with state.md and make it active
 #   make.sh [--bug]                     also commit a runtime-only bug: export ignores DATA_FILE
 #   make.sh [--bug --hollow-fix]        then fix it, with a test that passes on the buggy code too
+#   make.sh [--money]                   also commit a money() helper on main that summary uses for dollar amounts
 # Runs from a case's scaffold script, outside the agent's sandbox, with a minimal environment.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -68,6 +69,16 @@ PY
       git commit -qam "Add export command"
       base=$(git merge-base HEAD main)
       [ -z "${slug:-}" ] || "$bin/quorum-state" --task "$slug" set base_sha "$base" ;;
+    --money)
+      shift
+      python3 - <<'PY'
+p = "app/report.py"
+s = open(p).read()
+s = s.replace('def summary(rows):', '# Formats an amount as dollars: 1234 -> "$1,234".\ndef money(amount):\n    return f"${amount:,}"\n\n\ndef summary(rows):')
+s = s.replace('print(f"{region}: {total}")', 'print(f"{region}: {money(total)}")')
+open(p, "w").write(s)
+PY
+      git commit -qam "Show summary totals as dollars" ;;
     --hollow-fix)
       # After --bug: fix export to honor DATA_FILE, with a test that only runs the default file, so it passes on
       # the buggy code too.

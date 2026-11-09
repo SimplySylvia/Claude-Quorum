@@ -4,8 +4,9 @@
 
 # Quorum
 
-**A multi-agent verification pipeline for Claude Code: fresh-context reviewers, a verifier vote, a blind user
-test, and hooks that won't let "done" mean anything less than passing checks.**
+**A spec-to-pull-request pipeline for Claude Code that checks the work at every stage. The spec and the plan are
+reviewed before any code exists, fresh-context reviewers check the code against them, a blind user tries the result,
+and nothing counts as done without proof.**
 
 <p>
   <a href="https://code.claude.com/docs/en/plugins-reference"><img src="https://img.shields.io/badge/Claude_Code-plugin-D97757?logo=claude&logoColor=white" alt="Claude Code plugin"></a>
@@ -23,12 +24,19 @@ test, and hooks that won't let "done" mean anything less than passing checks.**
 
 ## Why
 
-When an agent writes most of the code, asking it to review its own work fails in three predictable ways. Quorum
-has one mechanism for each:
+When an agent writes most of the code, it goes wrong in a few predictable ways, and asking it to check its own work
+doesn't help. Quorum has one mechanism for each:
 
+- **It builds before the details are settled.** A spec that can't work, or a plan that rebuilds a helper the repo
+  already has, is cheap to fix on paper and expensive after review. Two spec reviewers check the spec against the
+  code, then the same reviewers who will later check the code review the plan, so the build starts from something
+  already checked.
 - **It grades its own homework.** The agent that wrote the code shares every assumption behind it. Quorum's
-  reviewers are separate subagents with a fresh context: they see the diff and the spec, never the builder's
-  reasoning.
+  reviewers are separate subagents with a fresh context: they see the diff, the spec, and the plan, never the
+  builder's reasoning, and each looks from its own angle: logic, architecture, repo patterns, docs, tests, or
+  accessibility.
+- **It calls the work done too early.** A Stop hook won't let a task finish until the repo's checks pass, and the
+  prover runs every check in the spec and shows the output, including that each new test fails without the fix.
 - **Reviews never end.** Builder and reviewer argue for dozens of rounds over the same nits. Quorum caps the loop
   at 3 rounds, reviews only new lines after round 1, limits nits to 2, and runs a voter that drops weak findings.
 - **Lessons don't stick.** A bug fixed today comes back next week. `/quorum:codify-lesson` turns it into a
@@ -42,7 +50,7 @@ why every task still carries a rollback plan.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/swiss-cheese-dark.svg">
-    <img src="assets/swiss-cheese-light.svg" alt="Animation: seven layers (spec review, checks and proof, reviewers, voter, security pass, blind test, human gate), each stopping a different kind of defect: a spec that can't meet its goal, a failing test, a regression test that can't fail, an unhandled edge case, a missing auth check, a dead-end screen, and right code with the wrong design. The voter filters a reviewer's false alarm, and one defect escapes where the holes line up, which is what the rollback plan is for." width="880">
+    <img src="assets/swiss-cheese-light.svg" alt="Animation: eight layers (spec review, plan review, checks and proof, reviewers, voter, security pass, blind test, human gate), each stopping a different kind of defect: a spec that can't meet its goal, a plan that rebuilds a helper or skips docs, a failing test, a regression test that can't fail, an unhandled edge case, a missing auth check, a dead-end screen, and right code with the wrong design. The voter filters a reviewer's false alarm, and one defect escapes where the holes line up, which is what the rollback plan is for." width="880">
   </picture>
 </p>
 
@@ -61,9 +69,10 @@ Then, in the repo you want to protect:
 ```
 /quorum:init-pipeline          # once per repo: CLAUDE.md, REVIEW.md, verify-completion.sh, .tasks/
 /quorum:spec-and-eval          # per task: risk tier, research, rd.md, eval.md, spec review (and a mockup for UI work)
-/quorum:build                  # first build on feat/<slug>; records mockup sign-off
+/quorum:plan                   # plan.md: files, reuse, tests, docs, a11y; reviewed, then you approve it
+/quorum:build                  # first build on feat/<slug>, following the plan
 /quorum:simplify-diff          # strip debug code and needless abstractions, re-run checks
-/quorum:review-loop            # fresh reviewers → voter → builder, up to 3 rounds
+/quorum:review-loop            # fresh reviewers check the code against the plan → voter → builder, up to 3 rounds
 /quorum:blind-test             # MEDIUM/HIGH: security pass, then a user test with no source access
 /quorum:pr-draft               # READY / AWAITING-HUMAN: PR description from the spec and proof
 /quorum:codify-lesson          # optional: save a repeated bug or false alarm as a rule
@@ -73,13 +82,13 @@ Every command is user-only: Claude never starts a review loop on its own.
 
 ## How it works
 
-A task moves through stages 0 to 7, and each stage catches defects the others miss. Here a task on the repo's
+A task moves through stages 0 to 8, and each stage catches defects the others miss. Here a task on the repo's
 fixture app carries two planted bugs; a red stage is one sending the work back:
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/stages-dark.svg">
-    <img src="assets/stages-light.svg" alt="Animation: one task moving through the stages. Bootstrap, spec and eval, and build pass. Review round 1 finds that export ignores DATA_FILE and sends it back to the builder; round 2 converges. The blind test finds that a comma in a customer name splits a CSV row and sends it back to the review loop, which fixes it; the second blind test passes. The lesson becomes a REVIEW.md rule, and the task waits at the human gate." width="880">
+    <img src="assets/stages-light.svg" alt="Animation: one task moving through the stages. Bootstrap and spec and eval pass; plan review finds the plan duplicates an existing loader, and the revised plan is approved; build passes. Review round 1 finds that export ignores DATA_FILE and sends it back to the builder; round 2 converges. The blind test finds that a comma in a customer name splits a CSV row and sends it back to the review loop, which fixes it; the second blind test passes. The lesson becomes a REVIEW.md rule, and the task waits at the human gate." width="880">
   </picture>
 </p>
 
@@ -89,7 +98,7 @@ No agent sees the conversation that produced the code.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/agent-map-dark.svg">
-    <img src="assets/agent-map-light.svg" alt="Agent map. Bootstrap writes CLAUDE.md's Verification Commands, REVIEW.md, and the check script. Spec and eval: researcher (MEDIUM/HIGH), then the spec, then two spec reviewers in parallel. Build: builder, then prover. Review loop: up to six reviewers in parallel by tier and by what changed, then the verifier-voter; surviving IMPORTANT findings go to the builder and back into review, and after round 3 the task halts for a redesign. Security and blind test (MEDIUM/HIGH): security reviewer, blind user, live accessibility check, friction triager, prover; blockers go back to the review loop. Human gate: pr-writer, then you review and merge." width="880">
+    <img src="assets/agent-map-light.svg" alt="Agent map. Bootstrap writes CLAUDE.md's Verification Commands, REVIEW.md, and the check script. Spec and eval: researcher (MEDIUM/HIGH), then the spec, then two spec reviewers in parallel. Plan: the planner writes plan.md, the same reviewers as the review loop check it in plan mode, the voter drops false alarms, the planner revises up to twice, and you approve it. Build: builder, following the plan, then prover. Review loop: up to six reviewers in parallel by tier and by what changed, then the verifier-voter; surviving IMPORTANT findings go to the builder and back into review, and after round 3 the task halts for a redesign. Security and blind test (MEDIUM/HIGH): security reviewer, blind user, live accessibility check, friction triager, prover; blockers go back to the review loop. Human gate: pr-writer, then you review and merge." width="880">
   </picture>
 </p>
 
@@ -100,6 +109,8 @@ No agent sees the conversation that produced the code.
 |---|---|---|
 | `spec-and-eval` | `researcher` | `research.md` |
 | | `spec-reviewer` (both personas) | `spec-review/feasibility.md`, `spec-review/improver.md` |
+| `plan` | `planner` | `plan.md` |
+| | plan reviewers and `verifier-voter`, per round | `plan-review/round-<n>/*.md`, `votes.md`, `survivors.md` |
 | `build` | `prover` | `proof-build.md` |
 | `review-loop` | reviewers, per round | `review/round-<n>/logic.md`, `architecture.md`, `patterns.md`, `docs.md`, `tests.md`, `a11y.md`, all in `candidates.md` |
 | | `verifier-voter` | `review/round-<n>/votes.md`, then `survivors.md` |
@@ -112,8 +123,9 @@ The diagrams are drawn by `assets/src/diagrams.py`; run it again after changing 
 
 </details>
 
-One round of the review loop: the voter drops false alarms, and the builder fixes each surviving bug class
-everywhere it appears before the next round looks at just its new lines.
+One round of the review loop: the reviewers check the code against the spec and the plan, the voter drops false
+alarms, and the builder fixes each surviving bug class everywhere it appears before the next round looks at just its
+new lines.
 
 <p align="center">
   <picture>
@@ -130,7 +142,7 @@ confirm. The tier decides how many layers the task gets:
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/risk-tiers-dark.svg">
-    <img src="assets/risk-tiers-light.svg" alt="Risk tiers. LOW, for changes a user can't reach: research only with --research, two spec reviewers, one code reviewer plus one for each of tests, UI, or docs it changes, no security pass, no blind test, no human review if green. MEDIUM, for anything a user can see or run: research, two spec reviewers, four to six code reviewers and the voter, a security pass only with security_on_medium, a blind test with live accessibility checks and friction triage, and a focused human review. HIGH, for data, money, or security: everything MEDIUM gets, a blocking security pass, and an architectural sign-off." width="880">
+    <img src="assets/risk-tiers-light.svg" alt="Risk tiers. LOW, for changes a user can't reach: research only with --research, two spec reviewers, one plan reviewer and one code reviewer plus one for each of tests, UI, or docs it touches, no security pass, no blind test, no human review if green. MEDIUM, for anything a user can see or run: research, two spec reviewers, four to six plan reviewers and four to six code reviewers with the voter, a security pass only with security_on_medium, a blind test with live accessibility checks and friction triage, and a focused human review. HIGH, for data, money, or security: everything MEDIUM gets, the security reviewer on the plan, a blocking security pass, and an architectural sign-off." width="880">
   </picture>
 </p>
 
@@ -158,6 +170,7 @@ your-repo/
     └── <slug>/
         ├── rd.md                  # requirements, non-goals, risk tier, rollback plan
         ├── eval.md                # runnable pass/fail checks
+        ├── plan.md                # files, reuse, tests, docs, a11y, security; approved before building
         ├── mockup.html            # UI tasks only
         └── state.md               # status, round, SHAs, pending findings
 ```
@@ -165,20 +178,21 @@ your-repo/
 ## Reference
 
 <details>
-<summary><b>Agents</b>: what each of the 13 sees and does</summary>
+<summary><b>Agents</b>: what each of the 14 sees and does</summary>
 
 | Agent | Sees | Job |
 |---|---|---|
 | `researcher` | the request, the repo, official docs online | Repo precedent and two or three approaches with sources; recommends one |
 | `spec-reviewer` | `rd.md`, `eval.md`, research, the code | Feasibility Critic (does the spec match the code?) or Spec Improver (clear, testable, covered?) |
-| `builder` | spec, checks, `CLAUDE.md`, surviving findings | Writes and fixes code; one commit per round |
+| `planner` | `rd.md`, `eval.md`, research, mockup, the code, plan-review findings | Writes `plan.md` (files, reuse, tests, docs, a11y, security) and revises it |
+| `builder` | spec, plan, checks, `CLAUDE.md`, surviving findings | Builds from `plan.md` and fixes code; one commit per round; notes deviations from the plan |
 | `prover` | `eval.md`, `CLAUDE.md` | Runs every check, fail-before-fix rows in a temporary worktree; reports PASS/FAIL with output |
-| `code-reviewer` | its diff range, spec, `CLAUDE.md`, `REVIEW.md` | Logic & edge cases; architecture, security & drift; or test adequacy |
-| `pattern-auditor` | its diff range, `CLAUDE.md`, `REVIEW.md`, repo rules, the rest of the repo | Reinvented helpers, broken conventions and repo rules; every finding cites the precedent |
-| `docs-auditor` | its diff range, the repo's docs, `CLAUDE.md`, `REVIEW.md` | Docs the change made wrong or left missing; lists linked docs outside the repo |
-| `a11y-auditor` | its diff range (diff mode) or the running app (live mode) | WCAG 2.2 A and AA, with a list of what needs a human |
-| `verifier-voter` | candidate findings, spec, `REVIEW.md` | Opens each cited `file:line`; keeps or drops it |
-| `security-reviewer` | branch diff, spec, `CLAUDE.md`, `REVIEW.md` | Exploitable vulnerabilities only; every finding blocks |
+| `code-reviewer` | its diff range or the plan, spec, `CLAUDE.md`, `REVIEW.md` | Logic & edge cases; architecture, security & drift; or test adequacy. Flags code that drifts from the plan |
+| `pattern-auditor` | its diff range or the plan, `CLAUDE.md`, `REVIEW.md`, repo rules, the rest of the repo | Reinvented helpers, broken conventions and repo rules; every finding cites the precedent |
+| `docs-auditor` | its diff range or the plan, the repo's docs, `CLAUDE.md`, `REVIEW.md` | Docs the change made wrong or left missing; lists linked docs outside the repo |
+| `a11y-auditor` | the plan (plan mode), its diff range (diff mode), or the running app (live mode) | WCAG 2.2 A and AA, with a list of what needs a human |
+| `verifier-voter` | candidate findings on the plan or the code, spec, `REVIEW.md` | Opens each cited `file:line`; keeps or drops it |
+| `security-reviewer` | the plan or the branch diff, spec, `CLAUDE.md`, `REVIEW.md` | Exploitable vulnerabilities only; every finding blocks |
 | `blind-user` | the user goal and the app's entry point | Uses the running app; blocked from reading source |
 | `friction-triager` | blind report, spec, branch diff | Sorts friction into caused, related, data gap, or unrelated; drafts follow-ups |
 | `pr-writer` | spec, state log, proof, diff, the repo's PR template | Drafts the PR description and lists commits that must not ship |
@@ -210,8 +224,8 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 |---|---|
 | `.claude-plugin/plugin.json` | Plugin manifest, including the `userConfig` options |
 | `.claude-plugin/marketplace.json` | Marketplace manifest (lists this repo as its only plugin) |
-| `skills/` | `init-pipeline`, `spec-and-eval`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `pr-draft`, `codify-lesson`, and the model-invocable `pipeline-laws` |
-| `agents/` | `researcher`, `spec-reviewer`, `builder`, `prover`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `verifier-voter`, `security-reviewer`, `blind-user`, `friction-triager`, `pr-writer` |
+| `skills/` | `init-pipeline`, `spec-and-eval`, `plan`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `pr-draft`, `codify-lesson`, and the model-invocable `pipeline-laws` |
+| `agents/` | `researcher`, `spec-reviewer`, `planner`, `builder`, `prover`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `verifier-voter`, `security-reviewer`, `blind-user`, `friction-triager`, `pr-writer` |
 | `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `stop-verify.sh` |
 | `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state` (on the Bash PATH while the plugin is enabled) |
 | `tests/` | bats tests for every hook and helper, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
@@ -231,7 +245,7 @@ Tests, evals, trying a local build, redrawing the diagrams, and releasing are in
 - **The blind guard is a safeguard, not a sandbox.** It blocks reading source, but running a script that reads
   source gets through, because running code is how a user runs the app.
 - **Agents use your session's model, and it adds up.** A MEDIUM or HIGH round runs 4–6 reviewers, a voter, and a
-  builder, for up to 3 rounds, after research and two spec reviewers.
+  builder, for up to 3 rounds, after research, two spec reviewers, and up to 2 plan-review rounds.
 - **Accessibility checks are partial.** Automated scans find only part of WCAG 2.2; the a11y auditor lists the
   rest under "Needs a human". A clean report isn't a conformance claim.
 - **`verify-completion.sh` should stay fast.** The Stop hook runs it on every finish; put slow suites in `eval.md`.

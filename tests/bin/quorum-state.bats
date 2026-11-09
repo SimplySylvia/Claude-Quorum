@@ -30,6 +30,17 @@ teardown() { cleanup_repo; }
   [ "$output" = "DRAFT-AWAITING-VISUAL-SIGNOFF" ]
 }
 
+@test "a task can start in PLANNING and record its plan rounds and approval" {
+  "$BIN/quorum-state" --task demo init MEDIUM PLANNING
+  run "$BIN/quorum-state" get status;        [ "$output" = "PLANNING" ]
+  run "$BIN/quorum-state" get plan_rounds;   [ "$output" = "0" ]
+  run "$BIN/quorum-state" get plan_approved; [ "$status" -eq 0 ]; [ -z "$output" ]
+  run "$BIN/quorum-state" incr plan_rounds;  [ "$output" = "1" ]
+  "$BIN/quorum-state" set plan_approved 2026-11-09
+  run "$BIN/quorum-state" get plan_approved; [ "$output" = "2026-11-09" ]
+  run "$BIN/quorum-state" set plan_rounds two; [ "$status" -eq 1 ]
+}
+
 @test "set validates status, risk, and counters" {
   "$BIN/quorum-state" --task demo init LOW
   run "$BIN/quorum-state" set status AWAITING-HUMAN; [ "$status" -eq 0 ]

@@ -22,7 +22,8 @@ next command. Never start one yourself: every Quorum command is run by the user.
 | Status | Next command |
 |---|---|
 | (no task) | `/quorum:spec-and-eval` |
-| `DRAFT-AWAITING-VISUAL-SIGNOFF` | The user reviews `mockup.html`, then `/quorum:build` |
+| `DRAFT-AWAITING-VISUAL-SIGNOFF` | The user reviews `mockup.html`, then `/quorum:plan`, which records the sign-off |
+| `PLANNING` | `/quorum:plan`: write and review `plan.md`, then approve it |
 | `BUILDING` | `/quorum:build` if no code exists yet; otherwise `/quorum:simplify-diff`, then `/quorum:review-loop` |
 | `IN_REVIEW` | `/quorum:review-loop` |
 | `CONVERGED` | `/quorum:blind-test` for MEDIUM or HIGH; LOW tasks already have their summary |
@@ -36,6 +37,6 @@ next command. Never start one yourself: every Quorum command is run by the user.
 
 | Tier | Typical changes | Gets |
 |---|---|---|
-| LOW | Copy or style, docs, an isolated test, code behind an off-by-default flag | 1 reviewer; no human line review if green |
-| MEDIUM | A user-facing workflow, an API endpoint, state logic | 2 reviewers, blind test, focused human review |
-| HIGH | Auth, money, destructive migrations, security boundaries, core state machines, build pipelines | 2 reviewers, security pass, blind test, human architectural sign-off |
+| LOW | Copy or style, docs, an isolated test, code behind an off-by-default flag | Plan and code review by 1 reviewer, plus 1 per tests, UI, or docs touched; no human line review if green |
+| MEDIUM | A user-facing workflow, an API endpoint, state logic | Research; plan and code review by 4–6 reviewers; blind test; focused human review |
+| HIGH | Auth, money, destructive migrations, security boundaries, core state machines, build pipelines | Research; plan and code review by 4–7 reviewers, including security; blocking security pass; blind test; human architectural sign-off |

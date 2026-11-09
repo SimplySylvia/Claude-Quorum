@@ -3,6 +3,33 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
+## Unreleased
+
+### Added
+
+- A planning stage, `/quorum:plan`, between the spec and the build. The new `planner` agent writes `plan.md` from the
+  spec: the files to change, the existing code to reuse, the tests and why each fails without the change, the docs,
+  and for UI work the accessibility approach and for risky work the security checks. The review loop's reviewers
+  (logic, architecture, patterns, docs, tests, a11y, and for HIGH the security reviewer) check the plan in plan
+  mode, the voter drops false alarms, and the planner revises, for up to 2 rounds. You approve the plan before
+  `/quorum:build` runs.
+- The builder follows `plan.md` and notes any deviation under its `## Deviations`. In the review loop, code that
+  skips or changes a planned step without a deviation note is an `[IMPORTANT]` "Plan drift" finding.
+- `quorum-state`: a `PLANNING` status and `plan_rounds` and `plan_approved` fields.
+- Eval cases for the planner, the pattern auditor in plan mode, and plan drift in code review; `make.sh --money`
+  adds a helper to the fixture app for them.
+
+### Changed
+
+- `/quorum:spec-and-eval` ends in `PLANNING`, and mockup sign-off moved from `/quorum:build` to `/quorum:plan`.
+  `/quorum:build` needs an approved plan.
+- Stages are renumbered for the new stage 2: build is 3, the review loop 4–5, security and blind test 6, codify 7,
+  and the human gate 8. The README's diagrams and animations show the plan stage.
+- README tagline, the Why section, and the plugin and marketplace descriptions now describe the whole pipeline,
+  from reviewed specs and plans to proof, not only the review loop.
+- The tier tables in `spec-and-eval` and `pipeline-laws` gave MEDIUM and HIGH 2 reviewers; they now say 4–6
+  (4–7 with security), with plan review.
+
 ## 0.2.0 (2026-11-09)
 
 ### Added

@@ -78,9 +78,9 @@ Collect the blocking problems: every `[IMPORTANT]` from the security pass and th
 `quorum-state log` a short block for this run either way: the security and accessibility summary lines, the blind
 test result, the blockers, and the triage counts.
 
-## 5. Stage 7 summary
+## 5. Stage 8 summary
 
-1. **Verification proof:** start `quorum:prover` on all of `eval.md` (as in `/quorum:build` step 5), save its
+1. **Verification proof:** start `quorum:prover` on all of `eval.md` (as in `/quorum:build` step 4), save its
    reply verbatim to `.tasks/<slug>/proof-final.md`, and show it. If anything fails, say so and stop without
    changing the status.
 2. **Risk tier**, the review rounds, and the blind-test runs.

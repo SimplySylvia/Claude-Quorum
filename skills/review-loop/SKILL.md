@@ -58,9 +58,10 @@ Let N = `quorum-state get round` + 1. Stop the loop if N > max_rounds (see step 
    own notes or the builder's report:
 
    > Persona: <persona, or "Mode: diff" for the a11y auditor>. Task: `<slug>`. Review the diff range `<RANGE>`
-   > (`git diff <RANGE>`) in this repo. Read `REVIEW.md`, `CLAUDE.md`, `.tasks/<slug>/rd.md`, and
-   > `.tasks/<slug>/eval.md`. This is round <N> <for N > 1: "; earlier rounds already reviewed the rest of the
-   > branch, so review only these lines and their immediate callers">.
+   > (`git diff <RANGE>`) in this repo. Read `REVIEW.md`, `CLAUDE.md`, `.tasks/<slug>/rd.md`,
+   > `.tasks/<slug>/eval.md`, and `.tasks/<slug>/plan.md`, and check the change against the plan. This is round
+   > <N> <for N > 1: "; earlier rounds already reviewed the rest of the branch, so review only these lines and
+   > their immediate callers">.
 
 4. Save each reviewer's reply **verbatim** to `round-<N>/<file>` from the table, and all of them together to
    `round-<N>/candidates.md`.
@@ -115,12 +116,12 @@ Tell the user to pick one and run `/quorum:spec-and-eval --redesign <slug>`.
 
 - **MEDIUM or HIGH:** say the review loop converged after N rounds, list the non-blocking findings and any
   "Needs a human" items, and that the next step is `/quorum:blind-test`.
-- **LOW:** print the **Stage 7 summary** below, then `quorum-state set status READY` and
+- **LOW:** print the **Stage 8 summary** below, then `quorum-state set status READY` and
   `quorum-active-task --clear`.
 
-### Stage 7 summary
+### Stage 8 summary
 
-1. **Verification proof:** start `quorum:prover` on all of `eval.md` (as in `/quorum:build` step 5), save its
+1. **Verification proof:** start `quorum:prover` on all of `eval.md` (as in `/quorum:build` step 4), save its
    reply verbatim to `.tasks/<slug>/proof-final.md`, and show it. If anything fails, say so and don't mark the
    task READY.
 2. **Risk tier**, and the rounds it took.

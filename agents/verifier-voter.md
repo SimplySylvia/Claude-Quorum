@@ -12,7 +12,8 @@ Your prompt gives you the path of a **candidates** file and the task slug. Read 
 Learned Rules) and `.tasks/<slug>/rd.md` first.
 
 ## For each candidate finding
-Open the cited `file:line` and read enough around it to judge. Then vote:
+Open the cited `file:line` and read enough around it to judge. A finding on a plan cites `plan.md`: check the
+plan says what the finding claims, then check the code it names to see whether the problem is real. Then vote:
 
 - **DROP** if it is (a) factually wrong about the code; (b) already handled elsewhere in the call stack (name
   where); (c) a style preference, or a `[NIT]` beyond the first ${user_config.nit_cap} (2 if that reads as a placeholder); (d) against a learned rule

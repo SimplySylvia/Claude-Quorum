@@ -26,6 +26,9 @@ each run's workspace and bootstraps for Quorum.
 | `spec-reviewer-feasibility` | The Feasibility Critic catches a spec citing a helper and a make target that don't exist |
 | `spec-improver-flags-vague` | The Spec Improver rewrites a vague requirement and asks for a docs decision |
 | `prover-catches-hollow-test` | `prover` runs a fail-before-fix row in a worktree, reports it FAIL, and leaves the tree alone |
+| `planner-plans-reuse` | `planner` reuses the existing `money()` helper and covers tests, docs, and every requirement |
+| `pattern-auditor-plan-mode` | `pattern-auditor`, in plan mode, flags a planned helper that already exists |
+| `reviewer-flags-plan-drift` | `code-reviewer` flags code that wrote its own helper where the plan said to reuse one |
 | `test-adequacy-hollow-test` | The Test Adequacy Hunter reports a regression test that passes on the old code |
 | `pattern-auditor-duplicate-helper` | `pattern-auditor` reports a new helper that duplicates an existing one |
 | `docs-auditor-stale-readme` | `docs-auditor` reports docs that still name a renamed command |

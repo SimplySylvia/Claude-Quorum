@@ -135,20 +135,49 @@ def draw_map(theme):
     for i, (label, tag) in enumerate(reviewers):
         s.chip(gx + 12, t + 34 + i * 52, label, tag)
 
-    # 2 · Build: the builder, then the prover's proof.
-    t = band("build", "2", "Build", "/quorum:build", 100, ["then /quorum:simplify-diff"])
-    s.row(CONTENT, t + 28, [("builder", "can't finish until the checks pass", False),
+    # 2 · Plan: the planner writes plan.md, the same reviewers as the review loop check it, then you approve it.
+    t = band("plan", "2", "Plan", "/quorum:plan", 204, ["before any code exists"])
+    py = t + 40
+    pw = s.chip(CONTENT, py, "planner", "writes and revises the plan")
+    dx = CONTENT + pw + ARROW
+    s.arrow(f"M{CONTENT + pw + 3:.1f},{py + CHIP_H / 2} H{dx - 3:.1f}")
+    dw = s.chip(dx, py, "plan.md", "files, reuse, tests, docs, a11y", doc=True)
+    vx = RIGHT - 14 - chip_w("you approve", "status BUILDING") - ARROW - chip_w("verifier-voter", "drops false alarms")
+    vw = s.chip(vx, py, "verifier-voter", "drops false alarms")
+    ax = vx + vw + ARROW
+    s.arrow(f"M{vx + vw + 3:.1f},{py + CHIP_H / 2} H{ax - 3:.1f}")
+    s.chip(ax, py, "you approve", "status BUILDING", doc=True)
+    plan_reviewers = [("logic", "always"), ("architecture", "MEDIUM/HIGH"), ("patterns", "MEDIUM/HIGH"),
+                      ("docs", "MEDIUM/HIGH, or docs"), ("tests", "plan adds tests"), ("a11y", "UI work"),
+                      ("security", "HIGH")]
+    gy = py + CHIP_H + TAG_H + 16
+    widths = [chip_w(*r) for r in plan_reviewers]
+    gw = sum(widths) + 8 * (len(widths) - 1) + 24
+    group(CONTENT, gy, gw, 82, "the review loop's reviewers, in plan mode, in parallel")
+    cx = CONTENT + 12
+    for (label, tag), w in zip(plan_reviewers, widths):
+        s.chip(cx, gy + 26, label, tag)
+        cx += w + 8
+    s.arrow(f"M{dx + dw / 2:.1f},{py + CHIP_H + TAG_H + 2} V{gy - 3}")
+    s.arrow(f"M{vx + vw / 2:.1f},{gy} V{py + CHIP_H + TAG_H + 5}")
+    s.arrow(f"M{vx + vw / 2 - 20:.1f},{py - 2} V{t + 16} H{CONTENT + pw / 2:.1f} V{py - 3}", color="back")
+    s.text((CONTENT + pw / 2 + vx + vw / 2 - 20) / 2, t + 12, "IMPORTANT left: the planner revises (2 rounds at most)",
+           size=TAG, color="back", anchor="middle")
+
+    # 3 · Build: the builder, from the plan, then the prover's proof.
+    t = band("build", "3", "Build", "/quorum:build", 100, ["then /quorum:simplify-diff"])
+    s.row(CONTENT, t + 28, [("builder", "follows plan.md; checks must pass", False),
                             ("prover", "runs every eval.md check", False)])
 
     # 3–4 · Review loop: reviewers in parallel, the voter, and the builder's fixes.
-    t = band("review", "3–4", "Review loop", "/quorum:review-loop", 252,
+    t = band("review", "4–5", "Review loop", "/quorum:review-loop", 252,
              ["up to 3 rounds,", "new lines only each round"])
     reviewers = [("code-reviewer: logic", "always"), ("code-reviewer: architecture", "MEDIUM/HIGH"),
                  ("pattern-auditor", "MEDIUM/HIGH"), ("docs-auditor", "MEDIUM/HIGH, or docs change"),
                  ("code-reviewer: tests", "tests change"), ("a11y-auditor: diff", "UI change")]
     cw = max(chip_w(*r) for r in reviewers)
     gx, gy, gw = CONTENT, t + 12, 2 * cw + 36
-    group(gx, gy, gw, 228, "reviewers in parallel, by tier and by what changed")
+    group(gx, gy, gw, 228, "reviewers in parallel, checking the code against the plan")
     for i, (label, tag) in enumerate(reviewers):
         cx = gx + 12 + (i % 2) * (cw + 12)
         s.chip(cx + (cw - chip_w(label, tag)) / 2, gy + 30 + (i // 2) * 66, label, tag)
@@ -163,19 +192,20 @@ def draw_map(theme):
     s.arrow(f"M{vx - 3:.1f},{fy + CHIP_H / 2} H{gx + gw + 3:.1f}", color="back")
 
     # 5 · Security & blind test.
-    t = band("blind", "5", "Security & blind test", "/quorum:blind-test", 100, ["MEDIUM/HIGH only"])
+    t = band("blind", "6", "Security & blind test", "/quorum:blind-test", 100, ["MEDIUM/HIGH only"])
     s.row(CONTENT, t + 28, [("security-reviewer", "HIGH", False), ("blind-user", "can't read source", False),
                             ("a11y-auditor: live", "UI change", False), ("friction-triager", "if friction", False),
                             ("prover", "no blockers", False)])
 
     # 7 · Human gate and PR (6, codify-lesson, is optional and starts no agents).
-    t = band("ship", "7", "Human gate & PR", "/quorum:pr-draft", 100, ["6 · codify-lesson: optional"])
+    t = band("ship", "8", "Human gate & PR", "/quorum:pr-draft", 100, ["7 · codify-lesson: optional"])
     s.row(CONTENT, t + 28, [("pr-writer", "spec + proof → PR description", False),
                             ("you review and merge", "MEDIUM/HIGH wait for you", True)])
 
     # Forward flow between bands, down the left of the content column.
     spine = CONTENT - 20
-    for upper, lower, label in (("init", "spec", None), ("spec", "build", "IMPORTANT spec findings fixed"), ("build", "review", None),
+    for upper, lower, label in (("init", "spec", None), ("spec", "plan", "IMPORTANT spec findings fixed"),
+                                ("plan", "build", "plan approved"), ("build", "review", None),
                                 ("review", "blind", "converged · LOW: prover, then READY"), ("blind", "ship", None)):
         uy, uh = bands[upper]
         s.arrow(f"M{spine},{uy + uh - 8} V{bands[lower][0] + 8}")
@@ -233,6 +263,8 @@ TIERS = [
 LAYERS = [
     ("Research", [("some", "only with --research"), ("yes", "repo precedent + docs"), ("yes", "repo precedent + docs")]),
     ("Spec review", [("yes", "2 spec reviewers"), ("yes", "2 spec reviewers"), ("yes", "2 spec reviewers")]),
+    ("Plan review", [("some", "1 reviewer, +1 per tests/UI/docs"), ("yes", "4–6 reviewers + voter"),
+                     ("yes", "5–7, with security")]),
     ("Code review", [("some", "1 reviewer, +1 per tests/UI/docs change"), ("yes", "4–6 reviewers + voter"),
                      ("yes", "4–6 reviewers + voter")]),
     ("Security pass", [("no", "none"), ("some", "if security_on_medium"), ("yes", "every finding blocks")]),
@@ -369,16 +401,17 @@ def draw_loop(theme):
 
 # The Swiss cheese layers, and one defect each layer exists to catch. stop is the layer that catches it (None: it
 # escapes); start is the layer it first appears after (the false alarm comes from the reviewers).
-LAYERS_SC = ["Spec review", "Checks & proof", "Reviewers", "Voter", "Security pass", "Blind test", "Human gate"]
+LAYERS_SC = ["Spec review", "Plan review", "Checks & proof", "Reviewers", "Voter", "Security pass", "Blind test", "Human gate"]
 DEFECTS = [
     ("A spec that can't meet its goal", 0, -1, "back"),
-    ("Failing test or type error", 1, -1, "back"),
-    ("Regression test that can't fail", 1, -1, "back"),
-    ("Unhandled edge case", 2, -1, "back"),
-    ("False alarm from a reviewer", 3, 2, "muted"),
-    ("Missing auth check", 4, -1, "back"),
-    ("Dead-end screen or keyboard trap", 5, -1, "back"),
-    ("Right code, wrong design", 6, -1, "back"),
+    ("A plan that rebuilds a helper or skips docs", 1, -1, "back"),
+    ("Failing test or type error", 2, -1, "back"),
+    ("Regression test that can't fail", 2, -1, "back"),
+    ("Unhandled edge case", 3, -1, "back"),
+    ("False alarm from a reviewer", 4, 3, "muted"),
+    ("Missing auth check", 5, -1, "back"),
+    ("Dead-end screen or keyboard trap", 6, -1, "back"),
+    ("Right code, wrong design", 7, -1, "back"),
     ("Holes line up: it escapes", None, -1, "escape"),
 ]
 
@@ -386,7 +419,7 @@ DEFECTS = [
 def draw_cheese(theme):
     s = Svg(THEMES[theme])
     t = THEMES[theme]
-    x0, gap, slab, top, row = 334, 88, 34, 92, 38
+    x0, gap, slab, top, row = 334, 78, 32, 92, 36
     lx = [x0 + i * gap for i in range(len(LAYERS_SC))]
     end_x = lx[-1] + 86
     bottom = top + len(DEFECTS) * row
@@ -451,27 +484,28 @@ def draw_cheese(theme):
     cap = bottom + 32
     s.text(W / 2, cap, "Each defect travels right until a layer has no hole in its path. Grey is noise the voter "
            "filters, not a bug.", size=TAG + 0.5, color="muted", anchor="middle")
-    return s.svg(int(cap + 14), "Animation: seven layers (spec review, checks and proof, reviewers, voter, security "
-                 "pass, blind test, human gate), each stopping a different kind of defect; a reviewer's false alarm "
+    return s.svg(int(cap + 14), "Animation: eight layers (spec review, plan review, checks and proof, reviewers, "
+                 "voter, security pass, blind test, human gate), each stopping a different kind of defect; a reviewer's false alarm "
                  "is filtered by the voter, and one defect escapes where the holes line up, which is what the "
                  "rollback plan is for")
 
 
 # One MEDIUM task on the fixture app, with two planted bugs. Each step: (stage index, caption, sent back to stage).
-STAGES = [("0", "Bootstrap"), ("1", "Spec & eval"), ("2", "Build"), ("3–4", "Review loop"), ("5", "Security + blind"),
-          ("6", "Codify"), ("7", "Human gate")]
+STAGES = [("0", "Bootstrap"), ("1", "Spec & eval"), ("2", "Plan"), ("3", "Build"), ("4–5", "Review loop"),
+          ("6", "Security + blind"), ("7", "Codify"), ("8", "Human gate")]
 STEPS = [
     (0, "init-pipeline: Makefile found; lint and test become the fast checks", None),
     (1, "spec-and-eval: MEDIUM, a new command; research, rd.md, eval.md, two spec reviewers", None),
-    (2, "build: the builder adds export on feat/csv-export; the prover records passing checks", None),
-    (3, "review round 1: the logic reviewer finds export ignores DATA_FILE; the voter keeps it", 2),
-    (2, "the builder fixes every place that ignores DATA_FILE; the checks pass again", None),
-    (3, "review round 2 reads only the fix: nothing IMPORTANT left, converged", None),
-    (4, "blind test: exporting \"Acme, Inc.\" splits the row in two; a blocker", 3),
-    (3, "the review loop fixes the blocker first, then reviews the fix: converged", None),
-    (4, "blind test, run 2: the goal is reached; friction is triaged into follow-ups", None),
-    (5, "codify-lesson: \"All CSV output goes through csv.writer\" joins REVIEW.md", None),
-    (6, "human gate: proof, rollback plan, and a PR description; waiting for your review", None),
+    (2, "plan: the pattern auditor finds the plan's new loader duplicates load(); revised and approved", None),
+    (3, "build: the builder follows plan.md on feat/csv-export; the prover records passing checks", None),
+    (4, "review round 1: the logic reviewer finds export ignores DATA_FILE; the voter keeps it", 3),
+    (3, "the builder fixes every place that ignores DATA_FILE; the checks pass again", None),
+    (4, "review round 2 reads only the fix: nothing IMPORTANT left, converged", None),
+    (5, "blind test: exporting \"Acme, Inc.\" splits the row in two; a blocker", 4),
+    (4, "the review loop fixes the blocker first, then reviews the fix: converged", None),
+    (5, "blind test, run 2: the goal is reached; friction is triaged into follow-ups", None),
+    (6, "codify-lesson: \"All CSV output goes through csv.writer\" joins REVIEW.md", None),
+    (7, "human gate: proof, rollback plan, and a PR description; waiting for your review", None),
 ]
 
 
@@ -565,7 +599,8 @@ def draw_stages(theme):
     css.append("@media (prefers-reduced-motion: reduce) { " + " ".join(reduced) + " }")
     s.add("<style>" + " ".join(css) + "</style>")
     return s.svg(int(cap_y + 40), "Animation: one task moving through Quorum's stages, from bootstrap to the human "
-                 "gate. The review loop sends a bug back to the builder, and the blind test sends a blocker back to "
+                 "gate. Plan review catches a duplicated helper before any code; the review loop sends a bug back to "
+                 "the builder, and the blind test sends a blocker back to "
                  "the review loop, before the task reaches the human gate.")
 
 
