@@ -16,6 +16,10 @@ copy with `/plugin marketplace update`.
   as waiting, running, or done with its findings, the voter's result, the builder and prover, or the blind test's
   reports. A **Checks** section joins `eval.md` with the latest proof, so you can see which checks pass, and the
   band shows `reviewers 3/4 · checks 6/7`.
+- The dashboard pane opens with what the task is: its title and goal from `rd.md`, each requirement with whether
+  its `eval.md` checks pass, and its non-goals.
+- When a task past the build has no saved proof, the dashboard says which proof file is missing and shows the round
+  log's line about the checks, instead of "not run yet".
 
 ## 0.3.0 (2026-11-09)
 

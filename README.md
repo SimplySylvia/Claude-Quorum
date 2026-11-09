@@ -144,10 +144,14 @@ While a task is active, Quorum shows where it is without you asking:
   and a **Dashboard** button.
 - **A dashboard pane**, which opens by itself when a session starts on a task and when a `/quorum:*` command runs;
   `/quorum-dashboard` shows or hides it:
+  - **The task:** its title and goal from `rd.md`, so it's clear what the work is for.
   - **Now:** what the current stage is doing. In spec, plan, and code review, each reviewer the round runs for the
     task's tier, as waiting, running (with its time), or done with its findings, then the voter's result and what it
     means for the round. In the build, the builder and the prover. In the blind test, whether the blind user reached
     the goal, its blockers and friction, and the accessibility, security, and triage reports.
+  - **Requirements:** each numbered requirement in `rd.md`, met when every `eval.md` row for it passes in the
+    latest proof, failing when one fails, and flagged when no row checks it; then what's out of scope (the
+    non-goals).
   - **Checks:** every `eval.md` row and the fast checks, each passing, failing, or not run in the latest proof
     (`proof-final.md`, else `proof-build.md`), with the commit it ran at; Stop-hook blocks; pending findings.
   - **Stages**, each with its outcome; each **review round**'s findings and how many the voter kept; and any other
