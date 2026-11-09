@@ -41,8 +41,8 @@ why every task still carries a rollback plan.
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/swiss-cheese-dark.gif">
-    <img src="assets/swiss-cheese-light.gif" alt="Animation: six defense layers (Stop hook, reviewers, voter, security pass, blind test, human gate), each stopping a different kind of defect, with one defect escaping where the holes line up" width="880">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/swiss-cheese-dark.svg">
+    <img src="assets/swiss-cheese-light.svg" alt="Animation: seven layers (spec review, checks and proof, reviewers, voter, security pass, blind test, human gate), each stopping a different kind of defect: a spec that can't meet its goal, a failing test, a regression test that can't fail, an unhandled edge case, a missing auth check, a dead-end screen, and right code with the wrong design. The voter filters a reviewer's false alarm, and one defect escapes where the holes line up, which is what the rollback plan is for." width="880">
   </picture>
 </p>
 

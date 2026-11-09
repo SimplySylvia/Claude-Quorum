@@ -4,6 +4,7 @@
 - assets/agent-map-*.svg: which agents each Quorum command starts, when, and the loops that send work back.
 - assets/risk-tiers-*.svg: which layers each risk tier gets.
 - assets/review-loop-*.svg: one round of the review loop and where it can end.
+- assets/swiss-cheese-*.svg: an animation of the layers, each catching the defect the others let through.
 
 Run it again after adding, renaming, or rewiring an agent, or changing what a tier gets:
     python3 assets/src/diagrams.py
@@ -20,10 +21,12 @@ MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 THEMES = {
     "light": dict(fg="#1f2328", muted="#59636e", line="#d1d9e0", band="#f6f8fa", chip="#ffffff",
                   doc="#eef1f4", go="#0f8a7e", back="#cf222e",
-                  low="#1a7f37", medium="#9a6700", high="#cf222e"),
+                  low="#1a7f37", medium="#9a6700", high="#cf222e",
+                  page="#ffffff", cheese="#fff8c5", rind="#d4a72c", escape="#bc4c00"),
     "dark": dict(fg="#f0f6fc", muted="#9198a1", line="#3d444d", band="#151b23", chip="#0d1117",
                  doc="#212830", go="#3fb9a6", back="#f85149",
-                  low="#3fb950", medium="#d29922", high="#f85149"),
+                  low="#3fb950", medium="#d29922", high="#f85149",
+                  page="#0d1117", cheese="#272115", rind="#9e6a03", escape="#db6d28"),
 }
 
 LABEL, TAG = 13, 11          # font sizes: chip label, the small "when it runs" tag under it
@@ -363,9 +366,100 @@ def draw_loop(theme):
             .replace(f'width="{W}" height="{h}" viewBox="0 0 {W} {h}"', f'width="{w}" height="{h}" viewBox="0 0 {w} {h}"'))
 
 
+# The Swiss cheese layers, and one defect each layer exists to catch. stop is the layer that catches it (None: it
+# escapes); start is the layer it first appears after (the false alarm comes from the reviewers).
+LAYERS_SC = ["Spec review", "Checks & proof", "Reviewers", "Voter", "Security pass", "Blind test", "Human gate"]
+DEFECTS = [
+    ("A spec that can't meet its goal", 0, -1, "back"),
+    ("Failing test or type error", 1, -1, "back"),
+    ("Regression test that can't fail", 1, -1, "back"),
+    ("Unhandled edge case", 2, -1, "back"),
+    ("False alarm from a reviewer", 3, 2, "muted"),
+    ("Missing auth check", 4, -1, "back"),
+    ("Dead-end screen or keyboard trap", 5, -1, "back"),
+    ("Right code, wrong design", 6, -1, "back"),
+    ("Holes line up: it escapes", None, -1, "escape"),
+]
+
+
+def draw_cheese(theme):
+    s = Svg(THEMES[theme])
+    t = THEMES[theme]
+    x0, gap, slab, top, row = 334, 88, 34, 92, 38
+    lx = [x0 + i * gap for i in range(len(LAYERS_SC))]
+    end_x = lx[-1] + 86
+    bottom = top + len(DEFECTS) * row
+    cycle, speed = 18.0, 300.0             # seconds per loop, pixels per second
+    hold_end, fade_end = cycle - 1.4, cycle - 0.6
+
+    # Layers: tall slabs with a hole wherever a defect's path passes, plus a few that lead nowhere.
+    for i, (x, name) in enumerate(zip(lx, LAYERS_SC)):
+        s.text(x, 34, str(i + 1), size=13, weight=700, anchor="middle")
+        s.text(x, 52, name, size=TAG, color="muted", anchor="middle")
+        s.rect(x - slab / 2, top - 26, slab, bottom - top + 30, "cheese", stroke="rind", r=12)
+        for k, (_, stop, start, _) in enumerate(DEFECTS):
+            y = top + k * row
+            passes = (stop is None or i < stop) and i > start
+            if passes:
+                s.add(f'<ellipse cx="{x}" cy="{y}" rx="11" ry="9" fill="{t["page"]}" stroke="{t["rind"]}" '
+                      f'stroke-opacity=".35"/>')
+        for k in range(len(DEFECTS) - 1):
+            if (i * 3 + k) % 7 == 0:
+                s.add(f'<circle cx="{x + (5 if k % 2 else -5)}" cy="{top + k * row + row / 2}" r="4" '
+                      f'fill="{t["page"]}" stroke="{t["rind"]}" stroke-opacity=".35"/>')
+
+    css = ["svg .dot, svg .ring { transform-box: fill-box; transform-origin: center; }"]
+    reduced = []
+    for k, (label, stop, start, color) in enumerate(DEFECTS):
+        y = top + k * row
+        s.text(x0 - 82, y + 4, label, size=12.5, anchor="end", color="muted" if color == "muted" else "fg")
+        sx = (lx[start] + slab / 2 + 16) if start >= 0 else x0 - 66
+        ex = end_x if stop is None else lx[stop] - slab / 2 - 8
+        s.add(f'<line x1="{sx}" y1="{y}" x2="{ex}" y2="{y}" stroke="{t["line"]}" stroke-dasharray="2 5"/>')
+        dx = ex - sx
+        t0 = 0.5 + k * 1.35
+        t1 = t0 + dx / speed
+        pct = lambda sec: f"{100 * sec / cycle:.2f}%"
+        css.append(
+            f"@keyframes m{k} {{ 0%, {pct(t0)} {{ transform: translateX(0); opacity: 0; }} "
+            f"{pct(t0 + 0.25)} {{ opacity: 1; animation-timing-function: cubic-bezier(.45,0,.25,1); }} "
+            f"{pct(t1)} {{ transform: translateX({dx:.1f}px); opacity: 1; }} "
+            + ("" if stop is None else
+               f"{pct(t1 + 0.12)} {{ transform: translateX({dx - 5:.1f}px); }} "
+               f"{pct(t1 + 0.3)} {{ transform: translateX({dx:.1f}px); }} "
+               f"{pct(t1 + 0.9)} {{ opacity: .55; }} ")
+            + f"{pct(hold_end)} {{ transform: translateX({dx:.1f}px); opacity: {1 if stop is None else .55}; }} "
+            f"{pct(fade_end)}, 100% {{ transform: translateX({dx:.1f}px); opacity: 0; }} }}")
+        css.append(f".d{k} {{ animation: m{k} {cycle}s infinite; }}")
+        ring = "go" if color == "back" else color
+        css.append(
+            f"@keyframes r{k} {{ 0%, {pct(t1 - 0.01)} {{ opacity: 0; transform: scale(.6); }} "
+            f"{pct(t1 + 0.05)} {{ opacity: .9; transform: scale(1); }} "
+            f"{pct(t1 + 0.9)}, 100% {{ opacity: 0; transform: scale(2.2); }} }}")
+        css.append(f".r{k} {{ animation: r{k} {cycle}s infinite; }}")
+        reduced.append(f".d{k} {{ animation: none; transform: translateX({dx:.1f}px); "
+                       f"opacity: {1 if stop is None else .7}; }} .r{k} {{ animation: none; opacity: 0; }}")
+        s.add(f'<circle class="ring r{k}" cx="{ex}" cy="{y}" r="11" fill="none" stroke="{t[ring]}" '
+              f'stroke-width="2" opacity="0"/>')
+        s.add(f'<circle class="dot d{k}" cx="{sx}" cy="{y}" r="8" fill="{t[color]}" opacity="0"/>')
+        if stop is None:
+            s.text(W - 6, y - 16, "rollback plan", size=TAG, weight=600, color="escape", anchor="end")
+    css.append("@media (prefers-reduced-motion: reduce) { " + " ".join(reduced) + " }")
+    s.add("<style>" + " ".join(css) + "</style>")
+
+    cap = bottom + 32
+    s.text(W / 2, cap, "Each defect travels right until a layer has no hole in its path. Grey is noise the voter "
+           "filters, not a bug.", size=TAG + 0.5, color="muted", anchor="middle")
+    return s.svg(int(cap + 14), "Animation: seven layers (spec review, checks and proof, reviewers, voter, security "
+                 "pass, blind test, human gate), each stopping a different kind of defect; a reviewer's false alarm "
+                 "is filtered by the voter, and one defect escapes where the holes line up, which is what the "
+                 "rollback plan is for")
+
+
 if __name__ == "__main__":
     for name in THEMES:
-        for base, draw in (("agent-map", draw_map), ("risk-tiers", draw_tiers), ("review-loop", draw_loop)):
+        for base, draw in (("agent-map", draw_map), ("risk-tiers", draw_tiers), ("review-loop", draw_loop),
+                           ("swiss-cheese", draw_cheese)):
             path = os.path.join(OUT, f"{base}-{name}.svg")
             with open(path, "w") as f:
                 f.write(draw(name))

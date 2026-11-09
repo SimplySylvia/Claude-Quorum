@@ -33,7 +33,10 @@ copy with `/plugin marketplace update`.
 
 - README: an agent map, a review-loop diagram, and risk-tier cards, as light and dark SVGs drawn by
   `assets/src/diagrams.py`, in place of the stage and tier tables and the review-loop animation (which showed only
-  two reviewers). The tier cards correct the reviewer counts (MEDIUM and HIGH get 4 to 6, not 2).
+  two reviewers).
+- README: the Swiss cheese animation is now an animated SVG in the same style, at 19 KB instead of about 960 KB. It
+  shows seven layers, including spec review and checks and proof, moves smoothly, and holds still for viewers who
+  ask for reduced motion. The tier cards correct the reviewer counts (MEDIUM and HIGH get 4 to 6, not 2).
 - README reorganized: reference tables (agents, configuration, repository layout) are collapsible, guardrails and
   known limits are one line each, and development material moved to the new `CONTRIBUTING.md`.
 
