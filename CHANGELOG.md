@@ -31,8 +31,11 @@ copy with `/plugin marketplace update`.
 - `/quorum:pr-draft` and the `pr-writer` agent: a PR description from the spec, state log, and proof, plus the
   commits that must not ship.
 
-- README: a tree of which agents each command starts and the files they write, and a diagram of the process and
-  its loops.
+- README: an agent map, a review-loop diagram, and risk-tier cards, as light and dark SVGs drawn by
+  `assets/src/diagrams.py`, in place of the stage and tier tables and the review-loop animation (which showed only
+  two reviewers). The tier cards correct the reviewer counts (MEDIUM and HIGH get 4 to 6, not 2).
+- README reorganized: reference tables (agents, configuration, repository layout) are collapsible, guardrails and
+  known limits are one line each, and development material moved to the new `CONTRIBUTING.md`.
 
 ### Tests
 

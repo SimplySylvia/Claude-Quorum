@@ -10,14 +10,14 @@ test, and hooks that won't let "done" mean anything less than passing checks.**
 <p>
   <a href="https://code.claude.com/docs/en/plugins-reference"><img src="https://img.shields.io/badge/Claude_Code-plugin-D97757?logo=claude&logoColor=white" alt="Claude Code plugin"></a>
   <a href=".claude-plugin/plugin.json"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FSimplySylvia%2FClaude-Quorum%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=6b4fd8" alt="Version"></a>
-  <a href="#requirements"><img src="https://img.shields.io/badge/hooks-bash-4EAA25?logo=gnubash&logoColor=white" alt="Hooks: bash"></a>
+  <a href="#quick-start"><img src="https://img.shields.io/badge/hooks-bash-4EAA25?logo=gnubash&logoColor=white" alt="Hooks: bash"></a>
   <a href="https://github.com/SimplySylvia/Claude-Quorum/actions/workflows/ci.yml"><img src="https://github.com/SimplySylvia/Claude-Quorum/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="#development"><img src="https://img.shields.io/badge/evals-claude_plugin_eval-6E56CF" alt="Evals"></a>
+  <a href="CONTRIBUTING.md#evals"><img src="https://img.shields.io/badge/evals-claude_plugin_eval-6E56CF" alt="Evals"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
 </p>
 
-[Quick start](#quick-start) · [How it works](#how-it-works) · [What it sets up](#what-it-sets-up-in-your-repo) ·
-[Configuration](#configuration) · [Development](#development) · [Known limits](#known-limits)
+[Quick start](#quick-start) · [How it works](#how-it-works) · [Risk tiers](#risk-tiers) · [Guardrails](#guardrails) ·
+[Reference](#reference) · [Contributing](CONTRIBUTING.md) · [Known limits](#known-limits)
 
 </div>
 
@@ -48,7 +48,8 @@ why every task still carries a rollback plan.
 
 ## Quick start
 
-This repo is both the plugin and a single-plugin marketplace. In Claude Code:
+You need [Claude Code](https://code.claude.com/docs) with plugin support, plus `bash`, `git`, and `jq`. This repo is
+both the plugin and a single-plugin marketplace:
 
 ```
 /plugin marketplace add SimplySylvia/Claude-Quorum
@@ -72,8 +73,8 @@ Every command is user-only: Claude never starts a review loop on its own.
 
 ## How it works
 
-A task moves through stages 0 to 7. Each layer catches defects the others miss, and the risk tier decides how
-many layers a task gets. The animation follows a real test run on the repo's fixture app, including two planted bugs:
+A task moves through stages 0 to 7, and each stage catches defects the others miss. This run on the repo's fixture
+app has two planted bugs; red frames are a stage sending work back:
 
 <p align="center">
   <picture>
@@ -82,35 +83,89 @@ many layers a task gets. The animation follows a real test run on the repo's fix
   </picture>
 </p>
 
-| Stage | Command | What happens |
-|---|---|---|
-| 0 · Bootstrap | `init-pipeline` | Detects the stack, writes the repo's verification commands and review rules, dry-runs the check script |
-| 1 · Spec & eval | `spec-and-eval` | Asks "what happens to the user or system if this breaks?", picks LOW, MEDIUM, or HIGH, researches the approach (MEDIUM/HIGH), writes the spec and runnable checks, and has two spec reviewers check them against the code |
-| 2 · Build | `build`, `simplify-diff` | Builder works on a feature branch; the Stop hook blocks "done" until checks pass |
-| 3–4 · Review loop | `review-loop` | Fresh reviewers in parallel (logic, architecture, repo patterns, docs, test adequacy, accessibility, by tier and by what changed), a verifier-voter, and a builder that fixes each bug class everywhere it appears |
-| 5 · Security & blind test | `blind-test` | Security-only review (HIGH), then an agent uses the running app like a first-time user, a live WCAG 2.2 check for UI changes, and a triage of the friction it reports |
-| 6 · Codify | `codify-lesson` | One-line learned rules in `REVIEW.md` |
-| 7 · Human gate | (summary), `pr-draft` | Proof from the prover, risk tier, and a one-step rollback plan. LOW is ready to merge; MEDIUM and HIGH wait for you. `pr-draft` writes the PR description |
-
-| Tier | Typical changes | Reviewers | Security pass | Blind test | Human review |
-|---|---|---|---|---|---|
-| **LOW** | Copy, docs, isolated tests, code behind an off flag | 1 | — | — | Not needed if green |
-| **MEDIUM** | User-facing workflows, API endpoints, state logic | 2 | Optional | Yes | Focused |
-| **HIGH** | Auth, money, destructive migrations, security boundaries | 2 | Yes, blocking | Yes | Required sign-off |
-
-### The review loop
-
-Fresh reviewers look only at the new lines, the voter drops false alarms, and the builder fixes each surviving
-bug class everywhere it appears. Round 1 below finds a problem and loops through the builder; round 2 converges.
+Each band below is a command you run, and the chips are the agents it starts, with when each one runs underneath.
+No agent sees the conversation that produced the code.
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/review-loop-dark.gif">
-    <img src="assets/review-loop-light.gif" alt="Animation: the review loop. Reviewers in parallel, the verifier-voter, a check for remaining IMPORTANT findings, and either CONVERGED, HALTED after the last round, or the builder and another round" width="520">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/agent-map-dark.svg">
+    <img src="assets/agent-map-light.svg" alt="Agent map. Bootstrap writes CLAUDE.md's Verification Commands, REVIEW.md, and the check script. Spec and eval: researcher (MEDIUM/HIGH), then the spec, then two spec reviewers in parallel. Build: builder, then prover. Review loop: up to six reviewers in parallel by tier and by what changed, then the verifier-voter; surviving IMPORTANT findings go to the builder and back into review, and after round 3 the task halts for a redesign. Security and blind test (MEDIUM/HIGH): security reviewer, blind user, live accessibility check, friction triager, prover; blockers go back to the review loop. Human gate: pr-writer, then you review and merge." width="880">
   </picture>
 </p>
 
-### Agents
+<details>
+<summary>Files each agent leaves in <code>.tasks/&lt;slug&gt;/</code></summary>
+
+| Command | Agent | File |
+|---|---|---|
+| `spec-and-eval` | `researcher` | `research.md` |
+| | `spec-reviewer` (both personas) | `spec-review/feasibility.md`, `spec-review/improver.md` |
+| `build` | `prover` | `proof-build.md` |
+| `review-loop` | reviewers, per round | `review/round-<n>/logic.md`, `architecture.md`, `patterns.md`, `docs.md`, `tests.md`, `a11y.md`, all in `candidates.md` |
+| | `verifier-voter` | `review/round-<n>/votes.md`, then `survivors.md` |
+| | `prover` (LOW) | `proof-final.md` |
+| `blind-test` | `security-reviewer`, `blind-user`, `a11y-auditor`, `friction-triager` | `blind/security-<n>.md`, `blind-<n>.md`, `a11y-<n>.md`, `triage-<n>.md` |
+| | `prover` | `proof-final.md` |
+| `pr-draft` | `pr-writer` | `pr.md`, `pr-body.md` |
+
+The diagrams are drawn by `assets/src/diagrams.py`; run it again after changing which agents a command starts.
+
+</details>
+
+One round of the review loop: the voter drops false alarms, and the builder fixes each surviving bug class
+everywhere it appears before the next round looks at just its new lines.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/review-loop-dark.svg">
+    <img src="assets/review-loop-light.svg" alt="One round of the review loop: pick the diff range (the whole branch in round 1, then only new lines), reviewers in parallel (logic always; architecture, patterns, and docs for MEDIUM/HIGH; tests and accessibility when those change), then the verifier-voter. With nothing IMPORTANT left, the task converges: LOW goes to the prover and READY, MEDIUM/HIGH to the blind test. Otherwise, after round 3 it halts for a redesign; before that, the builder fixes every instance of each Pattern Category and the next round starts. Blind-test blockers enter at the builder." width="640">
+  </picture>
+</p>
+
+## Risk tiers
+
+`/quorum:spec-and-eval` asks "what happens to the user or system if this breaks?" and picks a tier, which you
+confirm. The tier decides how many layers the task gets:
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/risk-tiers-dark.svg">
+    <img src="assets/risk-tiers-light.svg" alt="Risk tiers. LOW, for changes a user can't reach: research only with --research, two spec reviewers, one code reviewer plus one for each of tests, UI, or docs it changes, no security pass, no blind test, no human review if green. MEDIUM, for anything a user can see or run: research, two spec reviewers, four to six code reviewers and the voter, a security pass only with security_on_medium, a blind test with live accessibility checks and friction triage, and a focused human review. HIGH, for data, money, or security: everything MEDIUM gets, a blocking security pass, and an architectural sign-off." width="880">
+  </picture>
+</p>
+
+## Guardrails
+
+- **Proof before done.** The Stop hook blocks finishing during a task until the repo's fast checks pass; after 3
+  failures in a row it lets you go and marks the task `ESCALATED`.
+- **Quiet outside a task.** The hooks do nothing unless a task is building, in review, or escalated, or a blind
+  test is running.
+- **Hard caps.** At most 3 review rounds, then `HALTED` with a post-mortem and two redesign options.
+- **Asks before writing** to `CLAUDE.md`, `REVIEW.md`, or your global `~/.claude/CLAUDE.md`, with a diff first.
+- **Local data only.** Blind tests and `eval.md` checks use local, temporary, or synthetic data, never production.
+
+## What it sets up in your repo
+
+The plugin never hardcodes a test command; it reads them from these files.
+
+```
+your-repo/
+├── CLAUDE.md                      # + "## Verification Commands" and a link to REVIEW.md
+├── REVIEW.md                      # review rules, failure modes for your stack, paths to skip, learned rules
+├── .claude/hooks/
+│   └── verify-completion.sh       # your fast checks: typecheck, lint, unit tests
+└── .tasks/                        # always gitignored
+    └── <slug>/
+        ├── rd.md                  # requirements, non-goals, risk tier, rollback plan
+        ├── eval.md                # runnable pass/fail checks
+        ├── mockup.html            # UI tasks only
+        └── state.md               # status, round, SHAs, pending findings
+```
+
+## Reference
+
+<details>
+<summary><b>Agents</b>: what each of the 13 sees and does</summary>
 
 | Agent | Sees | Job |
 |---|---|---|
@@ -128,104 +183,13 @@ bug class everywhere it appears. Round 1 below finds a problem and loops through
 | `friction-triager` | blind report, spec, branch diff | Sorts friction into caused, related, data gap, or unrelated; drafts follow-ups |
 | `pr-writer` | spec, state log, proof, diff, the repo's PR template | Drafts the PR description and lists commits that must not ship |
 
-No agent sees the conversation that produced the code.
+</details>
 
-### How the agents work together
+<details>
+<summary><b>Configuration</b>: plugin options and their defaults</summary>
 
-Each command starts the agents below, in this order; the right column is the file each one leaves in
-`.tasks/<slug>/`. You run every command yourself; agents never start one.
-
-```
-/quorum:init-pipeline          no agents: CLAUDE.md section, REVIEW.md, verify-completion.sh
-/quorum:spec-and-eval
-├── researcher                 MEDIUM/HIGH, or --research               → research.md
-├── (you pick an approach; the spec is written)                         → rd.md, eval.md
-└── in parallel
-    ├── spec-reviewer · Feasibility Critic                              → spec-review/feasibility.md
-    └── spec-reviewer · Spec Improver                                   → spec-review/improver.md
-/quorum:build
-├── builder                    can't finish until the checks pass       → commits on feat/<slug>
-└── prover                                                              → proof-build.md
-/quorum:simplify-diff          no agents
-/quorum:review-loop            up to 3 rounds, each on the new lines only
-├── in parallel
-│   ├── code-reviewer · Logic & Edge-Case Hunter       always                       → review/round-<n>/logic.md
-│   ├── code-reviewer · Architecture, Security & Drift MEDIUM/HIGH                  → architecture.md
-│   ├── pattern-auditor                                MEDIUM/HIGH                  → patterns.md
-│   ├── docs-auditor                                   MEDIUM/HIGH, or docs changed → docs.md
-│   ├── code-reviewer · Test Adequacy Hunter           tests changed                → tests.md
-│   └── a11y-auditor · diff mode                       UI changed                   → a11y.md
-├── verifier-voter             keeps or drops each finding              → votes.md, survivors.md
-├── builder                    fixes each surviving Pattern Category, then the next round
-└── prover                     LOW, once converged                      → proof-final.md
-/quorum:blind-test             MEDIUM/HIGH, once converged
-├── security-reviewer          HIGH (MEDIUM with security_on_medium)    → blind/security-<n>.md
-├── blind-user                 can't read the source                    → blind/blind-<n>.md
-├── a11y-auditor · live mode   UI changed                               → blind/a11y-<n>.md
-├── friction-triager           when the blind user reports friction     → blind/triage-<n>.md
-└── prover                     no blockers                              → proof-final.md
-/quorum:pr-draft
-└── pr-writer                                                           → pr.md, pr-body.md
-/quorum:codify-lesson          no agents: one rule in REVIEW.md
-```
-
-The same flow as a process, with the loops that send work back:
-
-```mermaid
-flowchart TD
-  spec["spec-and-eval: researcher, then the spec"] --> specrev["spec-reviewer ×2"]
-  specrev -->|IMPORTANT findings fixed| build["build: builder, then prover"]
-  build --> simplify["simplify-diff"]
-  simplify --> round["review round: reviewers in parallel"]
-  round --> voter["verifier-voter"]
-  voter -->|IMPORTANT survives, rounds left| fix["builder fixes the Pattern Categories"]
-  fix --> round
-  voter -->|IMPORTANT survives after round 3| halted["HALTED: post-mortem and two redesigns"]
-  halted -->|"spec-and-eval --redesign"| spec
-  voter -->|nothing IMPORTANT| converged["CONVERGED"]
-  converged -->|LOW| ready["prover, then READY"]
-  converged -->|MEDIUM or HIGH| blind["blind-test: security pass, blind user, live a11y, triage"]
-  blind -->|blockers or CAUSED friction| round
-  blind -->|clean| human["prover, then AWAITING-HUMAN"]
-  ready --> pr["pr-draft: pr-writer"]
-  human --> pr
-```
-
-## Guardrails
-
-- **Proof before done.** The Stop hook runs the repo's fast checks whenever Claude or the builder tries to finish
-  during a task, and blocks until they pass. After 3 failures in a row it lets you go and marks the task
-  `ESCALATED`, so a broken environment can't trap a session.
-- **Quiet outside a task.** The Stop hook does nothing unless the repo is bootstrapped and a task is building, in
-  review, or escalated; the source guard does nothing outside blind mode; the session hook only adds the short laws.
-- **Hard caps.** At most 3 review rounds; a task still failing ends `HALTED` with a post-mortem and 2 redesign
-  options instead of another round.
-- **The blind guard is best effort, not a sandbox.** The blind user has no file tools, and a hook blocks shell
-  reads of source paths, but a determined command could get through.
-- **Asks before writing** to `CLAUDE.md`, `REVIEW.md`, or your global `~/.claude/CLAUDE.md`, and shows a diff first.
-- **Local data only.** Blind tests and `eval.md` use local, temporary, or synthetic data, never production.
-
-## What it sets up in your repo
-
-```
-your-repo/
-├── CLAUDE.md                      # + "## Verification Commands" and a link to REVIEW.md
-├── REVIEW.md                      # review rules, failure modes for your stack, paths to skip, learned rules
-├── .claude/hooks/
-│   └── verify-completion.sh       # your fast checks: typecheck, lint, unit tests
-└── .tasks/                        # always gitignored
-    └── <slug>/
-        ├── rd.md                  # requirements, non-goals, risk tier, rollback plan
-        ├── eval.md                # runnable pass/fail checks
-        ├── mockup.html            # UI tasks only
-        └── state.md               # status, round, SHAs, pending findings
-```
-
-The plugin never hardcodes a test command; it reads them from your repo.
-
-## Configuration
-
-Set through Claude Code's plugin options. Defaults are declared in `.claude-plugin/plugin.json`.
+Set through Claude Code's plugin options; defaults are in `.claude-plugin/plugin.json`. A repo can override the
+blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 
 | Option | Default | What it does |
 |---|---|---|
@@ -237,15 +201,10 @@ Set through Claude Code's plugin options. Defaults are declared in `.claude-plug
 | `blind_block_dirs` | `src,app,lib,packages,Source,Content` | Folders the blind user can't read |
 | `blind_block_exts` | `ts,tsx,js,jsx,py,rs,go,cpp,h,java,kt,rb` | File types the blind user can't read |
 
-A repo can override the block lists in `.claude/quorum.json`, which helps in monorepos.
+</details>
 
-## Requirements
-
-- [Claude Code](https://code.claude.com/docs) with plugin support
-- `bash`, `git`, and `jq` (hooks and `bin/` helpers)
-- For development: [`bats-core`](https://github.com/bats-core/bats-core) and `shellcheck`
-
-## Repository layout
+<details>
+<summary><b>Repository layout</b>: where the plugin's parts live</summary>
 
 | Path | What |
 |---|---|
@@ -257,84 +216,25 @@ A repo can override the block lists in `.claude/quorum.json`, which helps in mon
 | `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state` (on the Bash PATH while the plugin is enabled) |
 | `tests/` | bats tests for every hook and helper, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
 | `evals/` | `claude plugin eval` suite: risk tiering, one case per agent, voter false-alarm drops, blind-mode source reads, a near-miss |
-| `assets/` | The README's animations, in light and dark versions |
-| [`CHANGELOG.md`](CHANGELOG.md) · [`LICENSE`](LICENSE) | Release notes · MIT license |
+| `assets/` | The README's animations and diagrams, in light and dark versions; `assets/src/diagrams.py` draws the diagrams |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`CHANGELOG.md`](CHANGELOG.md) · [`LICENSE`](LICENSE) | Development guide · release notes · MIT license |
 
-## Development
+</details>
 
-### Tests
+## Contributing
 
-Hooks read JSON on stdin, so tests feed fixture hook input and check the exit code:
-
-```bash
-bats -r tests/                                # every hook and bin/ helper
-shellcheck hooks/*.sh bin/*                   # lint the shell
-claude plugin validate --strict .             # manifest, paths, marketplace; warnings fail
-```
-
-CI runs all three on every push and pull request, on Linux and on macOS (system bash 3.2).
-
-### Evals
-
-The suite in `evals/` runs against the `tests/e2e/sales-app` fixture, which `evals/_fixture/make.sh` copies into
-each run's workspace and bootstraps for Quorum.
-
-| Case | Checks |
-|---|---|
-| `risk-tier-low`, `-medium`, `-high` | `spec-and-eval` picks the right tier and writes runnable checks; the MEDIUM case also gets a `**Docs:**` requirement for its new command |
-| `researcher-finds-precedent` | `researcher` cites the repo's code, compares options, and cites the Python docs |
-| `spec-reviewer-feasibility` | The Feasibility Critic catches a spec citing a helper and a make target that don't exist |
-| `spec-improver-flags-vague` | The Spec Improver rewrites a vague requirement and asks for a docs decision |
-| `prover-catches-hollow-test` | `prover` runs a fail-before-fix row in a worktree, reports it FAIL, and leaves the tree alone |
-| `test-adequacy-hollow-test` | The Test Adequacy Hunter reports a regression test that passes on the old code |
-| `pattern-auditor-duplicate-helper` | `pattern-auditor` reports a new helper that duplicates an existing one |
-| `docs-auditor-stale-readme` | `docs-auditor` reports docs that still name a renamed command |
-| `a11y-auditor-diff` | `a11y-auditor` reports WCAG A/AA failures in a new page, by criterion |
-| `friction-triager-sorts` | `friction-triager` sorts blind-test friction into caused, data gap, and unrelated |
-| `pr-writer-drops-setup` | `pr-writer` lists the setup commit to drop and doesn't claim a skipped check |
-| `reviewer-finds-bug` | `code-reviewer` finds a planted requirement violation, with `file:line` and a Pattern Category |
-| `voter-drops-false-alarm` | `verifier-voter` keeps the real bug and drops a factually wrong finding |
-| `blind-user-no-source` | `blind-user` reaches its goal through the CLI without ever hitting the source guard |
-| `nearmiss-no-auto-review-loop` | An ordinary "look at my commit" request never starts a Quorum command |
-
-```bash
-evals/run.sh                                   # the whole suite
-evals/run.sh --case prover-catches-hollow-test # one case; any other `claude plugin eval` option works too
-```
-
-Every run makes real model calls on your Claude account, so CI doesn't run them. Run them after any change to a
-skill's instructions or an agent's prompt.
-
-**macOS note.** Claude Code's sandbox can't stat Homebrew's files, so PATH lookups fall back to Apple's
-`/usr/bin/git` launcher, which the sandbox can't run either. Every agent that uses git handles this: it calls git by
-full path when the launcher fails. The prover also creates worktrees with `--no-checkout`, so git doesn't start a
-second git process.
-
-### Trying a local build
-
-```bash
-claude plugin marketplace add ./
-claude plugin install quorum@quorum
-```
-
-### Releasing
-
-Bump `version` in `.claude-plugin/plugin.json` when you change a skill, agent, or hook, and move the `Unreleased`
-notes in [`CHANGELOG.md`](CHANGELOG.md) under the new version. Users pick it up with `/plugin marketplace update`.
+Tests, evals, trying a local build, redrawing the diagrams, and releasing are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Known limits
 
-- **Claude Code asks before writing `.claude/hooks/`.** `init-pipeline` writes the check script there, and
-  Claude Code treats `.claude/` as protected, so expect one approval prompt.
-- **The blind guard is a safeguard, not a sandbox.** It blocks reading commands on source paths, but running a
-  script that reads source (`python3 peek.py`) gets through, because running code is how a user runs the app.
-- **Every agent uses your session's model.** On MEDIUM and HIGH tasks a round runs four to six reviewers, a voter,
-  and a builder, for up to 3 rounds, plus research and two spec reviewers up front; that adds up. LOW tasks run
-  one reviewer (two when tests or UI change) and skip research unless you pass `--research`.
-- **Accessibility checks are partial.** Automated scans find only part of WCAG 2.2; the a11y auditor lists what
-  it couldn't decide under "Needs a human". A clean report isn't a conformance claim.
-- **`verify-completion.sh` should stay fast.** The Stop hook runs it whenever Claude or the builder finishes
-  during a task. Put slow suites in a task's `eval.md`.
+- **Claude Code asks before writing `.claude/hooks/`**, so `init-pipeline` brings one approval prompt.
+- **The blind guard is a safeguard, not a sandbox.** It blocks reading source, but running a script that reads
+  source gets through, because running code is how a user runs the app.
+- **Agents use your session's model, and it adds up.** A MEDIUM or HIGH round runs 4–6 reviewers, a voter, and a
+  builder, for up to 3 rounds, after research and two spec reviewers.
+- **Accessibility checks are partial.** Automated scans find only part of WCAG 2.2; the a11y auditor lists the
+  rest under "Needs a human". A clean report isn't a conformance claim.
+- **`verify-completion.sh` should stay fast.** The Stop hook runs it on every finish; put slow suites in `eval.md`.
 
 ## License
 
