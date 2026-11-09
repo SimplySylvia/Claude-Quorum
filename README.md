@@ -134,6 +134,23 @@ new lines.
   </picture>
 </p>
 
+## The dashboard
+
+While a task is active, Quorum shows where it is without you asking:
+
+- **Status line:** `Quorum · export-csv · IN_REVIEW · MEDIUM · round 2/3 · 1 pending`.
+- **Above the prompt:** the stage rail, `✓ Spec › ✓ Plan › ✓ Build › ● Review r2/3 › ○ Blind test › ○ PR`, the next
+  command, and a **Dashboard** button.
+- **A dashboard pane:** each stage with its outcome, each review round's findings and how many the voter kept, the
+  Quorum agents running now and the ones that finished, Stop-hook blocks, and the next command. It opens by itself
+  when a session starts on a task and when a `/quorum:*` command runs; `/quorum-dashboard` shows or hides it.
+- **Toasts** when a task converges, halts, escalates, or is ready for you.
+
+The pane sits beside the chat in a wide fullscreen terminal and above the prompt otherwise. Opened by itself, it
+waits for a terminal at least 144 columns wide; opened with the button or `/quorum-dashboard`, it shows at any
+width. The dashboard only reads `.tasks/`, so `claude -p`, cloud sessions, and the VS Code chat panel work as before,
+without it.
+
 ## Risk tiers
 
 `/quorum:spec-and-eval` asks "what happens to the user or system if this breaks?" and picks a tier, which you
@@ -226,9 +243,10 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `.claude-plugin/marketplace.json` | Marketplace manifest (lists this repo as its only plugin) |
 | `skills/` | `init-pipeline`, `spec-and-eval`, `plan`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `pr-draft`, `codify-lesson`, and the model-invocable `pipeline-laws` |
 | `agents/` | `researcher`, `spec-reviewer`, `planner`, `builder`, `prover`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `verifier-voter`, `security-reviewer`, `blind-user`, `friction-triager`, `pr-writer` |
-| `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `stop-verify.sh` |
+| `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `stop-verify.sh`, and `dashboard/`, the dashboard's hooks module |
+| `types/` | The type contract for the values the dashboard keeps in the session |
 | `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state` (on the Bash PATH while the plugin is enabled) |
-| `tests/` | bats tests for every hook and helper, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
+| `tests/` | bats tests for every hook and helper, `claude plugin test` tests for the dashboard, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
 | `evals/` | `claude plugin eval` suite: risk tiering, one case per agent, voter false-alarm drops, blind-mode source reads, a near-miss |
 | `assets/` | The README's animations and diagrams, in light and dark versions; `assets/src/diagrams.py` draws the diagrams |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`CHANGELOG.md`](CHANGELOG.md) · [`LICENSE`](LICENSE) | Development guide · release notes · MIT license |

@@ -9,10 +9,16 @@ Hooks read JSON on stdin, so tests feed fixture hook input and check the exit co
 ```bash
 bats -r tests/                                # every hook and bin/ helper
 shellcheck hooks/*.sh bin/* evals/run.sh evals/_fixture/make.sh evals/*/scaffold.sh
-claude plugin validate --strict .             # manifest, paths, marketplace; warnings fail
+claude plugin validate --strict .             # manifest, paths, marketplace, the dashboard module; warnings fail
+claude plugin test .                          # the dashboard's tests in tests/dashboard/, against the engine
 ```
 
-CI runs all three on every push and pull request, on Linux and on macOS (system bash 3.2).
+CI runs all four on every push and pull request: bats and shellcheck on Linux and on macOS (system bash 3.2).
+
+The dashboard (`hooks/dashboard/`) is a hooks module: TypeScript that runs inside Claude Code, with no Node or DOM.
+`task.ts` holds the pure parsing and stage logic; `register.tsx` hooks the events and draws. The values it keeps in
+the session are declared in `types/index.d.ts`. To try a change live, start `claude --plugin-dir .` from this repo;
+it reloads the module when you save.
 
 ## Evals
 

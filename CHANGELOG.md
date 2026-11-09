@@ -3,6 +3,16 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
+## Unreleased
+
+### Added
+
+- A dashboard for the active task, drawn in the Claude Code screen by a hooks module (`hooks/dashboard/`): a status
+  line, a stage rail above the prompt, toasts when a task converges, halts, escalates, or is ready, and a pane with
+  each stage's outcome, the review rounds' findings, the Quorum agents running now, Stop-hook blocks, and the next
+  command. The pane opens by itself when a session starts on a task or a `/quorum:*` command runs;
+  `/quorum-dashboard` shows or hides it. It only reads `.tasks/`.
+
 ## 0.3.0 (2026-11-09)
 
 ### Added
