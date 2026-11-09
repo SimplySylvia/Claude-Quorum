@@ -65,7 +65,9 @@ evals/run.sh                                   # the whole suite
 evals/run.sh --case prover-catches-hollow-test # one case; any other `claude plugin eval` option works too
 ```
 
-Every run makes real model calls on your Claude account, so CI doesn't run them. Run them after any change to a
+Every run makes real model calls on your Claude account, so CI doesn't run them. A run stops with partial results
+once it has spent $30; set `QUORUM_EVAL_MAX_COST` to change that (for example `QUORUM_EVAL_MAX_COST=10 evals/run.sh
+--case 'review-*'`). The ceiling is checked before each case starts, so a run can end slightly over it. Run them after any change to a
 skill's instructions or an agent's prompt.
 
 **macOS note.** Claude Code's sandbox can't stat Homebrew's files, so PATH lookups fall back to Apple's
