@@ -218,3 +218,18 @@ proof() {
   run "$BIN/quorum-state" set pr 42;                                 [ "$status" -eq 1 ]
   run "$BIN/quorum-state" set pr https://github.com/acme/app/issues/42; [ "$status" -eq 1 ]
 }
+
+@test "a standalone review records its kind, range, and review statuses" {
+  mkdir -p .tasks/review-pr-12
+  "$BIN/quorum-state" --task review-pr-12 init MEDIUM REVIEWING
+  "$BIN/quorum-state" --task review-pr-12 set kind review
+  "$BIN/quorum-state" --task review-pr-12 set range abc123..def456
+  run "$BIN/quorum-state" --task review-pr-12 get kind;  [ "$output" = "review" ]
+  run "$BIN/quorum-state" --task review-pr-12 get range; [ "$output" = "abc123..def456" ]
+  run "$BIN/quorum-state" --task review-pr-12 set status FIXING;   [ "$status" -eq 0 ]
+  run "$BIN/quorum-state" --task review-pr-12 set status REVIEWED; [ "$status" -eq 0 ]
+  run "$BIN/quorum-state" --task review-pr-12 set kind other;      [ "$status" -eq 1 ]
+  run "$BIN/quorum-state" --task review-pr-12 set range "a b";     [ "$status" -eq 1 ]
+  # kind and range sit right after slug, so a review's state.md reads as one at a glance
+  [ "$(sed -n 3p .tasks/review-pr-12/state.md)" = "kind: review" ]
+}

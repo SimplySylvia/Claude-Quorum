@@ -5,6 +5,8 @@
 #    task, or the task's status isn't BUILDING, IN_REVIEW, or ESCALATED. Also exit 0 for the main session (Stop)
 #    while the task has pending_findings: those failures are already queued for the builder, and its
 #    SubagentStop check still has to pass.
+#    While /quorum:review --fix runs its builder, .tasks/.review-fix-active names the review: the builder's
+#    SubagentStop is checked against that review's state (status FIXING) instead of the active task's.
 # 2. Run verify-completion.sh with a timeout (verify_timeout_s, default 300).
 # 3. On failure, count it in stop_blocks and exit 2 with the failing output, so Claude keeps working.
 # 4. Loop guard: on the 3rd failure in a row, let the stop through, save the status in escalated_from, set
@@ -29,10 +31,16 @@ export CLAUDE_PROJECT_DIR="$ROOT"
 VERIFY="$ROOT/.claude/hooks/verify-completion.sh"
 [ -f "$VERIFY" ] || exit 0
 
-task=$("$BIN/quorum-active-task" 2>/dev/null) || exit 0
+task=""
+FIX_MARKER="$ROOT/.tasks/.review-fix-active"
+if [ "$event" = SubagentStop ] && [ -f "$FIX_MARKER" ]; then
+  task=$(head -n 1 "$FIX_MARKER" | tr -d '[:space:]')
+  [ -n "$task" ] && [ -f "$ROOT/.tasks/$task/state.md" ] || task=""
+fi
+if [ -z "$task" ]; then task=$("$BIN/quorum-active-task" 2>/dev/null) || exit 0; fi
 state() { "$BIN/quorum-state" --task "$task" "$@"; }
 status=$(state get status 2>/dev/null) || exit 0
-case "$status" in BUILDING|IN_REVIEW|ESCALATED) ;; *) exit 0 ;; esac
+case "$status" in BUILDING|IN_REVIEW|ESCALATED|FIXING) ;; *) exit 0 ;; esac
 if [ "$event" = Stop ] && [ -n "$(state get pending_findings 2>/dev/null)" ]; then exit 0; fi
 
 timeout_s=${CLAUDE_PLUGIN_OPTION_VERIFY_TIMEOUT_S:-300}

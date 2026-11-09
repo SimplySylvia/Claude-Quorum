@@ -133,3 +133,37 @@ st() { "$BIN/quorum-state" --task demo get "$1"; }
   run bash -c "echo '{\"hook_event_name\":\"SubagentStop\",\"agent_type\":\"quorum:builder\"}' | '$HOOKS/stop-verify.sh'"
   [ "$status" -eq 2 ]
 }
+
+subagent_stop() { echo '{"hook_event_name":"SubagentStop","agent_type":"quorum:builder"}' | "$HOOKS/stop-verify.sh"; }
+
+@test "review --fix: the builder is checked against the review the marker names, not the active task" {
+  mkdir -p .tasks/review-pr-7
+  "$BIN/quorum-state" --task review-pr-7 init MEDIUM FIXING
+  "$BIN/quorum-state" --task demo set status PLANNING   # the active task isn't one the hook checks
+  printf 'review-pr-7\n' > .tasks/.review-fix-active
+  touch .fail
+  run subagent_stop
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"review-pr-7"* ]]
+  [ "$("$BIN/quorum-state" --task review-pr-7 get stop_blocks)" = "1" ]
+  [ "$(st stop_blocks)" = "0" ]
+  rm .fail
+  run subagent_stop
+  [ "$status" -eq 0 ]
+  [ "$("$BIN/quorum-state" --task review-pr-7 get stop_blocks)" = "0" ]
+}
+
+@test "review --fix: the main session's Stop ignores the marker, and a review that isn't FIXING isn't checked" {
+  mkdir -p .tasks/review-pr-7
+  "$BIN/quorum-state" --task review-pr-7 init MEDIUM REVIEWED
+  "$BIN/quorum-state" --task demo set status PLANNING
+  printf 'review-pr-7\n' > .tasks/.review-fix-active
+  touch .fail
+  run stop;          [ "$status" -eq 0 ]
+  run subagent_stop; [ "$status" -eq 0 ]
+  # A marker naming a review that doesn't exist falls back to the active task.
+  printf 'review-gone\n' > .tasks/.review-fix-active
+  "$BIN/quorum-state" --task demo set status BUILDING
+  run subagent_stop; [ "$status" -eq 2 ]
+  [[ "$output" == *"'demo'"* ]]
+}
