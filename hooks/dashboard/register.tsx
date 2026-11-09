@@ -1,19 +1,21 @@
-// Quorum's dashboard: a status line, a stage rail above the prompt, and a pane with the active task's stages,
-// review rounds and running agents. It only reads .tasks/; the skills and bin/ scripts stay the source of truth.
+// Quorum's dashboard: a status line, a stage rail above the prompt, and a pane with what the current stage is doing
+// (each reviewer of the round, the blind test's reports), how the task's checks stand, its stages, review rounds and
+// running agents. It only reads .tasks/; the skills and bin/ scripts stay the source of truth.
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { QuorumAgent, Round, Snapshot, Stage } from '../../types'
+import type { Check, Findings, Now, QuorumAgent, Reviewer, Round, Snapshot, Stage } from '../../types'
 import {
-  STAGES, count, countFindings, isStuck, list, nextStep, parseFrontmatter, scalar, slugFromHead, stageOf, stages,
+  ROLE_LABEL, STAGES, count, countFindings, countRequirements, evalRows, isStuck, joinChecks, list, nextStep, parseBlind,
+  parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, stageOf, stages,
 } from './task'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-1' })
-const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-1' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-2' })
+const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-2' })
 // Bumped every second while a Quorum agent runs, so the pane's running times count up.
 const clock = atom({ plugin: 'quorum', key: 'now' } as const, 0)
 let ticker: Timer | null = null
@@ -36,6 +38,10 @@ const GLYPH: Record<Stage['state'], [string, string]> = {
   skipped: ['–', 'inactive'],
 }
 
+const CHECK_GLYPH: Record<string, [string, string]> = { PASS: ['✓', 'success'], FAIL: ['✗', 'error'], SKIPPED: ['–', 'warning'] }
+
+const REVIEW_FILES = ['logic.md', 'architecture.md', 'patterns.md', 'docs.md', 'tests.md', 'a11y.md', 'security.md', 'votes.md', 'survivors.md']
+
 const STATUS_COLOR = (status: string) =>
   isStuck(status) ? 'error' : status === 'READY' || status === 'AWAITING-HUMAN' ? 'warning' : 'claude'
 
@@ -54,6 +60,57 @@ async function activeSlug($: EngineInterface, root: string): Promise<string> {
   if (fromBranch && (await $.fs.exists(`${root}/.tasks/${fromBranch}/state.md`))) return fromBranch
   const active = ((await readOr($, `${root}/.tasks/.active`)) ?? '').split('\n')[0]?.trim() ?? ''
   return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(active) ? active : ''
+}
+
+// The files among `names` under `dir` that exist, by name.
+async function readFiles($: EngineInterface, dir: string, names: string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {}
+  for (const name of names) {
+    const text = await readOr($, `${dir}/${name}`)
+    if (text !== null) out[name] = text
+  }
+  return out
+}
+
+// One plan or code review round: its reviewers' replies, the voter's, and what survived.
+async function roundNow($: EngineInterface, dir: string, kind: 'plan' | 'review', round: number, of: number, risk: string): Promise<Now> {
+  const files = await readFiles($, `${dir}/round-${round}`, REVIEW_FILES)
+  const survivors = files['survivors.md']
+  return {
+    kind,
+    round,
+    of,
+    reviewers: roundReviewers(kind, risk, files),
+    voter: reviewer('voter', files['votes.md']),
+    survivors: survivors === undefined ? null : countFindings(survivors),
+  }
+}
+
+// What the current stage is doing, read from the files its skill saves.
+async function nowFor($: EngineInterface, dir: string, t: Pick<Snapshot, 'stage' | 'risk' | 'round' | 'maxRounds' | 'planRounds' | 'blindRuns'>, rd: string): Promise<Now> {
+  switch (STAGES[t.stage]) {
+    case 'Spec': {
+      const files = await readFiles($, `${dir}/spec-review`, ['feasibility.md', 'improver.md'])
+      return {
+        kind: 'spec',
+        requirements: countRequirements(rd),
+        reviewers: [reviewer('feasibility', files['feasibility.md']), reviewer('improver', files['improver.md'])],
+      }
+    }
+    case 'Plan': return roundNow($, `${dir}/plan-review`, 'plan', t.planRounds, 2, t.risk)
+    case 'Build': return { kind: 'build' }
+    case 'Review': return roundNow($, `${dir}/review`, 'review', t.round, t.maxRounds, t.risk)
+    case 'Blind test': {
+      if (t.risk === 'LOW' || t.blindRuns === 0) return t.round > 0 ? roundNow($, `${dir}/review`, 'review', t.round, t.maxRounds, t.risk) : { kind: 'done' }
+      const run = t.blindRuns
+      const files = await readFiles($, `${dir}/blind`, [`blind-${run}.md`, `a11y-${run}.md`, `security-${run}.md`, `triage-${run}.md`])
+      return {
+        kind: 'blind',
+        blind: parseBlind(run, { blind: files[`blind-${run}.md`], a11y: files[`a11y-${run}.md`], security: files[`security-${run}.md`], triage: files[`triage-${run}.md`] }),
+      }
+    }
+    default: return { kind: 'done' }
+  }
 }
 
 async function snapshot($: EngineInterface, maxRounds: number, previous: Snapshot | null): Promise<Snapshot | null> {
@@ -79,26 +136,41 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     })
   }
 
+  // ESCALATED records the status it interrupted; HALTED comes from the review loop, or from blind test after 2 runs.
+  const stage = status === 'ESCALATED' && scalar(fm, 'escalated_from')
+    ? stageOf(scalar(fm, 'escalated_from'), undefined)
+    : status === 'HALTED' && count(fm, 'blind_runs') > 0
+      ? STAGES.indexOf('Blind test')
+      : stageOf(status, previous?.slug === slug ? previous.stage : undefined)
+  const planRounds = count(fm, 'plan_rounds')
+  const blindRuns = count(fm, 'blind_runs')
+
+  const dir = `${root}/.tasks/${slug}`
+  const rd = (await readOr($, `${dir}/rd.md`)) ?? ''
+  const evalMd = (await readOr($, `${dir}/eval.md`)) ?? ''
+  // proof-final.md is written after the review loop or blind test, so it is the newer one when both exist.
+  const proofs = await readFiles($, dir, ['proof-final.md', 'proof-build.md'])
+  const proofFile = proofs['proof-final.md'] !== undefined ? 'proof-final.md' : proofs['proof-build.md'] !== undefined ? 'proof-build.md' : ''
+  const proof = proofFile ? parseProof(proofs[proofFile] ?? '', proofFile) : null
+
   return {
     slug,
     risk,
     status,
-    // ESCALATED records the status it interrupted; HALTED comes from the review loop, or from blind test after 2 runs.
-    stage: status === 'ESCALATED' && scalar(fm, 'escalated_from')
-      ? stageOf(scalar(fm, 'escalated_from'), undefined)
-      : status === 'HALTED' && count(fm, 'blind_runs') > 0
-        ? STAGES.indexOf('Blind test')
-        : stageOf(status, previous?.slug === slug ? previous.stage : undefined),
+    stage,
     round,
     maxRounds,
-    planRounds: count(fm, 'plan_rounds'),
+    planRounds,
     planApproved: scalar(fm, 'plan_approved'),
     signoff: scalar(fm, 'signoff'),
-    blindRuns: count(fm, 'blind_runs'),
+    blindRuns,
     stopBlocks: count(fm, 'stop_blocks'),
     pending: list(fm, 'pending_findings').length,
     rounds,
     next: nextStep(status, risk),
+    now: await nowFor($, dir, { stage, risk, round, maxRounds, planRounds, blindRuns }, rd),
+    checks: joinChecks(evalRows(evalMd), proof),
+    proof,
   }
 }
 
@@ -120,6 +192,44 @@ function stageDetail(t: Snapshot, name: string): string {
     case 'Blind test': return t.risk === 'LOW' ? 'not run for LOW' : t.blindRuns ? `${t.blindRuns} run${t.blindRuns === 1 ? '' : 's'}` : ''
     default: return ''
   }
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+function findingsText(f: Findings): string {
+  if (f.important + f.nit + f.preExisting === 0) return 'clean'
+  return [`${f.important} IMPORTANT`, `${f.nit} NIT`, ...(f.preExisting ? [`${f.preExisting} pre-existing`] : [])].join(' · ')
+}
+
+// How many of the round's reviewers have replied, for the band and the pane.
+function reviewerProgress(now: Now): string {
+  if (now.kind !== 'plan' && now.kind !== 'review' && now.kind !== 'spec') return ''
+  const done = now.reviewers.filter(r => r.findings !== null).length
+  return `reviewers ${done}/${now.reviewers.length}`
+}
+
+function checkProgress(checks: Check[], hasProof: boolean): string {
+  return hasProof ? `checks ${checks.filter(c => c.result === 'PASS').length}/${checks.length}` : ''
+}
+
+function nowTitle(now: Now, maxRounds: number): string {
+  switch (now.kind) {
+    case 'spec': return 'Spec review'
+    case 'plan': return now.round === 0 ? 'Planning: the planner is writing plan.md' : `Plan review, round ${now.round} of ${now.of}`
+    case 'review': return `Code review, round ${now.round} of ${now.of || maxRounds}`
+    case 'build': return 'Build'
+    case 'blind': return `Blind test, run ${now.blind.run}`
+    case 'done': return 'Waiting for you'
+  }
+}
+
+// What the voter's result means for the round.
+function verdict(now: Extract<Now, { kind: 'plan' | 'review' }>): [string, string] | null {
+  if (!now.survivors) return null
+  if (now.survivors.important === 0) return [now.kind === 'plan' ? 'Nothing IMPORTANT left: ready for your approval' : 'Nothing IMPORTANT left: the round converges', 'success']
+  const who = now.kind === 'plan' ? 'the planner revises' : 'the builder fixes them'
+  const n = now.survivors.important
+  return [`${n === 1 ? '1 IMPORTANT finding survives' : `${n} IMPORTANT findings survive`}: ${who}`, 'error']
 }
 
 const seconds = (a: QuorumAgent, now: number) => `${Math.max(0, Math.round(((a.endedAt ?? now) - a.startedAt) / 1000))}s`
@@ -199,12 +309,26 @@ export const register: Register = (on, options) => {
     return ran
   }).catch(($, e, next) => next(e))
 
+  // Reviewers' replies, proofs, and blind-test reports are saved with Write (or fixed with Edit).
+  on('tool.call', { tool: 'Write' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (e.file_path.includes('/.tasks/')) await refresh($, maxRounds)
+    return ran
+  }).catch(($, e, next) => next(e))
+
+  on('tool.call', { tool: 'Edit' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (e.file_path.includes('/.tasks/')) await refresh($, maxRounds)
+    return ran
+  }).catch(($, e, next) => next(e))
+
   on('agent.spawn', async ($, e, next) => {
     const spawned = await next(e)
     if (spawned.deny === undefined && spawned.agentId && e.subagentType.startsWith('quorum:')) {
       const agent: QuorumAgent = {
         id: spawned.agentId,
         type: e.subagentType.slice('quorum:'.length),
+        role: roleOf(e.subagentType.slice('quorum:'.length), e.prompt),
         description: e.description,
         startedAt: await $.clock.now(),
         endedAt: null,
@@ -248,6 +372,9 @@ export const register: Register = (on, options) => {
             )
           })}
         </Text>
+        {[reviewerProgress(t.now), checkProgress(t.checks, t.proof !== null)].filter(Boolean).map(p => (
+          <Text key={p} dimColor>{p}</Text>
+        ))}
         {wide && <Text dimColor>next: {t.next}</Text>}
         <Button key="open" label="Dashboard" onPress={() => open($, true)} />
       </Box>
@@ -267,8 +394,44 @@ export const register: Register = (on, options) => {
     }
     const crew = await read($, agents)
     await read($, clock) // redraw on each tick
-    const now = await $.clock.now()
+    const clockNow = await $.clock.now()
     const rail = stages(t.status, t.risk, t.stage)
+    const n = t.now
+
+    // One line per reviewer or report: ● running, ✓ or ✗ done, ○ waiting.
+    const line = (key: string, state: 'running' | 'done' | 'waiting', label: string, detail: string, isBad = false) => (
+      <Text key={key}>
+        <Text color={state === 'running' ? 'claude' : state === 'waiting' ? 'inactive' : isBad ? 'error' : 'success'}>
+          {state === 'running' ? '●' : state === 'waiting' ? '○' : isBad ? '✗' : '✓'}{' '}
+        </Text>
+        <Text dimColor={state === 'waiting'}>{label}</Text>
+        {detail ? <Text dimColor>  {detail}</Text> : null}
+      </Text>
+    )
+    const runningAs = (role: string) => crew.findLast(a => a.role === role && a.endedAt === null)
+    const reviewerLine = (r: Reviewer) => {
+      const agent = runningAs(r.role)
+      const label = ROLE_LABEL[r.role] ?? r.role
+      if (r.findings) return line(r.role, 'done', label, r.role === 'voter' ? `kept ${findingsText(r.findings)}` : findingsText(r.findings), r.findings.important > 0)
+      if (agent) return line(r.role, 'running', label, `running ${seconds(agent, clockNow)}`)
+      return line(r.role, 'waiting', label, 'waiting')
+    }
+    // A report that only some runs write: shown once it exists or its agent runs.
+    const reportLine = (role: string, important: number | null, detail: (k: number) => string) => {
+      const agent = runningAs(role)
+      if (important !== null) return line(role, 'done', ROLE_LABEL[role] ?? role, detail(important), important > 0)
+      return agent ? line(role, 'running', ROLE_LABEL[role] ?? role, `running ${seconds(agent, clockNow)}`) : null
+    }
+
+    const shown = new Set<string>(
+      n.kind === 'plan' || n.kind === 'review' ? [...n.reviewers.map(r => r.role), 'voter']
+        : n.kind === 'spec' ? n.reviewers.map(r => r.role)
+          : n.kind === 'build' ? ['builder', 'prover']
+            : n.kind === 'blind' ? ['blind', 'a11y', 'security', 'triage'] : [],
+    )
+    const others = crew.filter(a => !shown.has(a.role)).slice(-6)
+    const taskChecks = t.checks.filter(c => c.id !== 'fast').length
+    const passed = t.checks.filter(c => c.result === 'PASS').length
 
     return (
       <Box flexDirection="column" gap={1}>
@@ -278,6 +441,71 @@ export const register: Register = (on, options) => {
             <Text color={STATUS_COLOR(t.status)} bold>{t.status || 'no status'}</Text>
             <Text dimColor> · {t.risk || 'no risk tier'} risk</Text>
           </Text>
+        </Box>
+
+        <Box flexDirection="column">
+          <Text>
+            <Text bold>Now · </Text>
+            <Text bold color="claude">{nowTitle(n, t.maxRounds)}</Text>
+          </Text>
+          {n.kind === 'spec' && <Text dimColor>{plural(n.requirements, 'requirement')} in rd.md · {plural(taskChecks, 'check')} in eval.md</Text>}
+          {n.kind === 'spec' && n.reviewers.map(reviewerLine)}
+          {(n.kind === 'plan' || n.kind === 'review') && n.round > 0 && (
+            <Box flexDirection="column">
+              <Text dimColor>{reviewerProgress(n)} replied</Text>
+              {n.reviewers.map(reviewerLine)}
+              {reviewerLine(n.voter)}
+              {(() => {
+                const v = verdict(n)
+                return v ? <Text color={v[1]}>{v[0]}</Text> : null
+              })()}
+            </Box>
+          )}
+          {n.kind === 'build' && (
+            <Box flexDirection="column">
+              {(['builder', 'prover'] as const).map(role => {
+                const agent = crew.findLast(a => a.role === role)
+                const label = role === 'builder' ? 'Builder' : 'Prover'
+                if (!agent) return line(role, 'waiting', label, role === 'builder' ? 'implements plan.md' : 'runs every check after the build')
+                return line(role, agent.endedAt === null ? 'running' : 'done', label, `${agent.endedAt === null ? 'running' : 'took'} ${seconds(agent, clockNow)}`)
+              })}
+            </Box>
+          )}
+          {n.kind === 'blind' && (
+            <Box flexDirection="column">
+              {n.blind.result
+                ? line('blind', 'done', ROLE_LABEL.blind ?? 'Blind user', `${n.blind.result === 'REACHED' ? 'reached the goal' : 'did not reach the goal'} · ${plural(n.blind.blockers, 'blocker')} · ${n.blind.friction} friction`, n.blind.result !== 'REACHED' || n.blind.blockers > 0)
+                : runningAs('blind')
+                  ? line('blind', 'running', ROLE_LABEL.blind ?? 'Blind user', `running ${seconds(runningAs('blind') as QuorumAgent, clockNow)}`)
+                  : line('blind', 'waiting', ROLE_LABEL.blind ?? 'Blind user', 'waiting')}
+              {reportLine('a11y', n.blind.a11y, k => k ? `${k} IMPORTANT` : 'clean')}
+              {reportLine('security', n.blind.security, k => k ? `${k} IMPORTANT` : 'clean')}
+              {reportLine('triage', n.blind.caused, k => k ? `${plural(k, 'item')} caused by this change` : 'nothing caused by this change')}
+            </Box>
+          )}
+          {n.kind === 'done' && <Text dimColor>Every stage is done.</Text>}
+        </Box>
+
+        <Box flexDirection="column">
+          <Text>
+            <Text bold>Checks · </Text>
+            {t.proof
+              ? <Text color={passed === t.checks.length ? 'success' : 'error'}>{passed} of {t.checks.length} pass</Text>
+              : <Text dimColor>{plural(taskChecks, 'check')} in eval.md, not run yet</Text>}
+          </Text>
+          {t.proof && <Text dimColor>{t.proof.file}{t.proof.rev ? ` at ${t.proof.rev}` : ''}</Text>}
+          {t.checks.map(c => {
+            const [glyph, color] = c.result ? CHECK_GLYPH[c.result] ?? ['○', 'inactive'] : ['○', 'inactive']
+            return (
+              <Text key={`check-${c.id}`} wrap="truncate-end">
+                <Text color={color}>{glyph} </Text>
+                <Text dimColor>{c.id}  </Text>
+                <Text dimColor={c.result === null}>{c.label}</Text>
+              </Text>
+            )
+          })}
+          {t.stopBlocks > 0 && <Text color="warning">Stop hook blocked {plural(t.stopBlocks, 'time')} in a row</Text>}
+          {t.pending > 0 && <Text color="warning">{plural(t.pending, 'finding')} pending for the builder</Text>}
         </Box>
 
         <Box flexDirection="column">
@@ -315,24 +543,16 @@ export const register: Register = (on, options) => {
           </Box>
         )}
 
-        {crew.length > 0 && (
+        {others.length > 0 && (
           <Box flexDirection="column">
-            <Text bold>Agents</Text>
-            {crew.slice(-10).map(a => (
+            <Text bold>Other agents</Text>
+            {others.map(a => (
               <Text key={a.id}>
                 <Text color={a.endedAt === null ? 'claude' : 'success'}>{a.endedAt === null ? '●' : '✓'} </Text>
                 <Text>{a.type}</Text>
-                <Text dimColor>  {a.description} · {seconds(a, now)}</Text>
+                <Text dimColor>  {a.description} · {seconds(a, clockNow)}</Text>
               </Text>
             ))}
-          </Box>
-        )}
-
-        {(t.stopBlocks > 0 || t.pending > 0) && (
-          <Box flexDirection="column">
-            <Text bold>Checks</Text>
-            {t.stopBlocks > 0 && <Text color="warning">Stop hook blocked {t.stopBlocks} time{t.stopBlocks === 1 ? '' : 's'} in a row</Text>}
-            {t.pending > 0 && <Text color="warning">{t.pending} finding{t.pending === 1 ? '' : 's'} pending for the builder</Text>}
           </Box>
         )}
 

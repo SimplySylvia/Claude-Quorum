@@ -8,6 +8,34 @@ export type Stage = { name: string; state: 'done' | 'active' | 'waiting' | 'stuc
 
 export type Round = { n: number; findings: Findings | null; candidates: number | null }
 
+// One reviewer of the current round: `findings` is null until its reply is saved.
+export type Reviewer = { role: string; findings: Findings | null }
+
+// The prover's latest report (proof-final.md, else proof-build.md).
+export type Proof = { file: string; rev: string; result: string; rows: { id: string; check: string; result: string }[] }
+
+// One eval.md row (or the fast checks) and its result in the latest proof; null when not run yet.
+export type Check = { id: string; label: string; result: 'PASS' | 'FAIL' | 'SKIPPED' | null }
+
+// The current blind-test run's reports; a count is null when that report wasn't written.
+export type Blind = {
+  run: number
+  result: string
+  blockers: number
+  friction: number
+  a11y: number | null
+  security: number | null
+  caused: number | null
+}
+
+// What the "Now" section shows for the current stage.
+export type Now =
+  | { kind: 'spec'; requirements: number; reviewers: Reviewer[] }
+  | { kind: 'plan' | 'review'; round: number; of: number; reviewers: Reviewer[]; voter: Reviewer; survivors: Findings | null }
+  | { kind: 'build' }
+  | { kind: 'blind'; blind: Blind }
+  | { kind: 'done' }
+
 export type Snapshot = {
   slug: string
   risk: string
@@ -23,11 +51,15 @@ export type Snapshot = {
   pending: number
   rounds: Round[]
   next: string
+  now: Now
+  checks: Check[]
+  proof: Proof | null
 }
 
 export type QuorumAgent = {
   id: string
   type: string
+  role: string
   description: string
   startedAt: number
   endedAt: number | null

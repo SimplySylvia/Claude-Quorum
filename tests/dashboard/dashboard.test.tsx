@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { countFindings, nextStep, parseFrontmatter, slugFromHead, stageOf, stages } from '../../hooks/dashboard/task'
+import {
+  countFindings, countRequirements, evalRows, joinChecks, nextStep, parseBlind, parseFrontmatter, parseProof, roleOf,
+  roundReviewers, slugFromHead, stageOf, stages,
+} from '../../hooks/dashboard/task'
 
 const state = (status: string, extra = '') => `---
 slug: export-csv
@@ -29,6 +32,62 @@ Mechanism: a comma splits a row.
 `
 const CANDIDATES = `${SURVIVORS}[NIT] app/report.py:9 — spacing
 [IMPORTANT] app/cli.py:3 — Pattern Category: Wrong env var
+`
+
+const RD = `# Export CSV
+
+## Requirements
+1. \`export\` writes a CSV of every customer.
+2. Fields with commas are quoted.
+3. **Docs:** add \`export\` to README.md.
+
+## Non-goals
+- No Excel output.
+`
+
+const EVAL = `# Eval: Export CSV
+
+## Task checks
+| # | Requirement | Command | Passes when |
+|---|---|---|---|
+| 1 | writes every customer | \`python -m app export\` | 3 rows |
+| 2 | quotes commas | \`pytest -k comma\` | passes |
+| 3 | README names export | \`rg -n export README.md\` | a match |
+
+## Edge cases
+- empty file
+`
+
+const PROOF = `Proof: export-csv at 1a2b3c4
+Result: 1 FAIL
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| fast | bash .claude/hooks/verify-completion.sh | PASS | "All checks passed." |
+| 1 | python -m app export | PASS | 3 rows |
+| 2 | pytest -k comma | FAIL | 1 failed |
+| 2b | fails without the fix (worktree) | PASS | 1 failed on old code |
+| 3 | rg -n export README.md | PASS | README.md:40 |
+`
+
+const BLIND = `Goal: export customers
+Result: NOT REACHED
+
+Blockers:
+- BLOCKER: ran export on data/empty.json — traceback — a header row
+
+Friction:
+- FRICTION: ran export --help — no example
+- FRICTION: ran export — no progress shown
+`
+
+const TRIAGE = `Triage: export-csv, 2 friction items
+
+CAUSED:
+- "no progress shown" — app/cli.py:12: the new command prints nothing
+
+RELATED:
+- "no example" — help text predates this change
 `
 
 const BAND = {
@@ -72,6 +131,8 @@ function world(on: On, files: Record<string, string>, root = '/repo') {
 const repo = (status: string) => ({
   '.git/HEAD': 'ref: refs/heads/feat/export-csv\n',
   '.tasks/export-csv/state.md': state(status),
+  '.tasks/export-csv/rd.md': RD,
+  '.tasks/export-csv/eval.md': EVAL,
   '.tasks/export-csv/review/round-1/candidates.md': CANDIDATES,
   '.tasks/export-csv/review/round-1/survivors.md': SURVIVORS,
   '.tasks/export-csv/review/round-2/candidates.md': SURVIVORS,
@@ -103,6 +164,36 @@ describe('task helpers', () => {
     expect(countFindings(CANDIDATES)).toEqual({ important: 2, nit: 2, preExisting: 0 })
     expect(slugFromHead('ref: refs/heads/fix/a.b-c\n')).toBe('a.b-c')
     expect(slugFromHead('ref: refs/heads/main')).toBe('')
+  })
+
+  test('reads requirements, eval rows, and the prover table, and joins them', () => {
+    expect(countRequirements(RD)).toBe(3)
+    expect(evalRows(EVAL).map(r => r.id)).toEqual(['1', '2', '3'])
+    const proof = parseProof(PROOF, 'proof-build.md')
+    expect(proof.rev).toBe('1a2b3c4')
+    expect(proof.result).toBe('1 FAIL')
+    const checks = joinChecks(evalRows(EVAL), proof)
+    expect(checks.map(c => `${c.id}:${c.result}`)).toEqual(['fast:PASS', '1:PASS', '2:FAIL', '3:PASS', '2b:PASS'])
+    expect(joinChecks(evalRows(EVAL), null).every(c => c.result === null)).toBe(true)
+  })
+
+  test('reads a blind run and names reviewers by persona', () => {
+    expect(parseBlind(1, { blind: BLIND, triage: TRIAGE })).toEqual({
+      run: 1, result: 'NOT REACHED', blockers: 1, friction: 2, a11y: null, security: null, caused: 1,
+    })
+    expect(roleOf('code-reviewer', 'Persona: Architecture, Security & Drift Hunter. Task: x')).toBe('architecture')
+    expect(roleOf('code-reviewer', 'Mode: plan. Persona: Test Adequacy Hunter, plan mode. Task: x')).toBe('tests')
+    expect(roleOf('spec-reviewer', 'Persona: Spec Improver. Task: x')).toBe('improver')
+    expect(roleOf('verifier-voter', 'Task: x')).toBe('voter')
+    expect(roleOf('builder', 'Task: x')).toBe('builder')
+  })
+
+  test('a round expects the reviewers its tier gets, plus any conditional one that replied', () => {
+    expect(roundReviewers('review', 'LOW', {}).map(r => r.role)).toEqual(['logic'])
+    expect(roundReviewers('review', 'MEDIUM', { 'a11y.md': 'Summary: 0 issues found. Ready to land.' }).map(r => r.role))
+      .toEqual(['logic', 'architecture', 'patterns', 'docs', 'a11y'])
+    expect(roundReviewers('plan', 'HIGH', {}).map(r => r.role)).toEqual(['logic', 'architecture', 'patterns', 'docs', 'security'])
+    expect(roundReviewers('review', 'LOW', { 'logic.md': SURVIVORS })[0]?.findings).toEqual({ important: 1, nit: 1, preExisting: 0 })
   })
 })
 
@@ -182,35 +273,100 @@ test('with no task the band is the engine\'s and the status line is clear', asyn
   await band.unmount()
 })
 
-test('quorum agents show while they run and tick when they finish', async ($, on) => {
-  const seen = world(on, repo('IN_REVIEW'))
-  on('agent.spawn', () => ({ model: 'claude-opus-5-5', agentId: 'a1' }))
+test('the round\'s reviewers show waiting, running, then their findings', async ($, on) => {
+  const files: Record<string, string> = repo('IN_REVIEW')
+  const seen = world(on, files)
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.tool_use_id }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const spawn = (id: string, subagentType: string, prompt: string) =>
+    $.agent.spawn({ tool_use_id: id, prompt, description: id, subagentType, parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  let pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /Code review, round 2 of 3/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /reviewers 0\/4 replied/ })).toBeDefined()
+  await pane.unmount()
 
   expect(seen.ticks).toBe(0)
-  await $.agent.spawn({ tool_use_id: 't1', prompt: 'review', description: 'Logic hunter', subagentType: 'quorum:code-reviewer', parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
+  await spawn('a1', 'quorum:code-reviewer', 'Persona: Logic & Edge-Case Hunter. Task: export-csv.')
   expect(seen.ticks).toBe(1)
-  let pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /^● $/ })).toBeDefined()
+  pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /running 0s/ })).toBeDefined()
   await pane.unmount()
 
+  // The skill saves the reply with Write, which re-reads the round.
+  files['.tasks/export-csv/review/round-2/logic.md'] = SURVIVORS
   await $.turn.complete({ agentId: 'a1', turnId: 'x', answer: 'done', reason: 'answer', durationMs: 1, isAborted: false })
+  await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/review/round-2/logic.md', content: SURVIVORS })
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /^✓ $/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /Logic hunter/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /reviewers 1\/4 replied/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^  1 IMPORTANT · 1 NIT$/ })).toBeDefined()
   await pane.unmount()
+
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ type: 'Text', text: /^reviewers 1\/4$/ })).toBeDefined()
+  await band.unmount()
 
   // The first interval was cancelled when the agent finished, so the next agent starts a new one.
-  await $.agent.spawn({ tool_use_id: 't2', prompt: 'vote', description: 'Voter', subagentType: 'quorum:verifier-voter', parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
+  await spawn('v1', 'quorum:verifier-voter', 'Task: export-csv.')
   expect(seen.ticks).toBe(2)
+
+  files['.tasks/export-csv/review/round-2/votes.md'] = SURVIVORS
+  files['.tasks/export-csv/review/round-2/survivors.md'] = SURVIVORS
+  await $.tool.call({ tool: 'Bash', command: 'quorum-findings cap 2 votes.md > .tasks/export-csv/review/round-2/survivors.md' })
+  pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /kept 1 IMPORTANT · 1 NIT/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /1 IMPORTANT finding survives: the builder fixes them/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('checks join eval.md with the latest proof', async ($, on) => {
+  const files: Record<string, string> = repo('BUILDING')
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /3 checks in eval.md, not run yet/ })).toBeDefined()
+  await pane.unmount()
+
+  files['.tasks/export-csv/proof-build.md'] = PROOF
+  await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/proof-build.md', content: PROOF })
+  pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^4 of 5 pass$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /proof-build.md at 1a2b3c4/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✗ 2  quotes commas$/ })).toBeDefined()
+  await pane.unmount()
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ type: 'Text', text: /^checks 4\/5$/ })).toBeDefined()
+  await band.unmount()
+})
+
+test('the spec and blind-test stages show their own reports', async ($, on) => {
+  const files: Record<string, string> = repo('DRAFT-AWAITING-VISUAL-SIGNOFF')
+  files['.tasks/export-csv/spec-review/feasibility.md'] = 'Summary: 0 issues found. Ready to build.\n'
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /3 requirements in rd.md · 3 checks in eval.md/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✓ Feasibility critic  clean$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^○ Spec improver  waiting$/ })).toBeDefined()
+  await pane.unmount()
+
+  files['.tasks/export-csv/state.md'] = state('BLIND-TEST').replace('blind_runs: 0', 'blind_runs: 1')
+  files['.tasks/export-csv/blind/blind-1.md'] = BLIND
+  files['.tasks/export-csv/blind/triage-1.md'] = TRIAGE
+  await $.tool.call({ tool: 'Bash', command: 'quorum-state set status BLIND-TEST' })
+  pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /Blind test, run 1/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /did not reach the goal · 1 blocker · 2 friction/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /1 item caused by this change/ })).toBeDefined()
+  await pane.unmount()
 })
 
 test('a reload marks agents the engine no longer runs as finished', async ($, on) => {
   const seen = world(on, repo('IN_REVIEW'))
   on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.description }))
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  const spawn = (description: string) => $.agent.spawn({ tool_use_id: description, prompt: 'review', description, subagentType: 'quorum:code-reviewer', parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
+  const spawn = (description: string) => $.agent.spawn({ tool_use_id: description, prompt: 'fix', description, subagentType: 'quorum:builder', parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
   await spawn('gone')
   await spawn('alive')
   seen.live = ['alive']
@@ -218,7 +374,7 @@ test('a reload marks agents the engine no longer runs as finished', async ($, on
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const marks = await pane.findAll({ type: 'Text', text: /^[●✓] $/ })
-  // The stage list draws the same glyphs first; the agents are the last two.
+  // The stage list draws the same glyphs first; the two builders, under Other agents, are last.
   expect(marks.slice(-2).map(m => m.text)).toEqual(['✓ ', '● '])
   await pane.unmount()
 })
