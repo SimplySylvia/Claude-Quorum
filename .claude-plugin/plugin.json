@@ -7,6 +7,7 @@
   "homepage": "https://github.com/SimplySylvia/Claude-Quorum",
   "repository": "https://github.com/SimplySylvia/Claude-Quorum",
   "keywords": ["code-review", "verification", "multi-agent", "hooks", "testing", "quality"],
+  "types": "./types/index.d.ts",
   "userConfig": {
     "max_rounds": { "type": "number", "title": "Max review rounds", "description": "Hard cap on review-loop rounds before a task is HALTED.", "default": 3, "min": 1, "max": 10 },
     "nit_cap": { "type": "number", "title": "Nit cap", "description": "Most [NIT] findings kept per review pass.", "default": 2, "min": 0, "max": 10 },
