@@ -18,6 +18,11 @@ copy with `/plugin marketplace update`.
   band shows `reviewers 3/4 · checks 6/7`.
 - The dashboard pane opens with what the task is: its title and goal from `rd.md`, each requirement with whether
   its `eval.md` checks pass, and its non-goals.
+- Once a task is `READY` or `AWAITING-HUMAN`, the dashboard looks up the branch's PR with `gh` and shows it open,
+  merged, or closed, with its link and the next step; the status line names it too. Without `gh` it shows whether
+  `pr.md` is drafted.
+- When no proof file was saved but the round log says every check passed, requirements and checks show a muted
+  "reported passing" mark instead of looking unstarted.
 - When a task past the build has no saved proof, the dashboard says which proof file is missing and shows the round
   log's line about the checks, instead of "not run yet".
 

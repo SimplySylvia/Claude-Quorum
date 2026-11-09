@@ -151,9 +151,14 @@ While a task is active, Quorum shows where it is without you asking:
     the goal, its blockers and friction, and the accessibility, security, and triage reports.
   - **Requirements:** each numbered requirement in `rd.md`, met when every `eval.md` row for it passes in the
     latest proof, failing when one fails, and flagged when no row checks it; then what's out of scope (the
-    non-goals).
+    non-goals). When no proof file was saved but the round log says every check passed, the requirements and
+    checks are marked, muted, as "reported passing" rather than proven.
   - **Checks:** every `eval.md` row and the fast checks, each passing, failing, or not run in the latest proof
     (`proof-final.md`, else `proof-build.md`), with the commit it ran at; Stop-hook blocks; pending findings.
+  - **The PR:** once the task is `READY` or `AWAITING-HUMAN`, the dashboard asks GitHub (`gh pr list --head
+    <branch>`, at most every 2 minutes and right after a `gh pr` command or a push) for the branch's PR, and shows
+    it open, merged, or closed with its link, or that `pr.md` is drafted and no PR is open yet. Without `gh`, or
+    signed out, it shows only whether `pr.md` is drafted.
   - **Stages**, each with its outcome; each **review round**'s findings and how many the voter kept; and any other
     Quorum agents running or finished.
 - **Toasts** when a task converges, halts, escalates, or is ready for you.
