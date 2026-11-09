@@ -7,7 +7,7 @@ You need `bash`, `git`, `jq`, [`bats-core`](https://github.com/bats-core/bats-co
 Hooks read JSON on stdin, so tests feed fixture hook input and check the exit code:
 
 ```bash
-bats -r tests/                                # every hook and bin/ helper
+bats -r tests/                                # every hook, bin/ helper, and the stage steps
 shellcheck hooks/*.sh bin/* evals/run.sh evals/_fixture/make.sh evals/*/scaffold.sh assets/src/*.sh
 claude plugin validate --strict .             # manifest, paths, marketplace, the dashboard module; warnings fail
 claude plugin test .                          # the dashboard's tests in tests/dashboard/, against the engine
@@ -19,6 +19,17 @@ The dashboard (`hooks/dashboard/`) is a hooks module: TypeScript that runs insid
 `task.ts` holds the pure parsing and stage logic; `register.tsx` hooks the events and draws. The values it keeps in
 the session are declared in `types/index.d.ts`. To try a change live, start `claude --plugin-dir .` from this repo;
 it reloads the module when you save.
+
+## Skills and their steps
+
+`/quorum:run` follows the stage commands' instructions, but a skill can't start another user-only skill, and the
+plugin root, `$ARGUMENTS`, and `${user_config.…}` are only filled in inside a `SKILL.md`. So each stage `run` chains
+(`spec-and-eval`, `plan`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `pr-draft`) keeps its instructions
+in `skills/<stage>/steps.md`, and its `SKILL.md` is a short wrapper: the frontmatter, then the values the steps use,
+written as `<plugin root>`, `<arguments>`, and `<setting>`. `skills/run/SKILL.md` lists the same values.
+
+Edit a stage's behavior in `steps.md`. If a step needs a new setting, add it to the stage's `SKILL.md` and to
+`run`'s, with its default.
 
 ## Evals
 
@@ -45,6 +56,8 @@ each run's workspace and bootstraps for Quorum.
 | `voter-drops-false-alarm` | `verifier-voter` keeps the real bug and drops a factually wrong finding |
 | `blind-user-no-source` | `blind-user` reaches its goal through the CLI without ever hitting the source guard |
 | `review-standalone-finds-bug` | `/quorum:review` on a branch with no task keeps the planted bug through the voter and records the run in `.tasks/review-<id>/` |
+| `run-low-to-ready` | `/quorum:run --yes` takes a LOW task through every stage to `READY`, with a proof at HEAD and a drafted PR, and pushes nothing |
+| `run-high-asks-tier` | Even with `--yes`, `/quorum:run` asks the user to confirm a HIGH tier and builds nothing before an answer |
 | `nearmiss-no-auto-review-loop` | An ordinary "look at my commit" request never starts a Quorum command |
 
 ```bash

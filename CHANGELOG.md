@@ -7,6 +7,13 @@ copy with `/plugin marketplace update`.
 
 ### Added
 
+- **`/quorum:run`: the whole pipeline in one command.** It starts a task from a request, or continues the active
+  one from its status, and follows each stage's own steps in order: spec, plan, build, simplify, review loop, blind
+  test, PR draft. It stops only where you must decide (the slug, tier, and research; the models; docs; mockup
+  sign-off; plan approval; a halt; the human review), and `--yes` never skips a HIGH task's tier or plan approval.
+  `--until <stage>` stops it early. It never pushes, opens, or merges a PR, and keeps the chat to one line per
+  stage.
+
 - **`/quorum:review`: Quorum's reviewers on any diff,** with no task, spec, plan, or bootstrap. It reviews the
   current branch, a GitHub PR, or a git range against the PR's description or the commit messages; proposes a risk
   tier you confirm, which picks the reviewers as the review loop does (plus the security reviewer for HIGH); runs the
@@ -33,6 +40,12 @@ copy with `/plugin marketplace update`.
 - **What the agents cost, on the dashboard.** A **Spend** section shows how many Quorum agents ran since the last
   `/quorum:*` command, their input (and cached) and output tokens, summed from each request they made, and how many
   ran on each model. Other agents show their own token counts.
+
+### Changed
+
+- Each stage command (`spec-and-eval`, `plan`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `pr-draft`)
+  keeps its instructions in `skills/<stage>/steps.md`, which `/quorum:run` follows too. Its `SKILL.md` gives the
+  values the steps use. The commands behave as before.
 
 ### Fixed
 

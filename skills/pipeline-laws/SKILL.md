@@ -17,7 +17,8 @@ description: Quorum's universal engineering laws and stage map. Use when decidin
 ## Where a task is, and what comes next
 
 Find the active task with `quorum-active-task` and its status with `quorum-state get status`. Then suggest the
-next command. Never start one yourself: every Quorum command is run by the user.
+next command. Never start one yourself: every Quorum command is run by the user. `/quorum:run` takes a task
+through these stages in order when the user starts it.
 
 | Status | Next command |
 |---|---|

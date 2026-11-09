@@ -78,6 +78,15 @@ Then, in the repo you want to protect:
 /quorum:codify-lesson          # optional: save a repeated bug or false alarm as a rule
 ```
 
+Or let one command take a task through every stage, stopping only where you must decide:
+
+```
+/quorum:run Add a CSV export to the sales report   # spec → plan → build → review → blind test → PR draft
+/quorum:run                                        # continue the active task from wherever it stopped
+```
+
+See [Running the whole pipeline](#running-the-whole-pipeline).
+
 Every command is user-only: Claude never starts a review loop on its own.
 
 To try Quorum's reviewers first, no setup needed, review a branch or pull request you already have:
@@ -142,6 +151,27 @@ new lines.
     <img src="assets/review-loop-light.svg" alt="One round of the review loop: pick the diff range (the whole branch in round 1, then only new lines), reviewers in parallel (logic always; architecture, patterns, and docs for MEDIUM/HIGH; tests and accessibility when those change), then the verifier-voter. With nothing IMPORTANT left, the task converges: LOW goes to the prover and READY, MEDIUM/HIGH to the blind test. Otherwise, after round 3 it halts for a redesign; before that, the builder fixes every instance of each Pattern Category and the next round starts. Blind-test blockers enter at the builder." width="640">
   </picture>
 </p>
+
+## Running the whole pipeline
+
+`/quorum:run` follows each stage's own steps, in order, so a task gets exactly what the separate commands give it:
+the same agents, the same checks, the same caps. It goes on by itself between stages and stops where only you can
+decide:
+
+| It stops for | When |
+|---|---|
+| The slug, risk tier, and research choice | the spec (with `--yes`, it accepts its proposals, but still asks about a HIGH tier) |
+| The reviewer and helper models | the spec, unless the plugin options set them |
+| Docs for a new feature | the spec (with `--yes`, the places the repo documents similar features) |
+| Mockup sign-off | UI tasks, before planning, always |
+| Plan approval | after plan review (with `--yes`, approved when nothing `[IMPORTANT]` survives, except for HIGH) |
+| A halt | the review loop or blind test runs out of rounds, or the Stop hook escalates |
+| Your review | MEDIUM and HIGH tasks end at `AWAITING-HUMAN`, after drafting the PR |
+
+It never pushes, opens, or merges the PR: it ends with the draft and the commands to run. `--until <stage>`
+(`spec`, `plan`, `build`, `review`, `blind`, or `pr`) stops it earlier, and running it again without a request
+picks up from the task's status, so you can mix it with the single-stage commands. Between stages it prints one
+line per stage; agents' full replies stay in `.tasks/<slug>/`.
 
 ## Reviewing any diff
 
@@ -321,7 +351,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 |---|---|
 | `.claude-plugin/plugin.json` | Plugin manifest, including the `userConfig` options |
 | `.claude-plugin/marketplace.json` | Marketplace manifest (lists this repo as its only plugin) |
-| `skills/` | `init-pipeline`, `spec-and-eval`, `plan`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `pr-draft`, `codify-lesson`, `review`, and the model-invocable `pipeline-laws` |
+| `skills/` | `init-pipeline`, `spec-and-eval`, `plan`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `pr-draft`, `codify-lesson`, `review`, `run`, and the model-invocable `pipeline-laws`. Each stage `run` chains keeps its instructions in `steps.md`, which its `SKILL.md` and `run` both follow |
 | `agents/` | `researcher`, `spec-reviewer`, `planner`, `builder`, `prover`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `verifier-voter`, `security-reviewer`, `blind-user`, `friction-triager`, `pr-writer` |
 | `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `stop-verify.sh`, `record-pr.sh`, and `dashboard/`, the dashboard's hooks module |
 | `types/` | The type contract for the values the dashboard keeps in the session |

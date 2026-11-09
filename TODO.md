@@ -30,70 +30,18 @@ The command itself shipped (see `CHANGELOG.md`, Unreleased). Still to do:
 - **`/quorum:codify-lesson` from a review.** It reads a task's round files; let it read a review's `run-<N>/`
   files too, so a false alarm in a PR review can become a rule.
 
-## 2. `/quorum:run`: the whole pipeline, stopping only where a person must decide
+## 2. `/quorum:run`: what's left
 
-**Why.** Quorum is eight commands run by hand. Superpowers now runs a plan straight through, stopping only when
-blocked, and Compound Engineering has `/lfg`, which plans, builds, reviews, fixes, and commits on its own. People
-who trust the checks want to start a task and come back to a PR. Quorum is better placed for this than either: its
-gates are enforced by hooks and `quorum-state`, not by asking the model to stop itself, so an autopilot can't skip
-proof.
+The command shipped (see `CHANGELOG.md`, Unreleased), with each stage's instructions moved to `steps.md` so `run`
+and the stage commands share them. Still to do:
 
-**What it does.**
-
-```
-/quorum:run <what to build>        # start a task and take it as far as it can go
-/quorum:run                        # continue the active task from wherever it stopped
-/quorum:run --until review         # stop after a stage: spec, plan, build, review, blind, pr
-/quorum:run --yes                  # also accept the proposals that only need a nod (see below)
-```
-
-It reads the task's status and runs the next stage from `pipeline-laws`' stage map, again and again, until it
-reaches a gate, an end state, or `--until`. Because each step comes from `state.md`, stopping and running it again
-picks up where it left off, and running a single stage command in between still works.
-
-**Where it stops (the gates).** Each is a decision only the user can make, so `run` asks and waits:
-
-| Gate | When | With `--yes` |
-|---|---|---|
-| Slug, risk tier, and research choice | spec | accepted as proposed (HIGH still asks) |
-| Model choices | spec, if not configured | `inherit` |
-| Docs for a new feature | spec | the places the repo documents similar features |
-| Mockup sign-off | UI tasks, before planning | always asks |
-| Plan approval | after plan review | accepted if no `[IMPORTANT]` survives (HIGH still asks) |
-| HALTED | the review loop or blind test runs out of rounds | always stops, with the post-mortem |
-| ESCALATED | the Stop hook fails 3 times | always stops |
-| Human review | `AWAITING-HUMAN` (MEDIUM and HIGH) | always stops; drafts the PR first |
-
-It never pushes, opens a PR, or merges; it ends with `/quorum:pr-draft`'s output and the commands to run.
-
-**The hard design question: how `run` reaches the stages.** Every stage skill has
-`disable-model-invocation: true` so Claude never starts a review on its own, and that may also stop a running
-`/quorum:run` from invoking them through the Skill tool. Options:
-
-1. **Shared step files.** Move each stage's body into `skills/<stage>/steps.md`; the stage's `SKILL.md` becomes a
-   short wrapper that reads it, and `run` reads the same files in order. One source of truth, no invocation
-   question. Costs a refactor of every stage skill and their evals.
-2. **Check whether a user-invoked skill may invoke `disable-model-invocation` skills.** If the harness allows it
-   from inside a user-started command, `run` is mostly a loop over the stage map. Verify before choosing.
-3. **A Workflow script.** Deterministic, but needs the user to opt into workflows and loses the conversational
-   gates.
-
-Leaning towards 1, after checking 2.
-
-**Context budget.** A whole MEDIUM task in one conversation is long: research, two spec reviews, two plan rounds,
-up to three review rounds, a blind test. The orchestrator only reads agents' replies and saves them, but that adds
-up. Ideas: print a one-line progress note per stage and keep the verbatim replies in files, not in the chat; make
-sure the stage skills already say "save verbatim, show the summary" (most do).
-
-**Dashboard.** The band could show "autopilot: running · next gate: plan approval", and a toast at each gate, so
-a user can work elsewhere and come back when asked.
-
-**Open questions.**
-
-- Should `run` do `/quorum:simplify-diff` after the build? (Yes: it's cheap and shrinks every review round.)
-- Should it offer `/quorum:codify-lesson` at the end when a Pattern Category came back in more than one round?
-- Evals: a LOW task end to end on the fixture app reaching `READY` with a proof at HEAD; a MEDIUM task stopping at
-  plan approval without `--yes`; `run` with no task and no request asks what to build instead of guessing.
+- **Run its evals:** `run-low-to-ready` (a whole LOW task: the most expensive case in the suite) and
+  `run-high-asks-tier`, plus the existing stage cases, since every stage skill moved into `steps.md`.
+- **The dashboard during a run:** "autopilot · next stop: plan approval" in the band, and a toast at each stop, so a
+  user can work elsewhere and come back when asked. The dashboard can't tell a run from single commands today.
+- **Context length.** A whole MEDIUM task is long for one conversation. Measure one with the Spend section and the
+  transcript size, and see whether the chat rule (one line per stage) is enough.
+- **`--fast` for LOW** (item 3) fits here as a `run` flag.
 
 ## 3. A fast path for LOW tasks
 

@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: run-low-to-ready
+description: /quorum:run takes a LOW task from request to READY with a proof at HEAD and a drafted PR, without pushing or opening it.
+tags: [run]
+context:
+  scaffold_script: scaffold.sh

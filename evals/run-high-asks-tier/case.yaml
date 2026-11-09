@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: run-high-asks-tier
+description: Even with --yes, /quorum:run stops to ask the user to confirm a HIGH tier, and builds nothing before an answer.
+tags: [run, safety]
+context:
+  scaffold_script: scaffold.sh
