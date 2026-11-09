@@ -80,9 +80,10 @@ test result, the blockers, and the triage counts.
 
 ## 5. Stage 8 summary
 
-1. **Verification proof:** start `quorum:prover` on all of `eval.md` (as in `/quorum:build` step 4), save its
-   reply verbatim to `.tasks/<slug>/proof-final.md`, and show it. If anything fails, say so and stop without
-   changing the status.
+1. **Verification proof:** start `quorum:prover` on all of `eval.md` (as in `/quorum:build` step 4), save its reply
+   verbatim to `.tasks/<slug>/proof-final.md`, and show it. `quorum-state` refuses `READY` and `AWAITING-HUMAN`
+   without this file, at HEAD, with no failed check, so save it before setting the status. If anything fails, say so
+   and stop without changing the status.
 2. **Risk tier**, the review rounds, and the blind-test runs.
 3. **Rollback plan:** the one step from `rd.md`.
 4. **Changes:** `git diff --stat <base_sha>..HEAD` and `git log --oneline <base_sha>..HEAD`.

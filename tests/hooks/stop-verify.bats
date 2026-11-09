@@ -74,6 +74,8 @@ st() { "$BIN/quorum-state" --task demo get "$1"; }
 
 @test "only BUILDING, IN_REVIEW, and ESCALATED tasks are checked" {
   touch .fail
+  # READY and AWAITING-HUMAN need a passing proof at HEAD (quorum-state checks it).
+  printf 'Proof: demo at %s\nResult: ALL PASS\n' "$(git rev-parse --short HEAD)" > .tasks/demo/proof-final.md
   for s in DRAFT-AWAITING-VISUAL-SIGNOFF CONVERGED BLIND-TEST READY AWAITING-HUMAN HALTED; do
     "$BIN/quorum-state" --task demo set status "$s"
     run stop

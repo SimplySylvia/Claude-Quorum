@@ -28,8 +28,8 @@ next command. Never start one yourself: every Quorum command is run by the user.
 | `IN_REVIEW` | `/quorum:review-loop` |
 | `CONVERGED` | `/quorum:blind-test` for MEDIUM or HIGH; LOW tasks already have their summary |
 | `BLIND-TEST` | Wait for `/quorum:blind-test` to finish |
-| `READY` | `/quorum:pr-draft`, then merge. Optionally `/quorum:codify-lesson` |
-| `AWAITING-HUMAN` | The user reviews the files named in the summary; `/quorum:pr-draft` for the PR. Optionally `/quorum:codify-lesson` |
+| `READY` | `/quorum:pr-draft`, then merge (once `quorum-state get pr` names the PR, get it reviewed and merged). Optionally `/quorum:codify-lesson` |
+| `AWAITING-HUMAN` | The user reviews the files named in the summary; `/quorum:pr-draft` for the PR, or, once `quorum-state get pr` names it, its review and merge. Optionally `/quorum:codify-lesson` |
 | `HALTED` | The user picks a redesign from the post-mortem, then `/quorum:spec-and-eval --redesign <slug>` |
 | `ESCALATED` | The Stop-hook checks failed 3 times in a row. Fix the environment or the failing checks; the next pass restores the previous status |
 

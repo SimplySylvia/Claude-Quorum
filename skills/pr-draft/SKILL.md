@@ -16,6 +16,8 @@ Don't run git commands that change the working tree, index, or history here, and
    say which command comes next (`pipeline-laws` has the stage map) and stop.
 2. **Check the proof.** `.tasks/<slug>/proof-final.md` must exist and say `Result: ALL PASS`. If it's missing or
    anything failed, say so and stop: a PR shouldn't claim checks that didn't pass.
+   If the branch already has a PR (`gh pr view --json url --jq .url` prints one), record it with
+   `quorum-state --task <slug> set pr <url>` and say you're drafting a new description for it.
 3. **Run the writer.** Start `quorum:pr-writer` with:
 
    > Task `<slug>`. Base commit `<quorum-state get base_sha>`. Draft the PR title and description, and list any
@@ -29,4 +31,6 @@ Don't run git commands that change the working tree, index, or history here, and
      `git rebase --onto <sha> <sha>^`, or an interactive rebase they run themselves), and say to rerun the fast
      checks afterwards.
    - The push and create commands that fit the repo (for example `git push -u origin <branch>` and
-     `gh pr create --title "<title>" --body-file .tasks/<slug>/pr-body.md`).
+     `gh pr create --title "<title>" --body-file .tasks/<slug>/pr-body.md`). When `gh pr create` runs in this
+     session, Quorum records the new PR's URL as the task's `pr`. If they open it another way, give
+     `quorum-state --task <slug> set pr <url>` to record it.

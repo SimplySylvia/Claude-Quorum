@@ -20,7 +20,6 @@ open(p, "w").write(s)
 PY
 git commit -qam "Add export command"
 "$(dirname "$0")/../../bin"/quorum-state --task csv-export set base_sha "$(git rev-parse main)"
-"$(dirname "$0")/../../bin"/quorum-state --task csv-export set status AWAITING-HUMAN
 cat > .tasks/csv-export/rd.md <<'MD'
 # Add a CSV export command (SALES-12)
 
@@ -32,7 +31,7 @@ Users can export the sales rows as CSV. Ticket: SALES-12.
 2. Exporting a 10,000-row file takes under a second.
 MD
 cat > .tasks/csv-export/proof-final.md <<'MD'
-Proof: csv-export at HEAD
+Proof: csv-export at SHORT_SHA
 Result: 1 SKIPPED
 
 | # | Check | Result | Evidence |
@@ -43,3 +42,6 @@ Result: 1 SKIPPED
 
 Working tree unchanged: yes
 MD
+# The proof names the commit it ran at; quorum-state checks it before AWAITING-HUMAN.
+sed -i.bak "s/SHORT_SHA/$(git rev-parse --short HEAD)/" .tasks/csv-export/proof-final.md && rm -f .tasks/csv-export/proof-final.md.bak
+"$(dirname "$0")/../../bin"/quorum-state --task csv-export set status AWAITING-HUMAN

@@ -12,6 +12,7 @@ teardown() { cleanup_repo; }
   run "$BIN/quorum-state" get round;       [ "$output" = "0" ]
   run "$BIN/quorum-state" get base_sha;    [ -z "$output" ]
   run "$BIN/quorum-state" get round_shas;  [ -z "$output" ]
+  run "$BIN/quorum-state" get pr;          [ "$status" -eq 0 ]; [ -z "$output" ]
 }
 
 @test "init refuses to overwrite and validates its arguments" {
@@ -43,7 +44,7 @@ teardown() { cleanup_repo; }
 
 @test "set validates status, risk, and counters" {
   "$BIN/quorum-state" --task demo init LOW
-  run "$BIN/quorum-state" set status AWAITING-HUMAN; [ "$status" -eq 0 ]
+  run "$BIN/quorum-state" set status IN_REVIEW;      [ "$status" -eq 0 ]
   run "$BIN/quorum-state" set status DONE;           [ "$status" -eq 1 ]
   run "$BIN/quorum-state" set risk MEDIUM;           [ "$status" -eq 0 ]
   run "$BIN/quorum-state" set risk SEVERE;           [ "$status" -eq 1 ]
@@ -141,4 +142,60 @@ STATE
   [ "$status" -eq 0 ]
   run "$BIN/quorum-state" get status; [ "$output" = "IN_REVIEW" ]
   [ -z "$(ls -A .tasks | grep quorum-state || true)" ]
+}
+
+# proof RESULT [REV]: write the prover's proof-final.md for demo, at HEAD unless REV is given.
+proof() {
+  local rev=${2-$(git rev-parse --short HEAD)}
+  printf 'Proof: demo at %s\nResult: %s\n\n| # | Check | Result | Evidence |\n|---|---|---|---|\n' "$rev" "$1" > .tasks/demo/proof-final.md
+}
+
+@test "READY and AWAITING-HUMAN need proof-final.md" {
+  "$BIN/quorum-state" --task demo init MEDIUM IN_REVIEW
+  for s in READY AWAITING-HUMAN; do
+    run "$BIN/quorum-state" set status "$s"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"can't set $s without .tasks/demo/proof-final.md"* ]]
+  done
+  run "$BIN/quorum-state" get status; [ "$output" = "IN_REVIEW" ]
+  # init can't start a task finished either.
+  run "$BIN/quorum-state" --task other init LOW READY
+  [ "$status" -eq 1 ]
+  [ ! -e .tasks/other/state.md ]
+}
+
+@test "a proof with a failed check, no Result line, or no commit is refused" {
+  "$BIN/quorum-state" --task demo init MEDIUM IN_REVIEW
+  proof "1 FAIL"
+  run "$BIN/quorum-state" set status READY; [ "$status" -eq 1 ]; [[ "$output" == *'says "Result: 1 FAIL"'* ]]
+  printf 'Proof: demo at %s\n' "$(git rev-parse --short HEAD)" > .tasks/demo/proof-final.md
+  run "$BIN/quorum-state" set status READY; [ "$status" -eq 1 ]; [[ "$output" == *'no "Result:" line'* ]]
+  printf 'Result: ALL PASS\n' > .tasks/demo/proof-final.md
+  run "$BIN/quorum-state" set status READY; [ "$status" -eq 1 ]; [[ "$output" == *"doesn't name the commit"* ]]
+}
+
+@test "a proof from an older commit is refused" {
+  "$BIN/quorum-state" --task demo init MEDIUM IN_REVIEW
+  proof "ALL PASS"
+  git -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m fix
+  run "$BIN/quorum-state" set status AWAITING-HUMAN
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"but HEAD is"* ]]
+}
+
+@test "a passing proof at HEAD, or one with only skipped checks, finishes the task" {
+  "$BIN/quorum-state" --task demo init LOW IN_REVIEW
+  proof "ALL PASS"
+  run "$BIN/quorum-state" set status READY; [ "$status" -eq 0 ]
+  proof "1 SKIPPED" "$(git rev-parse HEAD)"
+  run "$BIN/quorum-state" set status AWAITING-HUMAN; [ "$status" -eq 0 ]
+  run "$BIN/quorum-state" get status; [ "$output" = "AWAITING-HUMAN" ]
+}
+
+@test "pr takes a pull request URL" {
+  "$BIN/quorum-state" --task demo init MEDIUM
+  run "$BIN/quorum-state" set pr https://github.com/acme/app/pull/42; [ "$status" -eq 0 ]
+  run "$BIN/quorum-state" get pr; [ "$output" = "https://github.com/acme/app/pull/42" ]
+  run "$BIN/quorum-state" set pr 42;                                 [ "$status" -eq 1 ]
+  run "$BIN/quorum-state" set pr https://github.com/acme/app/issues/42; [ "$status" -eq 1 ]
 }

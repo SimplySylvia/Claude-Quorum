@@ -121,9 +121,10 @@ Tell the user to pick one and run `/quorum:spec-and-eval --redesign <slug>`.
 
 ### Stage 8 summary
 
-1. **Verification proof:** start `quorum:prover` on all of `eval.md` (as in `/quorum:build` step 4), save its
-   reply verbatim to `.tasks/<slug>/proof-final.md`, and show it. If anything fails, say so and don't mark the
-   task READY.
+1. **Verification proof:** start `quorum:prover` on all of `eval.md` (as in `/quorum:build` step 4), save its reply
+   verbatim to `.tasks/<slug>/proof-final.md`, and show it. `quorum-state` refuses `READY` and `AWAITING-HUMAN`
+   without this file, at HEAD, with no failed check, so save it before setting the status. If anything fails, say so
+   and don't mark the task READY.
 2. **Risk tier**, and the rounds it took.
 3. **Rollback plan:** the one step from `rd.md`.
 4. **Changes:** `git diff --stat <base_sha>..HEAD` and `git log --oneline <base_sha>..HEAD`.
