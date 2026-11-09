@@ -12,6 +12,10 @@ copy with `/plugin marketplace update`.
   each stage's outcome, the review rounds' findings, the Quorum agents running now, Stop-hook blocks, and the next
   command. The pane opens by itself when a session starts on a task or a `/quorum:*` command runs;
   `/quorum-dashboard` shows or hides it. It only reads `.tasks/`.
+- The dashboard's **Now** section shows the current stage in detail: each spec, plan, or code reviewer of the round
+  as waiting, running, or done with its findings, the voter's result, the builder and prover, or the blind test's
+  reports. A **Checks** section joins `eval.md` with the latest proof, so you can see which checks pass, and the
+  band shows `reviewers 3/4 · checks 6/7`.
 
 ## 0.3.0 (2026-11-09)
 

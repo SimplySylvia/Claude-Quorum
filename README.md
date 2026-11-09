@@ -139,11 +139,19 @@ new lines.
 While a task is active, Quorum shows where it is without you asking:
 
 - **Status line:** `Quorum · export-csv · IN_REVIEW · MEDIUM · round 2/3 · 1 pending`.
-- **Above the prompt:** the stage rail, `✓ Spec › ✓ Plan › ✓ Build › ● Review r2/3 › ○ Blind test › ○ PR`, the next
-  command, and a **Dashboard** button.
-- **A dashboard pane:** each stage with its outcome, each review round's findings and how many the voter kept, the
-  Quorum agents running now and the ones that finished, Stop-hook blocks, and the next command. It opens by itself
-  when a session starts on a task and when a `/quorum:*` command runs; `/quorum-dashboard` shows or hides it.
+- **Above the prompt:** the stage rail, `✓ Spec › ✓ Plan › ✓ Build › ● Review r2/3 › ○ Blind test › ○ PR`, how many
+  of the round's reviewers have replied and how many checks pass (`reviewers 3/4 · checks 6/7`), the next command,
+  and a **Dashboard** button.
+- **A dashboard pane**, which opens by itself when a session starts on a task and when a `/quorum:*` command runs;
+  `/quorum-dashboard` shows or hides it:
+  - **Now:** what the current stage is doing. In spec, plan, and code review, each reviewer the round runs for the
+    task's tier, as waiting, running (with its time), or done with its findings, then the voter's result and what it
+    means for the round. In the build, the builder and the prover. In the blind test, whether the blind user reached
+    the goal, its blockers and friction, and the accessibility, security, and triage reports.
+  - **Checks:** every `eval.md` row and the fast checks, each passing, failing, or not run in the latest proof
+    (`proof-final.md`, else `proof-build.md`), with the commit it ran at; Stop-hook blocks; pending findings.
+  - **Stages**, each with its outcome; each **review round**'s findings and how many the voter kept; and any other
+    Quorum agents running or finished.
 - **Toasts** when a task converges, halts, escalates, or is ready for you.
 
 The pane sits beside the chat in a wide fullscreen terminal and above the prompt otherwise. Opened by itself, it
