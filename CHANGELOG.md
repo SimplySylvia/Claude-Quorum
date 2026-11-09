@@ -3,42 +3,38 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
-## Unreleased
+## 0.4.0 (2026-11-09)
 
 ### Added
 
-- A dashboard for the active task, drawn in the Claude Code screen by a hooks module (`hooks/dashboard/`): a status
-  line, a stage rail above the prompt, toasts when a task converges, halts, escalates, or is ready, and a pane with
-  each stage's outcome, the review rounds' findings, the Quorum agents running now, Stop-hook blocks, and the next
-  command. The pane opens by itself when a session starts on a task or a `/quorum:*` command runs;
-  `/quorum-dashboard` shows or hides it. It only reads `.tasks/`.
-- The dashboard's **Now** section shows the current stage in detail: each spec, plan, or code reviewer of the round
-  as waiting, running, or done with its findings, the voter's result, the builder and prover, or the blind test's
-  reports. A **Checks** section joins `eval.md` with the latest proof, so you can see which checks pass, and the
-  band shows `reviewers 3/4 · checks 6/7`.
-- The dashboard pane opens with what the task is: its title and goal from `rd.md`, each requirement with whether
-  its `eval.md` checks pass, and its non-goals.
-- Once a task is `READY` or `AWAITING-HUMAN`, the dashboard looks up the branch's PR with `gh` and shows it open,
-  merged, or closed, with its link and the next step; the status line names it too. Without `gh` it shows whether
-  `pr.md` is drafted.
-- When no proof file was saved but the round log says every check passed, requirements and checks show a muted
-  "reported passing" mark instead of looking unstarted.
-- When a task past the build has no saved proof, the dashboard says which proof file is missing and shows the round
-  log's line about the checks, instead of "not run yet".
-
-- `assets/src/dashboard-demo.sh` builds a demo repo with one task at code review, blind test, or AWAITING-HUMAN, for
-  seeing the dashboard and making its README screenshot.
-- The dashboard flags a proof that ran at a commit older than HEAD as possibly out of date, so a build proof's
-  failure that a review round has since fixed doesn't read as current.
+- **A dashboard for the active task**, drawn in the Claude Code screen by a hooks module (`hooks/dashboard/`). It
+  only reads `.tasks/`, and `claude -p`, cloud sessions, and the VS Code chat panel work as before without it.
+  - A status line (`Quorum · csv-export · IN_REVIEW · MEDIUM · round 2/3`) and a stage rail above the prompt with
+    `reviewers 3/4 · checks 6/7`, the next command, and a **Dashboard** button.
+  - A pane that opens by itself when a session starts on a task or a `/quorum:*` command runs; `/quorum-dashboard`
+    shows or hides it. It shows the task's title and goal from `rd.md`; **Now**, what the current stage is doing
+    (each spec, plan, or code reviewer of the round as waiting, running with its time, or done with its findings,
+    then the voter's result; the builder and prover; the blind test's reports); each requirement with whether its
+    `eval.md` checks pass, and the non-goals; **Checks**, every `eval.md` row against the latest proof; the stages,
+    the review rounds, and other Quorum agents.
+  - Toasts when a task converges, halts, escalates, or is ready for you.
+  - Once a task is `READY` or `AWAITING-HUMAN`, its PR from GitHub (`gh`), open, merged, or closed, with its link.
+  - Honest gaps: a proof older than HEAD is flagged as possibly out of date; a missing proof is named; and when only
+    the round log says the checks passed, they show a muted "reported passing" mark rather than a proven one.
+- `assets/src/dashboard-demo.sh` builds a demo repo with one task at code review, blind test, or `AWAITING-HUMAN`,
+  for seeing the dashboard without a real task. The README's dashboard screenshots come from it.
+- CI runs the dashboard's tests (`claude plugin test .`).
 
 ### Changed
 
 - `quorum-state` refuses `READY` and `AWAITING-HUMAN` unless `.tasks/<slug>/proof-final.md` exists, names the
   commit at HEAD, and has no failed check (`Result: ALL PASS` or only skipped checks). A task could reach the end
-  with its checks summarized in the round log and no saved proof, which `/quorum:pr-draft` then needs.
+  with its checks summarized in the round log and no saved proof, which `/quorum:pr-draft` then needs. Tasks already
+  at `READY` or `AWAITING-HUMAN` keep their status; one still in progress needs the prover's `proof-final.md`, at
+  its final commit, before it finishes.
 - `state.md` has a `pr` field: the task's pull request URL. A new PostToolUse hook, `record-pr.sh`, sets it when
   `gh pr create` runs in the session and prints the URL; `/quorum:pr-draft` records a PR the branch already has,
-  and tells you how to record one opened another way. The dashboard asks GitHub about that PR by its URL.
+  and tells you how to record one opened another way.
 
 ## 0.3.0 (2026-11-09)
 
