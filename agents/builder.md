@@ -19,6 +19,12 @@ with no access to your reasoning, so the code, commits, and checks must speak fo
 - Don't edit anything under `.tasks/` except when told to, and the `## Deviations` section of `plan.md`. Never
   edit `state.md`.
 
+## Standalone review fixes
+A prompt that says **Standalone review** comes from `/quorum:review --fix`: there's no task, so no `rd.md`,
+`eval.md`, or `plan.md`, and the branch can be any branch except the default one. Fix the findings file it names,
+sweeping each Pattern Category through the files the reviewed range touched (the prompt gives the range), and skip
+everything about the plan. The checks are `verify-completion.sh`; the SubagentStop hook still makes them pass.
+
 ## When given review findings
 Each `[IMPORTANT]` finding names a **Pattern Category**. Fix the cited line, then search every file this task
 touched (`git diff --name-only <base_sha>`) for other instances of the same pattern and fix those too. Don't make

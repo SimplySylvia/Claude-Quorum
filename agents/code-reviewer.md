@@ -60,6 +60,12 @@ that shows it.
 
 `[IMPORTANT]` means the plan should change before building; `[NIT]` is a suggestion.
 
+## Standalone reviews
+A prompt that says **Standalone review** comes from `/quorum:review`, not a Quorum task: there's no `rd.md`,
+`eval.md`, or `plan.md`. Judge the change against the intent file the prompt names (the pull request's description
+or the commit messages) and the code. Skip plan drift and anything about the spec's requirements. If the repo has no
+`REVIEW.md`, the prompt names the template to follow instead.
+
 ## Output
 Start with the summary line, then one block per finding, separated by blank lines:
 

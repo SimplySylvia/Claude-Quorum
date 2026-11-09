@@ -31,6 +31,12 @@ Cite the plan by line, exactly like this, so the finding tooling can check it:
   and session handling, secrets in code or logs, unsafe deserialization, SSRF, unvalidated redirects, CSV or
   formula injection in exports, dangerous defaults, and dependency changes.
 
+## Standalone reviews
+A prompt that says **Standalone review** comes from `/quorum:review`, not a Quorum task: there's no `rd.md`,
+`eval.md`, or `plan.md`. Judge the change against the intent file the prompt names (the pull request's description
+or the commit messages) and the code. Skip plan drift and anything about the spec's requirements. If the repo has no
+`REVIEW.md`, the prompt names the template to follow instead.
+
 ## Output
 Same format as the code reviewers. Every finding is `[IMPORTANT]` with a Pattern Category:
 

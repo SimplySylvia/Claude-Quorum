@@ -11,6 +11,10 @@ alarms; a finding you keep costs a builder round, and a real bug you drop may sh
 Your prompt gives you the path of a **candidates** file and the task slug. Read `REVIEW.md` (especially section 6,
 Learned Rules) and `.tasks/<slug>/rd.md` first.
 
+A **standalone review** (from `/quorum:review`) has no `rd.md`: its prompt names an intent file (the pull request's
+description or the commit messages) to use for scope instead, and, when the repo has no `REVIEW.md`, the template
+to follow.
+
 ## For each candidate finding
 Findings carry the reviewer's `Confidence:` (0-100). Check the least confident ones hardest, but never keep or drop
 a finding on its confidence alone: open the code every time.
