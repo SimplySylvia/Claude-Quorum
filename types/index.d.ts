@@ -28,6 +28,12 @@ export type Blind = {
   caused: number | null
 }
 
+// One numbered requirement of rd.md, by its short name.
+export type Requirement = { n: string; title: string }
+
+// What rd.md says the task is.
+export type Spec = { title: string; goal: string; isUi: boolean; requirements: Requirement[]; nonGoals: string[] }
+
 // What the "Now" section shows for the current stage.
 export type Now =
   | { kind: 'spec'; requirements: number; reviewers: Reviewer[] }
@@ -52,6 +58,7 @@ export type Snapshot = {
   rounds: Round[]
   next: string
   now: Now
+  spec: Spec | null
   checks: Check[]
   proof: Proof | null
   // The proof the skills should have saved by now ('' while none is due), and the round log's line about the checks.

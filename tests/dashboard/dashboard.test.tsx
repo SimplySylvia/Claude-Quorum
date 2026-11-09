@@ -2,7 +2,8 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import {
-  countFindings, countRequirements, evalRows, joinChecks, nextStep, parseBlind, parseFrontmatter, parseProof, roleOf,
+  countFindings, countRequirements, evalRows, joinChecks, nextStep, parseBlind, parseFrontmatter, parseProof, parseSpec,
+  requirementState, roleOf,
   roundReviewers, slugFromHead, stageOf, stages,
 } from '../../hooks/dashboard/task'
 
@@ -34,11 +35,21 @@ const CANDIDATES = `${SURVIVORS}[NIT] app/report.py:9 — spacing
 [IMPORTANT] app/cli.py:3 — Pattern Category: Wrong env var
 `
 
-const RD = `# Export CSV
+const RD = `# Export customers as CSV (CARE-42)
+
+- **Slug:** \`export-csv\`
+- **Risk tier:** MEDIUM. Users run it.
+- **UI change:** no.
+
+## Goal
+<!-- One or two sentences. -->
+Users can run \`export\` to get every customer as a **CSV** file.
+
+Today there is no export.
 
 ## Requirements
 1. \`export\` writes a CSV of every customer.
-2. Fields with commas are quoted.
+2. **Commas are quoted.** Fields with commas are wrapped in quotes.
 3. **Docs:** add \`export\` to README.md.
 
 ## Non-goals
@@ -175,6 +186,30 @@ describe('task helpers', () => {
     const checks = joinChecks(evalRows(EVAL), proof)
     expect(checks.map(c => `${c.id}:${c.result}`)).toEqual(['fast:PASS', '1:PASS', '2:FAIL', '3:PASS', '2b:PASS'])
     expect(joinChecks(evalRows(EVAL), null).every(c => c.result === null)).toBe(true)
+  })
+
+  test('reads what the task is from rd.md, and each requirement\'s checks', () => {
+    const spec = parseSpec(RD)
+    expect(spec?.title).toBe('Export customers as CSV (CARE-42)')
+    expect(spec?.goal).toBe('Users can run export to get every customer as a CSV file.')
+    expect(spec?.isUi).toBe(false)
+    expect(spec?.requirements).toEqual([
+      { n: '1', title: 'export writes a CSV of every customer.' },
+      { n: '2', title: 'Commas are quoted' },
+      { n: '3', title: 'Docs: add export to README.md.' },
+    ])
+    expect(spec?.nonGoals).toEqual(['No Excel output.'])
+    expect(parseSpec('')).toBeNull()
+    expect(parseSpec('1. **Fast checks pass:** run them.\n')?.requirements).toEqual([])
+    expect(parseSpec('## Requirements\n1. **Fast checks pass:** run them.\n')?.requirements[0]?.title).toBe('Fast checks pass')
+
+    const checks = joinChecks([{ id: '4, 5', label: '' }, { id: '6', label: '' }, { id: '6b', label: '' }], {
+      file: 'proof-final.md', rev: '', result: '', rows: [{ id: '4, 5', check: '', result: 'PASS' }, { id: '6', check: '', result: 'PASS' }, { id: '6b', check: '', result: 'FAIL' }],
+    })
+    expect(requirementState('5', checks)).toEqual({ checks: 1, state: 'pass' })
+    expect(requirementState('6', checks)).toEqual({ checks: 2, state: 'fail' })
+    expect(requirementState('16', checks)).toEqual({ checks: 0, state: 'none' })
+    expect(requirementState('4', joinChecks([{ id: '4', label: '' }], null))).toEqual({ checks: 1, state: 'open' })
   })
 
   test('reads a blind run and names reviewers by persona', () => {
@@ -317,6 +352,27 @@ test('the round\'s reviewers show waiting, running, then their findings', async 
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /kept 1 IMPORTANT · 1 NIT/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /1 IMPORTANT finding survives: the builder fixes them/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('the pane opens with what the task is: title, goal, requirements, and what is out of scope', async ($, on) => {
+  const files: Record<string, string> = repo('IN_REVIEW')
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^Export customers as CSV \(CARE-42\)$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Users can run export to get every customer as a CSV file\.$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^3 in rd\.md$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^○ 2  Commas are quoted$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^- No Excel output\.$/ })).toBeDefined()
+  await pane.unmount()
+
+  files['.tasks/export-csv/proof-build.md'] = PROOF
+  await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/proof-build.md', content: PROOF })
+  pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^2 of 3 met$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✗ 2  Commas are quoted$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✓ 3  Docs: add export to README\.md\.$/ })).toBeDefined()
   await pane.unmount()
 })
 

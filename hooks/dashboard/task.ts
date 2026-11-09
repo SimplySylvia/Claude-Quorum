@@ -2,7 +2,7 @@
 // the stage rail, count findings the way bin/quorum-findings does, and read the specs, proofs, and reports the skills
 // save in .tasks/<slug>/. No `$` here, so tests can call them directly.
 
-import type { Blind, Check, Findings, Frontmatter, Proof, Reviewer, Stage } from '../../types'
+import type { Blind, Check, Findings, Frontmatter, Proof, Requirement, Reviewer, Spec, Stage } from '../../types'
 
 export const STAGES = ['Spec', 'Plan', 'Build', 'Review', 'Blind test', 'PR'] as const
 
@@ -245,4 +245,47 @@ export function checksNoteFromLog(stateMd: string): string {
   const lines = body.slice(end + 1).map(l => l.trim()).filter(l => /\b(eval|checks?)\b/i.test(l) && /\b(pass(es|ed)?|fail(s|ed)?)\b/i.test(l))
   const last = lines.at(-1) ?? ''
   return last.length > 200 ? `${last.slice(0, 199)}…` : last
+}
+
+// Markdown down to plain text for a one-line label: no emphasis, code ticks, or links.
+const plain = (text: string) => text.replace(/\*\*|__|`/g, '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/\s+/g, ' ').trim()
+
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text)
+
+// A requirement's short name: its bold lead ("**One shared helper.**"), or after a one-word label like
+// "**Docs:** add …", the whole line.
+function requirementTitle(text: string): string {
+  const lead = /^\*\*(.+?)\*\*\s*(.*)$/.exec(text)?.[1]
+  if (lead && !/^\w+:$/.test(lead)) return clip(plain(lead).replace(/[.:]$/, ''), 90)
+  return clip(plain(text), 90)
+}
+
+// What rd.md says the task is: its title, goal, requirements, and non-goals.
+export function parseSpec(rd: string): Spec | null {
+  if (!rd.trim()) return null
+  // The goal's first paragraph, the template's comment left out.
+  const goal = section(rd, 'Goal').map(l => l.trim()).filter(l => !l.startsWith('<!--'))
+  const start = goal.findIndex(l => l !== '')
+  const end = goal.indexOf('', start)
+  const paragraph = start < 0 ? [] : goal.slice(start, end < 0 ? undefined : end)
+  const requirements: Requirement[] = []
+  for (const line of section(rd, 'Requirements')) {
+    const m = /^(\d+)\.\s+(\S.*)$/.exec(line)
+    if (m) requirements.push({ n: m[1] ?? '', title: requirementTitle(m[2] ?? '') })
+  }
+  return {
+    title: plain(/^#\s+(.+)$/m.exec(rd)?.[1] ?? ''),
+    goal: clip(plain(paragraph.join(' ')), 280),
+    isUi: /\*\*UI change:\*\*\s*yes/i.test(rd),
+    requirements,
+    nonGoals: section(rd, 'Non-goals').filter(l => /^-\s+\S/.test(l)).map(l => clip(plain(l.replace(/^-\s+/, '')), 90)),
+  }
+}
+
+// A requirement's checks: the eval.md rows whose # names it ("4", "4, 5", "4b"), and how they stand.
+export function requirementState(n: string, checks: Check[]): { checks: number; state: 'pass' | 'fail' | 'open' | 'none' } {
+  const mine = checks.filter(c => c.id.split(/[,\s]+/).some(id => new RegExp(`^${n}[a-z]?$`).test(id)))
+  if (mine.length === 0) return { checks: 0, state: 'none' }
+  if (mine.some(c => c.result === 'FAIL')) return { checks: mine.length, state: 'fail' }
+  return { checks: mine.length, state: mine.every(c => c.result === 'PASS') ? 'pass' : 'open' }
 }

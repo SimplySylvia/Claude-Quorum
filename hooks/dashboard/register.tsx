@@ -7,14 +7,14 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { Check, Findings, Now, QuorumAgent, Reviewer, Round, Snapshot, Stage } from '../../types'
 import {
-  ROLE_LABEL, STAGES, checksNoteFromLog, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, list, nextStep, parseBlind,
+  ROLE_LABEL, STAGES, checksNoteFromLog, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, stageOf, stages,
 } from './task'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-3' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-4' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-2' })
 // Bumped every second while a Quorum agent runs, so the pane's running times count up.
 const clock = atom({ plugin: 'quorum', key: 'now' } as const, 0)
@@ -37,6 +37,8 @@ const GLYPH: Record<Stage['state'], [string, string]> = {
   todo: ['○', 'inactive'],
   skipped: ['–', 'inactive'],
 }
+
+const REQUIREMENT_GLYPH = { pass: ['✓', 'success'], fail: ['✗', 'error'], open: ['○', 'inactive'], none: ['–', 'inactive'] } as const
 
 const CHECK_GLYPH: Record<string, [string, string]> = { PASS: ['✓', 'success'], FAIL: ['✗', 'error'], SKIPPED: ['–', 'warning'] }
 
@@ -169,6 +171,7 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     rounds,
     next: nextStep(status, risk),
     now: await nowFor($, dir, { stage, risk, round, maxRounds, planRounds, blindRuns }, rd),
+    spec: parseSpec(rd),
     checks: joinChecks(evalRows(evalMd), proof),
     proof,
     expectedProof: expectedProof(status, stage),
@@ -434,16 +437,27 @@ export const register: Register = (on, options) => {
     const others = crew.filter(a => !shown.has(a.role)).slice(-6)
     const taskChecks = t.checks.filter(c => c.id !== 'fast').length
     const passed = t.checks.filter(c => c.result === 'PASS').length
+    const spec = t.spec
+    const requirements = (spec?.requirements ?? []).map(r => ({ ...r, ...requirementState(r.n, t.checks) }))
+    const met = requirements.filter(r => r.state === 'pass').length
 
     return (
       <Box flexDirection="column" gap={1}>
         <Box flexDirection="column">
-          <Text bold>{t.slug}</Text>
+          <Text bold>{spec?.title || t.slug}</Text>
+          {spec?.title ? <Text dimColor>{t.slug}</Text> : null}
           <Text>
             <Text color={STATUS_COLOR(t.status)} bold>{t.status || 'no status'}</Text>
-            <Text dimColor> · {t.risk || 'no risk tier'} risk</Text>
+            <Text dimColor> · {t.risk || 'no risk tier'} risk{spec?.isUi ? ' · UI change' : ''}</Text>
           </Text>
         </Box>
+
+        {spec?.goal ? (
+          <Box flexDirection="column">
+            <Text bold>Goal</Text>
+            <Text>{spec.goal}</Text>
+          </Box>
+        ) : null}
 
         <Box flexDirection="column">
           <Text>
@@ -487,6 +501,36 @@ export const register: Register = (on, options) => {
           )}
           {n.kind === 'done' && <Text dimColor>Every stage is done.</Text>}
         </Box>
+
+        {requirements.length > 0 && (
+          <Box flexDirection="column">
+            <Text>
+              <Text bold>Requirements · </Text>
+              {t.proof
+                ? <Text color={met === requirements.length ? 'success' : 'warning'}>{met} of {requirements.length} met</Text>
+                : <Text dimColor>{requirements.length} in rd.md</Text>}
+            </Text>
+            {requirements.map(r => {
+              const [glyph, color] = REQUIREMENT_GLYPH[r.state]
+              return (
+                <Text key={`req-${r.n}`} wrap="truncate-end">
+                  <Text color={color}>{glyph} </Text>
+                  <Text dimColor>{r.n}  </Text>
+                  <Text>{r.title}</Text>
+                  {r.state === 'none' ? <Text dimColor>  no check in eval.md</Text> : null}
+                </Text>
+              )
+            })}
+          </Box>
+        )}
+
+        {spec && spec.nonGoals.length > 0 && (
+          <Box flexDirection="column">
+            <Text bold>Not in scope</Text>
+            {spec.nonGoals.slice(0, 4).map((g, i) => <Text key={`non-${i}`} dimColor wrap="truncate-end">- {g}</Text>)}
+            {spec.nonGoals.length > 4 ? <Text dimColor>and {spec.nonGoals.length - 4} more in rd.md</Text> : null}
+          </Box>
+        )}
 
         <Box flexDirection="column">
           <Text>
