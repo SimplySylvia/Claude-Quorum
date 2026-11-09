@@ -44,6 +44,9 @@ export type Now =
 
 export type Snapshot = {
   slug: string
+  branch: string
+  // pr.md exists: /quorum:pr-draft has run.
+  prDrafted: boolean
   risk: string
   status: string
   stage: number
@@ -66,6 +69,17 @@ export type Snapshot = {
   checksNote: string
 }
 
+// The task branch's pull request on GitHub, as `gh pr list` last reported it. NONE: no PR yet; UNKNOWN: gh is
+// missing, signed out, or failed.
+export type PullRequest = {
+  slug: string
+  number: number
+  state: 'OPEN' | 'MERGED' | 'CLOSED' | 'NONE' | 'UNKNOWN'
+  isDraft: boolean
+  url: string
+  checkedAt: number
+}
+
 export type QuorumAgent = {
   id: string
   type: string
@@ -80,6 +94,7 @@ declare module 'claude-code' {
     quorum: {
       task: Shaped<Snapshot | null>
       agents: Shaped<QuorumAgent[]>
+      pr: Shaped<PullRequest | null>
       now: number
     }
   }

@@ -2,7 +2,7 @@
 // the stage rail, count findings the way bin/quorum-findings does, and read the specs, proofs, and reports the skills
 // save in .tasks/<slug>/. No `$` here, so tests can call them directly.
 
-import type { Blind, Check, Findings, Frontmatter, Proof, Requirement, Reviewer, Spec, Stage } from '../../types'
+import type { Blind, Check, Findings, Frontmatter, Proof, PullRequest, Requirement, Reviewer, Spec, Stage } from '../../types'
 
 export const STAGES = ['Spec', 'Plan', 'Build', 'Review', 'Blind test', 'PR'] as const
 
@@ -289,3 +289,49 @@ export function requirementState(n: string, checks: Check[]): { checks: number; 
   if (mine.some(c => c.result === 'FAIL')) return { checks: mine.length, state: 'fail' }
   return { checks: mine.length, state: mine.every(c => c.result === 'PASS') ? 'pass' : 'open' }
 }
+
+export function branchFromHead(head: string): string {
+  return /^ref: refs\/heads\/(\S+)\s*$/.exec(head.trim())?.[1] ?? ''
+}
+
+// The PR stage only matters once the task is finished and waiting on a PR.
+export const isPrStage = (status: string) => status === 'READY' || status === 'AWAITING-HUMAN'
+
+// `gh pr list --json number,state,isDraft,url` output: the newest PR for the branch, or NONE.
+export function parsePr(slug: string, stdout: string, checkedAt: number): PullRequest {
+  const none: PullRequest = { slug, number: 0, state: 'NONE', isDraft: false, url: '', checkedAt }
+  try {
+    const list: unknown = JSON.parse(stdout)
+    const pr = Array.isArray(list) ? (list[0] as Partial<PullRequest> | undefined) : undefined
+    if (!pr || typeof pr.number !== 'number') return none
+    const state = pr.state === 'OPEN' || pr.state === 'MERGED' || pr.state === 'CLOSED' ? pr.state : 'UNKNOWN'
+    return { slug, number: pr.number, state, isDraft: pr.isDraft === true, url: typeof pr.url === 'string' ? pr.url : '', checkedAt }
+  } catch {
+    return { ...none, state: 'UNKNOWN' }
+  }
+}
+
+// The PR stage's line, or '' when there is nothing to say.
+export function prDetail(pr: PullRequest | null, isDrafted: boolean): string {
+  if (pr && pr.number > 0) {
+    if (pr.state === 'MERGED') return `PR #${pr.number} merged`
+    if (pr.state === 'CLOSED') return `PR #${pr.number} closed without merging`
+    return `${pr.isDraft ? 'draft ' : ''}PR #${pr.number} open`
+  }
+  if (!isDrafted) return ''
+  return pr?.state === 'NONE' ? 'pr.md drafted, PR not opened yet' : 'pr.md drafted'
+}
+
+// The next step once the PR is known; otherwise the status's own (nextStep).
+export function prNext(pr: PullRequest | null, isDrafted: boolean, fallback: string): string {
+  if (pr && pr.number > 0) {
+    if (pr.state === 'MERGED') return 'Done. Optionally /quorum:codify-lesson'
+    if (pr.state === 'CLOSED') return `PR #${pr.number} was closed; reopen it or start again`
+    return `Get PR #${pr.number} reviewed and merged`
+  }
+  if (isDrafted && pr?.state !== 'UNKNOWN') return 'Push the branch and open the PR with pr.md (gh pr create)'
+  return fallback
+}
+
+// The round log says every check passed, though no proof file was saved.
+export const isReportedPass = (note: string) => /\ball\b[^.]*\bchecks?\s+pass/i.test(note) && !/\bfail/i.test(note)

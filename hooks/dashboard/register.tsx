@@ -5,17 +5,20 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Check, Findings, Now, QuorumAgent, Reviewer, Round, Snapshot, Stage } from '../../types'
+import type { Check, Findings, Now, PullRequest, QuorumAgent, Reviewer, Round, Snapshot, Stage } from '../../types'
 import {
-  ROLE_LABEL, STAGES, checksNoteFromLog, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
+  ROLE_LABEL, STAGES, branchFromHead, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, stageOf, stages,
 } from './task'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-4' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-5' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-2' })
+const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
+// How long a PR lookup stands before the next refresh asks GitHub again.
+const PR_TTL_MS = 2 * 60 * 1000
 // Bumped every second while a Quorum agent runs, so the pane's running times count up.
 const clock = atom({ plugin: 'quorum', key: 'now' } as const, 0)
 let ticker: Timer | null = null
@@ -51,17 +54,18 @@ const readOr = ($: EngineInterface, path: string) => $.fs.read(path).catch(() =>
 
 // The slug bin/quorum-active-task would print: a feat/ or fix/ branch with a task folder, then .tasks/.active.
 // `root` is the session's project root, the CLAUDE_PROJECT_DIR that script resolves against.
-async function activeSlug($: EngineInterface, root: string): Promise<string> {
+async function activeSlug($: EngineInterface, root: string): Promise<{ slug: string; branch: string }> {
   let head = await readOr($, `${root}/.git/HEAD`)
   if (head === null) {
     // A worktree: .git is a file naming the real git dir, absolute or relative to the worktree.
     const gitdir = /^gitdir:\s*(.+)$/m.exec((await readOr($, `${root}/.git`)) ?? '')?.[1]?.trim()
     head = gitdir ? await readOr($, gitdir.startsWith('/') ? `${gitdir}/HEAD` : `${root}/${gitdir}/HEAD`) : null
   }
+  const branch = branchFromHead(head ?? '')
   const fromBranch = slugFromHead(head ?? '')
-  if (fromBranch && (await $.fs.exists(`${root}/.tasks/${fromBranch}/state.md`))) return fromBranch
+  if (fromBranch && (await $.fs.exists(`${root}/.tasks/${fromBranch}/state.md`))) return { slug: fromBranch, branch }
   const active = ((await readOr($, `${root}/.tasks/.active`)) ?? '').split('\n')[0]?.trim() ?? ''
-  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(active) ? active : ''
+  return { slug: /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(active) ? active : '', branch }
 }
 
 // The files among `names` under `dir` that exist, by name.
@@ -117,7 +121,7 @@ async function nowFor($: EngineInterface, dir: string, t: Pick<Snapshot, 'stage'
 
 async function snapshot($: EngineInterface, maxRounds: number, previous: Snapshot | null): Promise<Snapshot | null> {
   const root = await $.session.root()
-  const slug = await activeSlug($, root)
+  const { slug, branch } = await activeSlug($, root)
   if (!slug) return null
   const text = await readOr($, `${root}/.tasks/${slug}/state.md`)
   if (text === null) return null
@@ -157,6 +161,8 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
 
   return {
     slug,
+    branch,
+    prDrafted: await $.fs.exists(`${dir}/pr.md`),
     risk,
     status,
     stage,
@@ -179,15 +185,37 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
   }
 }
 
-function statusLine(t: Snapshot | null): string | undefined {
+// The task's PR as last looked up, if it is this task's.
+const prOf = (t: Snapshot, known: PullRequest | null) => (known?.slug === t.slug ? known : null)
+
+function statusLine(t: Snapshot | null, known: PullRequest | null): string | undefined {
   if (!t) return undefined
   const parts = [`Quorum · ${t.slug}`, t.status || 'no status', t.risk]
   if (t.round > 0) parts.push(`round ${t.round}/${t.maxRounds}`)
   if (t.pending > 0) parts.push(`${t.pending} pending`)
+  if (isPrStage(t.status)) parts.push(prDetail(prOf(t, known), t.prDrafted))
   return parts.filter(Boolean).join(' · ')
 }
 
-function stageDetail(t: Snapshot, name: string): string {
+// Ask GitHub for the task branch's PR, at most every PR_TTL_MS unless `force`d, and only once the task waits on one.
+// It runs after the hook that started it; a missing or signed-out gh is remembered as UNKNOWN until the TTL passes.
+async function lookupPr($: EngineInterface, t: Snapshot, force: boolean) {
+  if (!isPrStage(t.status) || !t.branch) return
+  const known = prOf(t, await read($, pr))
+  const now = await $.clock.now()
+  if (!force && known && now - known.checkedAt < PR_TTL_MS) return
+  const ran = await $.process.run(
+    ['gh', 'pr', 'list', '--head', t.branch, '--state', 'all', '--limit', '1', '--json', 'number,state,isDraft,url'],
+    { cwd: await $.session.root(), timeoutMs: 15_000 },
+  ).catch(() => null)
+  const found: PullRequest = ran && ran.exitCode === 0
+    ? parsePr(t.slug, ran.stdout, now)
+    : { slug: t.slug, number: 0, state: 'UNKNOWN', isDraft: false, url: '', checkedAt: now }
+  const after = await update($, pr, () => found)
+  $.ui.status(statusLine(await read($, task), after))
+}
+
+function stageDetail(t: Snapshot, name: string, known: PullRequest | null): string {
   switch (name) {
     case 'Spec': return t.signoff ? `mockup signed off ${t.signoff}` : ''
     case 'Plan':
@@ -195,6 +223,7 @@ function stageDetail(t: Snapshot, name: string): string {
         t.planApproved ? `approved ${t.planApproved}` : ''].filter(Boolean).join(', ')
     case 'Review': return t.round ? `round ${t.round} of ${t.maxRounds}` : ''
     case 'Blind test': return t.risk === 'LOW' ? 'not run for LOW' : t.blindRuns ? `${t.blindRuns} run${t.blindRuns === 1 ? '' : 's'}` : ''
+    case 'PR': return prDetail(known, t.prDrafted)
     default: return ''
   }
 }
@@ -237,14 +266,22 @@ function verdict(now: Extract<Now, { kind: 'plan' | 'review' }>): [string, strin
   return [`${n === 1 ? '1 IMPORTANT finding survives' : `${n} IMPORTANT findings survive`}: ${who}`, 'error']
 }
 
+// The stage rail, with the PR stage done once GitHub says the PR merged.
+const railFor = (t: Snapshot, known: PullRequest | null): Stage[] =>
+  stages(t.status, t.risk, t.stage).map(s => (s.name === 'PR' && known?.state === 'MERGED' ? { ...s, state: 'done' } : s))
+
+const nextFor = (t: Snapshot, known: PullRequest | null) => (isPrStage(t.status) ? prNext(known, t.prDrafted, t.next) : t.next)
+
 const seconds = (a: QuorumAgent, now: number) => `${Math.max(0, Math.round(((a.endedAt ?? now) - a.startedAt) / 1000))}s`
 
 // Re-read the task, redraw, set the status line, and toast a status change worth interrupting for.
-async function refresh($: EngineInterface, maxRounds: number): Promise<Snapshot | null> {
+async function refresh($: EngineInterface, maxRounds: number, forcePr = false): Promise<Snapshot | null> {
   const before = await read($, task)
   const after = await snapshot($, maxRounds, before)
   await update($, task, () => after)
-  $.ui.status(statusLine(after))
+  $.ui.status(statusLine(after, await read($, pr)))
+  // In the background, so a slow GitHub never holds up the turn; a failed lookup just leaves the last answer.
+  if (after) void lookupPr($, after, forcePr).catch(() => undefined)
   const message = after && TOASTS[after.status]
   if (message && before?.slug === after.slug && before.status !== after.status) {
     $.ui.toast(`Quorum · ${after.slug}: ${message}`)
@@ -310,7 +347,9 @@ export const register: Register = (on, options) => {
   // only watches: if one of its hooks fails, the call goes on as if it weren't there.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
-    if (/quorum-(state|active-task|branch)|\.tasks\//.test(e.command)) await refresh($, maxRounds)
+    // `gh pr create` or a push can open or change the PR: look it up again now.
+    const isPrCommand = /\bgh\s+pr\b|\bgit\s+push\b/.test(e.command)
+    if (isPrCommand || /quorum-(state|active-task|branch)|\.tasks\//.test(e.command)) await refresh($, maxRounds, isPrCommand)
     return ran
   }).catch(($, e, next) => next(e))
 
@@ -359,7 +398,8 @@ export const register: Register = (on, options) => {
     const t = await read($, task)
     if (!t || e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
-    const rail = stages(t.status, t.risk, t.stage)
+    const known = prOf(t, await read($, pr))
+    const rail = railFor(t, known)
     const wide = (e.props.bodyColumns ?? 120) >= 110
 
     return (
@@ -380,7 +420,7 @@ export const register: Register = (on, options) => {
         {[reviewerProgress(t.now), checkProgress(t.checks, t.proof !== null)].filter(Boolean).map(p => (
           <Text key={p} dimColor>{p}</Text>
         ))}
-        {wide && <Text dimColor>next: {t.next}</Text>}
+        {wide && <Text dimColor>next: {nextFor(t, known)}</Text>}
         <Button key="open" label="Dashboard" onPress={() => open($, true)} />
       </Box>
     )
@@ -400,7 +440,8 @@ export const register: Register = (on, options) => {
     const crew = await read($, agents)
     await read($, clock) // redraw on each tick
     const clockNow = await $.clock.now()
-    const rail = stages(t.status, t.risk, t.stage)
+    const known = prOf(t, await read($, pr))
+    const rail = railFor(t, known)
     const n = t.now
 
     // One line per reviewer or report: ● running, ✓ or ✗ done, ○ waiting.
@@ -437,6 +478,9 @@ export const register: Register = (on, options) => {
     const others = crew.filter(a => !shown.has(a.role)).slice(-6)
     const taskChecks = t.checks.filter(c => c.id !== 'fast').length
     const passed = t.checks.filter(c => c.result === 'PASS').length
+    // No proof file, but the round log says every check passed: mark them, muted, as reported rather than proven.
+    const isReported = !t.proof && isReportedPass(t.checksNote)
+    const REPORTED: readonly [string, string] = ['✓', 'subtle']
     const spec = t.spec
     const requirements = (spec?.requirements ?? []).map(r => ({ ...r, ...requirementState(r.n, t.checks) }))
     const met = requirements.filter(r => r.state === 'pass').length
@@ -499,7 +543,14 @@ export const register: Register = (on, options) => {
               {reportLine('triage', n.blind.caused, k => k ? `${plural(k, 'item')} caused by this change` : 'nothing caused by this change')}
             </Box>
           )}
-          {n.kind === 'done' && <Text dimColor>Every stage is done.</Text>}
+          {n.kind === 'done' && (known && known.number > 0
+            ? (
+              <Box flexDirection="column">
+                <Text color={known.state === 'MERGED' ? 'success' : known.state === 'CLOSED' ? 'error' : 'warning'}>{prDetail(known, t.prDrafted)}</Text>
+                {known.url ? <Text dimColor>{known.url}</Text> : null}
+              </Box>
+            )
+            : <Text dimColor>{t.prDrafted ? 'Every stage is done; pr.md is drafted.' : 'Every stage is done.'}</Text>)}
         </Box>
 
         {requirements.length > 0 && (
@@ -508,10 +559,13 @@ export const register: Register = (on, options) => {
               <Text bold>Requirements · </Text>
               {t.proof
                 ? <Text color={met === requirements.length ? 'success' : 'warning'}>{met} of {requirements.length} met</Text>
-                : <Text dimColor>{requirements.length} in rd.md</Text>}
+                : isReported
+                  ? <Text color="subtle">{requirements.length} of {requirements.length} reported passing</Text>
+                  : <Text dimColor>{requirements.length} in rd.md</Text>}
             </Text>
+            {isReported ? <Text dimColor>From the round log, not a saved proof</Text> : null}
             {requirements.map(r => {
-              const [glyph, color] = REQUIREMENT_GLYPH[r.state]
+              const [glyph, color] = isReported && r.state === 'open' ? REPORTED : REQUIREMENT_GLYPH[r.state]
               return (
                 <Text key={`req-${r.n}`} wrap="truncate-end">
                   <Text color={color}>{glyph} </Text>
@@ -549,7 +603,7 @@ export const register: Register = (on, options) => {
           )}
           {!t.proof && t.expectedProof && t.checksNote && <Text dimColor>Round log: {t.checksNote}</Text>}
           {t.checks.map(c => {
-            const [glyph, color] = c.result ? CHECK_GLYPH[c.result] ?? ['○', 'inactive'] : ['○', 'inactive']
+            const [glyph, color] = c.result ? CHECK_GLYPH[c.result] ?? ['○', 'inactive'] : isReported ? REPORTED : ['○', 'inactive']
             return (
               <Text key={`check-${c.id}`} wrap="truncate-end">
                 <Text color={color}>{glyph} </Text>
@@ -566,7 +620,7 @@ export const register: Register = (on, options) => {
           <Text bold>Stages</Text>
           {rail.map(s => {
             const [glyph, color] = GLYPH[s.state]
-            const detail = stageDetail(t, s.name)
+            const detail = stageDetail(t, s.name, known)
             return (
               <Text key={s.name}>
                 <Text color={color}>{glyph} </Text>
@@ -612,7 +666,7 @@ export const register: Register = (on, options) => {
 
         <Text>
           <Text dimColor>Next: </Text>
-          <Text>{t.next}</Text>
+          <Text>{nextFor(t, known)}</Text>
         </Text>
       </Box>
     )

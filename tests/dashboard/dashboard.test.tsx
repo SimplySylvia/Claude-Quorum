@@ -2,7 +2,8 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import {
-  countFindings, countRequirements, evalRows, joinChecks, nextStep, parseBlind, parseFrontmatter, parseProof, parseSpec,
+  countFindings, countRequirements, evalRows, isReportedPass, joinChecks, nextStep, parseBlind, parseFrontmatter, parsePr,
+  parseProof, parseSpec, prDetail, prNext,
   requirementState, roleOf,
   roundReviewers, slugFromHead, stageOf, stages,
 } from '../../hooks/dashboard/task'
@@ -115,6 +116,11 @@ const PANE = {
   props: { title: 'Quorum', isFocused: false, bodyColumns: 50, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
 } as const
 
+// Lets the dashboard's background PR lookup finish.
+const settle = async () => {
+  for (let i = 0; i < 200; i++) await Promise.resolve()
+}
+
 // Stands for the engine beneath the plugin: a project at /repo holding the files in `files`.
 function world(on: On, files: Record<string, string>, root = '/repo') {
   const seen = { status: [] as (string | undefined)[], toasts: [] as string[], opened: 0, ticks: 0, live: [] as string[] }
@@ -210,6 +216,22 @@ describe('task helpers', () => {
     expect(requirementState('6', checks)).toEqual({ checks: 2, state: 'fail' })
     expect(requirementState('16', checks)).toEqual({ checks: 0, state: 'none' })
     expect(requirementState('4', joinChecks([{ id: '4', label: '' }], null))).toEqual({ checks: 1, state: 'open' })
+  })
+
+  test('reads the branch\'s PR from gh, and says what it means', () => {
+    const open = parsePr('x', '[{"number":33807,"state":"OPEN","isDraft":false,"url":"https://github.com/o/r/pull/33807"}]', 5)
+    expect(open).toEqual({ slug: 'x', number: 33807, state: 'OPEN', isDraft: false, url: 'https://github.com/o/r/pull/33807', checkedAt: 5 })
+    expect(parsePr('x', '[]', 5).state).toBe('NONE')
+    expect(parsePr('x', 'not json', 5).state).toBe('UNKNOWN')
+    expect(prDetail(open, true)).toBe('PR #33807 open')
+    expect(prDetail({ ...open, state: 'MERGED' }, true)).toBe('PR #33807 merged')
+    expect(prDetail(parsePr('x', '[]', 5), true)).toBe('pr.md drafted, PR not opened yet')
+    expect(prDetail(parsePr('x', 'not json', 5), true)).toBe('pr.md drafted')
+    expect(prNext(open, true, 'fallback')).toBe('Get PR #33807 reviewed and merged')
+    expect(prNext(null, false, 'fallback')).toBe('fallback')
+    expect(isReportedPass('All eval checks pass on 673fa13 (fast checks 117/117).')).toBe(true)
+    expect(isReportedPass('All checks pass except 7b, which fails.')).toBe(false)
+    expect(isReportedPass('Ran the checks.')).toBe(false)
   })
 
   test('reads a blind run and names reviewers by persona', () => {
@@ -408,6 +430,65 @@ test('a finished task with no proof file says so, shows the log, and hides stale
   expect(await pane.find({ type: 'Text', text: /Round log: All eval checks pass on 673fa13/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /not run yet/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /Stop hook blocked/ })).toBeUndefined()
+  // The log says every check passed: requirements and checks are marked, muted, as reported.
+  expect(await pane.find({ type: 'Text', text: /^3 of 3 reported passing$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^From the round log, not a saved proof$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✓ 2  Commas are quoted$/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('a finished task shows its PR from GitHub, asking again only after the TTL or a gh pr command', async ($, on) => {
+  const files: Record<string, string> = repo('AWAITING-HUMAN')
+  files['.tasks/export-csv/pr.md'] = '## Summary\n'
+  const seen = world(on, files)
+  const calls: string[][] = []
+  let answer = '[]'
+  on('process.run', (_, e) => {
+    calls.push([...e.argv])
+    return { value: { exitCode: 0, stdout: answer, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await settle()
+  expect(calls[0]).toEqual(['gh', 'pr', 'list', '--head', 'feat/export-csv', '--state', 'all', '--limit', '1', '--json', 'number,state,isDraft,url'])
+  let pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^  pr\.md drafted, PR not opened yet$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Push the branch and open the PR/ })).toBeDefined()
+  await pane.unmount()
+
+  // An ordinary refresh within the TTL doesn't ask again.
+  await $.tool.call({ tool: 'Bash', command: 'quorum-state get status' })
+  await settle()
+  expect(calls.length).toBe(1)
+
+  answer = '[{"number":33807,"state":"OPEN","isDraft":false,"url":"https://github.com/o/r/pull/33807"}]'
+  await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "x" --body-file .tasks/export-csv/pr-body.md' })
+  await settle()
+  expect(calls.length).toBe(2)
+  expect(seen.status.at(-1)).toBe('Quorum · export-csv · AWAITING-HUMAN · MEDIUM · round 2/3 · 1 pending · PR #33807 open')
+  pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^PR #33807 open$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^https:\/\/github\.com\/o\/r\/pull\/33807$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Get PR #33807 reviewed and merged$/ })).toBeDefined()
+  await pane.unmount()
+
+  answer = answer.replace('OPEN', 'MERGED')
+  await $.tool.call({ tool: 'Bash', command: 'gh pr view 33807' })
+  await settle()
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ type: 'Text', text: /^ › ✓ PR$/ })).toBeDefined()
+  await band.unmount()
+})
+
+test('without gh, a finished task still says pr.md is drafted, and never claims no PR exists', async ($, on) => {
+  const files: Record<string, string> = repo('AWAITING-HUMAN')
+  files['.tasks/export-csv/pr.md'] = '## Summary\n'
+  world(on, files)
+  on('process.run', () => { throw new Error('gh: command not found') })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await settle()
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^  pr\.md drafted$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /not opened/ })).toBeUndefined()
   await pane.unmount()
 })
 
