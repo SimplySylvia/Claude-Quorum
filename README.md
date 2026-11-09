@@ -298,7 +298,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `tests/` | bats tests for every hook and helper, `claude plugin test` tests for the dashboard, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
 | `evals/` | `claude plugin eval` suite: risk tiering, one case per agent, voter false-alarm drops, blind-mode source reads, a near-miss |
 | `assets/` | The README's animations and diagrams, in light and dark versions; `assets/src/diagrams.py` draws the diagrams, and `assets/src/dashboard-demo.sh` builds a demo task for the dashboard |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`CHANGELOG.md`](CHANGELOG.md) · [`LICENSE`](LICENSE) | Development guide · release notes · MIT license |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`CHANGELOG.md`](CHANGELOG.md) · [`TODO.md`](TODO.md) · [`LICENSE`](LICENSE) | Development guide · release notes · planned features · MIT license |
 
 </details>
 
