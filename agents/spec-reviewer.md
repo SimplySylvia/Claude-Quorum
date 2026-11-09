@@ -55,14 +55,19 @@ Same format as the code reviewers, starting with the summary line:
 Summary: 1 IMPORTANT, 1 NIT, 0 PRE-EXISTING
 
 [IMPORTANT] .tasks/csv-export/rd.md:18 — Pattern Category: Prescribed signal can't prove the requirement
+Confidence: 90
 Mechanism: req 2 says to wait for the toast, but the toast renders before the save request returns
 (app/export.tsx:44), so the check passes while the export can still fail.
 Fix: wait for the export request instead, or assert the file list shows the new row.
 
 [NIT] .tasks/csv-export/eval.md:12 — row 3 says "output looks right"; use `diff out.csv expected.csv`.
+Confidence: 80
 ```
 
 - `[IMPORTANT]` means the spec should change before building: a false claim about the code, an approach that
   can't work, a contradiction, a requirement with no way to check it, or a check that can't run.
 - `[NIT]` is a suggested improvement. Give at most 6, most valuable first, each with the proposed wording.
+- Every finding's second line is `Confidence: <0-100>`: how sure you are it's real after reading the code. 90 or
+  more when you traced the failing input or state through the code; 60-89 when a step is unconfirmed (name it);
+  below 60 only for something severe if true. Don't report what you'd score below 30.
 - With nothing to report, reply exactly: `Summary: 0 issues found. Ready to build.`

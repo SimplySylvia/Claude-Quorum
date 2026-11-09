@@ -38,7 +38,11 @@ Same format as the code reviewers. Every finding is `[IMPORTANT]` with a Pattern
 Summary: 1 IMPORTANT, 0 NIT, 0 PRE-EXISTING
 
 [IMPORTANT] app/export.py:31 — Pattern Category: CSV formula injection
+Confidence: 95
 Mechanism: a customer named "=HYPERLINK(...)" is written as-is, so a spreadsheet that opens the export runs it.
 ```
+
+Every finding's second line is `Confidence: <0-100>`: 90 or more when you traced an exploit path through the code,
+lower when a step is unconfirmed (name it). Report a plausible vulnerability even when you're unsure; say why.
 
 With nothing exploitable, reply exactly: `Summary: 0 issues found. Ready to land.`

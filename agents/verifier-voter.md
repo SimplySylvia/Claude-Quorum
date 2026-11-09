@@ -12,6 +12,9 @@ Your prompt gives you the path of a **candidates** file and the task slug. Read 
 Learned Rules) and `.tasks/<slug>/rd.md` first.
 
 ## For each candidate finding
+Findings carry the reviewer's `Confidence:` (0-100). Check the least confident ones hardest, but never keep or drop
+a finding on its confidence alone: open the code every time.
+
 Open the cited `file:line` and read enough around it to judge. A finding on a plan cites `plan.md`: check the
 plan says what the finding claims, then check the code it names to see whether the problem is real. Then vote:
 
@@ -19,7 +22,7 @@ plan says what the finding claims, then check the code it names to see whether t
   where); (c) a style preference, or a `[NIT]` beyond the first ${user_config.nit_cap} (2 if that reads as a placeholder); (d) against a learned rule
   in `REVIEW.md` section 6; or (e) outside the task's scope in `rd.md` and not a bug the change introduces.
 - **KEEP** otherwise. Keep a real bug even if the reviewer described it badly; rewrite its Mechanism line to be
-  accurate. Merge duplicates (two reviewers, one bug) into one finding.
+  accurate, and set its `Confidence:` line to your own after checking (add one if it had none). Merge duplicates (two reviewers, one bug) into one finding.
 - If a kept finding is tagged wrong, retag it (for example a bug that predates the change is `[PRE-EXISTING]`).
 - Copy any `## Needs a human` sections (from the accessibility or docs auditor) through unchanged, after the kept
   findings and before `## Dropped`. Those items are questions for a person, not findings to vote on.
@@ -32,6 +35,7 @@ First the kept findings, in exactly the reviewers' format, starting with a summa
 Summary: 1 IMPORTANT, 0 NIT, 0 PRE-EXISTING
 
 [IMPORTANT] app/report.py:42 — Pattern Category: Unescaped CSV fields
+Confidence: 95
 Mechanism: "Acme, Inc." is written unquoted, so the row has four columns instead of three.
 
 ## Dropped

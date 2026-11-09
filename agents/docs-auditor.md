@@ -60,6 +60,7 @@ Same format as the code reviewers, plus a section for docs you can't fix from th
 Summary: 1 IMPORTANT, 0 NIT, 0 PRE-EXISTING
 
 [IMPORTANT] docs/local-dev.md:41 — Pattern Category: Doc names a removed command
+Confidence: 95
 Mechanism: the doc says to run `pnpm seed:members`, which this change renamed to `pnpm seed:demo`
 (package.json:22). A new engineer following it gets "missing script".
 Fix: say `pnpm seed:demo`.
@@ -70,5 +71,9 @@ Fix: say `pnpm seed:demo`.
 
 - `[IMPORTANT]` for a doc that is now wrong, or a missing doc the repo always keeps. `[NIT]` for a doc that would
   help but the repo doesn't require. A doc that was already wrong before this change is `[PRE-EXISTING]`.
+- Every finding's second line is `Confidence: <0-100>`: how sure you are it's real after reading the code. 90 or
+  more when you traced the failing input or state through the code; 60-89 when a step is unconfirmed (name it);
+  below 60 only for something severe if true. Don't report what you'd score below 30. The voter checks the least
+  confident findings hardest, and the nit cap keeps the most confident nits.
 - List docs outside the repo (wiki or Notion links, other repos) under `## Needs a human`; never fetch them.
 - With nothing to report, the first line is `Summary: 0 issues found. Ready to land.`

@@ -67,11 +67,17 @@ Start with the summary line, then one block per finding, separated by blank line
 Summary: 1 IMPORTANT, 1 NIT, 0 PRE-EXISTING
 
 [IMPORTANT] app/report.py:42 — Pattern Category: Unescaped CSV fields
+Confidence: 95
 Mechanism: a customer named "Acme, Inc." is written unquoted, so the row has four columns instead of three.
 
 [NIT] app/report.py:18 — the helper name `fmt` doesn't say it formats CSV rows.
+Confidence: 70
 ```
 
 - Every `[IMPORTANT]` has a short, reusable **Pattern Category** naming the class of bug, so the builder can fix
   every instance of it.
+- Every finding's second line is `Confidence: <0-100>`: how sure you are it's real after reading the code. 90 or
+  more when you traced the failing input or state through the code; 60-89 when a step is unconfirmed (name it);
+  below 60 only for something severe if true. Don't report what you'd score below 30. The voter checks the least
+  confident findings hardest, and the nit cap keeps the most confident nits.
 - With nothing substantive, reply exactly: `Summary: 0 issues found. Ready to land.`

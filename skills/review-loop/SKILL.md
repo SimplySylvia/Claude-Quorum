@@ -77,7 +77,7 @@ Let N = `quorum-state get round` + 1. Stop the loop if N > max_rounds (see step 
    > `.tasks/<slug>/rd.md`, check each finding against the code, and vote.
 
    Save its reply verbatim to `round-<N>/votes.md` (it keeps the `## Dropped` lines, which `/quorum:codify-lesson`
-   reads). Then `quorum-findings cap <nit_cap> votes.md > survivors.md`: the kept findings, nits capped. Run
+   reads). Then `quorum-findings cap <nit_cap> votes.md > survivors.md`: the kept findings, with only the most confident nits. Run
    `quorum-findings check survivors.md`; if it fails, ask the voter once to fix the format.
 6. **Log the round:** pipe a short block to `quorum-state log`:
    `## Round <N> (<RANGE>)`, the `quorum-findings summary` line, the Pattern Categories, and the number of `DROP`

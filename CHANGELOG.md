@@ -14,6 +14,10 @@ copy with `/plugin marketplace update`.
   `helper_model`) and every later command passes them on. `--models` on `spec-and-eval`, `plan`, `review-loop`,
   `blind-test`, or `pr-draft` asks again. The `reviewer_model` and `helper_model` plugin options (default `ask`)
   set a default and skip the question. The rules are in `skills/pipeline-laws/models.md`.
+- **Confidence on every finding.** Reviewers add `Confidence: <0-100>` under each finding. The voter checks the least
+  confident findings hardest, never keeps or drops one on its score alone, and replaces the score with its own after
+  checking. `quorum-findings cap` keeps the most confident nits instead of the first ones, and
+  `quorum-findings check` refuses a score outside 0-100. Findings without a score still parse.
 
 ### Fixed
 

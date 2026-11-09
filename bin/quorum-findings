@@ -6,14 +6,19 @@
 # line) are its body:
 #
 #   [IMPORTANT] app/report.py:42 — Pattern Category: Unescaped CSV fields
+#   Confidence: 90
 #   Mechanism: a customer name with a comma splits into two columns.
+#
+# `Confidence:` (0-100, how sure the reviewer is the finding is real) is optional; a finding without one counts
+# as the least confident.
 #
 #   quorum-findings summary [FILE]          "Summary: 1 IMPORTANT, 2 NIT, 0 PRE-EXISTING"
 #   quorum-findings count TAG [FILE]        number of findings with TAG (IMPORTANT, NIT, PRE-EXISTING)
 #   quorum-findings important [FILE]        the [IMPORTANT] findings with their bodies, for the builder
 #   quorum-findings categories [FILE]       distinct Pattern Categories of [IMPORTANT] findings, one per line
-#   quorum-findings cap N [FILE]            all findings, keeping only the first N [NIT]s
-#   quorum-findings check [FILE]            exit 1 and list problems if an [IMPORTANT] lacks file:line or category
+#   quorum-findings cap N [FILE]            all findings, keeping only the N most confident [NIT]s (first wins ties)
+#   quorum-findings check [FILE]            exit 1 and list problems: an [IMPORTANT] without file:line or category,
+#                                           or a Confidence that isn't a whole number from 0 to 100
 #
 # Lines starting with anything else (for example "DROP" lines from the verifier-voter) are not findings.
 set -euo pipefail
@@ -33,7 +38,7 @@ records() {
     /^#/ || /^(DROP|KEEP|Summary:)/ { flush(); next }
     tag != "" {
       if ($0 ~ /^[ \t]*$/) { blank = 1; next }
-      if (blank && $0 !~ /^[ \t]/ && $0 !~ /^(Mechanism|Why|Fix|Evidence|Pattern Category):/) { flush(); blank = 0; next }
+      if (blank && $0 !~ /^[ \t]/ && $0 !~ /^(Confidence|Mechanism|Why|Fix|Evidence|Pattern Category):/) { flush(); blank = 0; next }
       blank = 0
       body = (body == "" ? $0 : body "\037" $0)
     }
@@ -66,15 +71,39 @@ case "$cmd" in
   cap)
     n=${1:-}; shift || true
     printf '%s' "$n" | grep -Eq '^[0-9]+$' || die "cap needs a number"
+    # Keep the N most confident nits (no Confidence line counts as -1; earlier wins ties), in their original order.
     records "$(src "${1:-}")" | awk -F '\t' -v cap="$n" '
-      $1 == "NIT" && ++nits > cap { next }
-      { if (k++) print ""; print $2; m = split($3, b, "\037"); for (i = 1; i <= m; i++) if (b[i] != "") print b[i] }' ;;
+      function conf(body,   m, b, i, v) {
+        m = split(body, b, "\037")
+        for (i = 1; i <= m; i++) if (b[i] ~ /^Confidence:[ ]*[0-9]+/) { v = b[i]; sub(/^Confidence:[ ]*/, "", v); return v + 0 }
+        return -1
+      }
+      { tag[NR] = $1; head[NR] = $2; body[NR] = $3; if ($1 == "NIT") c[NR] = conf($3) }
+      END {
+        for (r = 1; r <= NR; r++) {
+          if (tag[r] != "NIT") continue
+          better = 0
+          for (o = 1; o <= NR; o++) if (tag[o] == "NIT" && (c[o] > c[r] || (c[o] == c[r] && o < r))) better++
+          if (better >= cap) drop[r] = 1
+        }
+        for (r = 1; r <= NR; r++) {
+          if (drop[r]) continue
+          if (k++) print ""; print head[r]; m = split(body[r], b, "\037"); for (i = 1; i <= m; i++) if (b[i] != "") print b[i]
+        }
+      }' ;;
 
   check)
     bad=$(records "$(src "${1:-}")" | awk -F '\t' '
       { h = $2 }
       h !~ /^\[[A-Z-]+\] [^ ]+:[0-9]+/ { print "missing file:line: " h; next }
-      $1 == "IMPORTANT" && h !~ /Pattern Category:[ ]*[^ ]/ { print "missing Pattern Category: " h }')
+      $1 == "IMPORTANT" && h !~ /Pattern Category:[ ]*[^ ]/ { print "missing Pattern Category: " h }
+      {
+        m = split($3, b, "\037")
+        for (i = 1; i <= m; i++) if (b[i] ~ /^Confidence:/) {
+          v = b[i]; sub(/^Confidence:[ ]*/, "", v); sub(/[ \t]+$/, "", v)
+          if (v !~ /^[0-9]+$/ || v + 0 > 100) print "Confidence must be 0-100: " h
+        }
+      }')
     if [ -n "$bad" ]; then printf '%s\n' "$bad" >&2; exit 1; fi ;;
 
   *) die "usage: quorum-findings summary|count TAG|important|categories|cap N|check [FILE]" ;;

@@ -68,3 +68,43 @@ qf() { "$BIN/quorum-findings" "$@"; }
   run qf count NIT "$BATS_TEST_TMPDIR/ex.md"
   [ "$output" = "0" ]
 }
+
+@test "cap keeps the most confident nits, in their original order" {
+  printf '%s\n' '[NIT] a.py:1 — one' 'Confidence: 30' '' '[NIT] a.py:2 — two' 'Confidence: 80' '' \
+    '[IMPORTANT] a.py:3 — Pattern Category: Bug' 'Confidence: 10' 'Mechanism: x' '' \
+    '[NIT] a.py:4 — four' 'Confidence: 90' '' '[NIT] a.py:5 — five' > "$BATS_TEST_TMPDIR/c.md"
+  run qf cap 2 "$BATS_TEST_TMPDIR/c.md"
+  [[ "$output" == *"a.py:2"* ]]
+  [[ "$output" == *"a.py:3"* ]]
+  [[ "$output" == *"a.py:4"* ]]
+  [[ "$output" != *"a.py:1"* ]]
+  [[ "$output" != *"a.py:5"* ]]
+  [ "${lines[0]}" = "[NIT] a.py:2 — two" ]
+}
+
+@test "cap without confidence lines still keeps the first N nits" {
+  run bash -c "'$BIN/quorum-findings' cap 1 '$FX/mixed.md'"
+  [[ "$output" == *"report.py:10"* ]]
+  [[ "$output" != *"report.py:11"* ]]
+}
+
+@test "check refuses a confidence outside 0-100" {
+  printf '%s\n' '[NIT] a.py:1 — x' 'Confidence: high' > "$BATS_TEST_TMPDIR/bad.md"
+  run qf check "$BATS_TEST_TMPDIR/bad.md"
+  [ "$status" -eq 1 ]; [[ "$output" == *"Confidence must be 0-100"* ]]
+  printf '%s\n' '[NIT] a.py:1 — x' 'Confidence: 101' > "$BATS_TEST_TMPDIR/bad.md"
+  run qf check "$BATS_TEST_TMPDIR/bad.md"
+  [ "$status" -eq 1 ]
+  printf '%s\n' '[NIT] a.py:1 — x' 'Confidence: 100' > "$BATS_TEST_TMPDIR/ok.md"
+  run qf check "$BATS_TEST_TMPDIR/ok.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "every finding agent's example output passes check and carries a confidence" {
+  for a in code-reviewer pattern-auditor docs-auditor a11y-auditor spec-reviewer security-reviewer verifier-voter; do
+    sed -n '/^```$/,/^```$/p' "$REPO_ROOT/agents/$a.md" | sed '/^```$/d' > "$BATS_TEST_TMPDIR/$a.md"
+    run qf check "$BATS_TEST_TMPDIR/$a.md"
+    [ "$status" -eq 0 ] || { echo "$a: $output"; return 1; }
+    grep -q '^Confidence: [0-9]' "$BATS_TEST_TMPDIR/$a.md" || { echo "$a has no Confidence line"; return 1; }
+  done
+}

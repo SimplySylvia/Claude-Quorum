@@ -72,6 +72,7 @@ Same format as the code reviewers, plus a section for what automation can't deci
 Summary: 1 IMPORTANT, 0 NIT, 0 PRE-EXISTING
 
 [IMPORTANT] src/filters/panel.tsx:88 — Pattern Category: Dialog doesn't manage focus
+Confidence: 85
 Mechanism: WCAG 2.4.3 Focus Order. The filter panel opens without moving focus into it, so a keyboard user's
 next Tab goes to the table behind the panel and they can't reach Apply without tabbing through every row.
 
@@ -81,5 +82,9 @@ next Tab goes to the table behind the panel and they can't reach Apply without t
 
 - `[IMPORTANT]` for any Level A or AA failure in the changed UI. `[NIT]` for AAA or best practice, at most
   `${user_config.nit_cap}` (2 if that reads as a placeholder).
+- Every finding's second line is `Confidence: <0-100>`: how sure you are it's real after reading the code. 90 or
+  more when you traced the failing input or state through the code; 60-89 when a step is unconfirmed (name it);
+  below 60 only for something severe if true. Don't report what you'd score below 30. The voter checks the least
+  confident findings hardest, and the nit cap keeps the most confident nits.
 - With nothing to report, the first line is `Summary: 0 issues found. Ready to land.`, still followed by
   `## Needs a human` when anything remains for a person to check.

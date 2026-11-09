@@ -2,6 +2,7 @@
 
 ## 1. Core Review Philosophy
 - **Evidence Requirement:** Every finding MUST cite an exact `file:line` reference and explain the concrete failure mechanism. Never guess based on variable or function names alone.
+- **Confidence:** Every finding's second line is `Confidence: <0-100>`, how sure the reviewer is that it's real. The verifier checks the least confident findings hardest; the nit cap keeps the most confident nits.
 - **Clean Summary Header:** Start every review output with an exact count of findings by tag (e.g., `Summary: 1 IMPORTANT, 2 NIT, 0 PRE-EXISTING`). If there is nothing substantive to fix, state plainly: `Summary: 0 issues found. Ready to land.`
 - **Nitpick Cap:** Maximum of **2 `[NIT]` comments** per review pass. Drop all pure style/formatting preferences covered by linters.
 - **`CLAUDE.md` Drift Check:** Flag `[IMPORTANT]` if this code change makes any documented command, path, or architectural statement in `./CLAUDE.md` inaccurate or outdated.

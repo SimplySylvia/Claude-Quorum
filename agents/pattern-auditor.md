@@ -58,10 +58,15 @@ Same format as the code reviewers:
 Summary: 1 IMPORTANT, 0 NIT, 0 PRE-EXISTING
 
 [IMPORTANT] src/export/format.ts:12 — Pattern Category: Reinvented helper
+Confidence: 90
 Mechanism: `formatMoney()` duplicates `formatCurrency()` in src/shared/format.ts:30, which also handles
 negative values and locale; the new copy prints "-$-5.00" for refunds.
 ```
 
 - `[IMPORTANT]` when the break causes a bug, contradicts a written rule, or is a duplicate the next change will
   copy. Name a reusable **Pattern Category**.
+- Every finding's second line is `Confidence: <0-100>`: how sure you are it's real after reading the code. 90 or
+  more when you traced the failing input or state through the code; 60-89 when a step is unconfirmed (name it);
+  below 60 only for something severe if true. Don't report what you'd score below 30. The voter checks the least
+  confident findings hardest, and the nit cap keeps the most confident nits.
 - With nothing substantive, reply exactly: `Summary: 0 issues found. Ready to land.`
