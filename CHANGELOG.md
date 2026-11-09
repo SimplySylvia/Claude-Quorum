@@ -26,6 +26,15 @@ copy with `/plugin marketplace update`.
 - When a task past the build has no saved proof, the dashboard says which proof file is missing and shows the round
   log's line about the checks, instead of "not run yet".
 
+### Changed
+
+- `quorum-state` refuses `READY` and `AWAITING-HUMAN` unless `.tasks/<slug>/proof-final.md` exists, names the
+  commit at HEAD, and has no failed check (`Result: ALL PASS` or only skipped checks). A task could reach the end
+  with its checks summarized in the round log and no saved proof, which `/quorum:pr-draft` then needs.
+- `state.md` has a `pr` field: the task's pull request URL. A new PostToolUse hook, `record-pr.sh`, sets it when
+  `gh pr create` runs in the session and prints the URL; `/quorum:pr-draft` records a PR the branch already has,
+  and tells you how to record one opened another way. The dashboard asks GitHub about that PR by its URL.
+
 ## 0.3.0 (2026-11-09)
 
 ### Added

@@ -155,10 +155,11 @@ While a task is active, Quorum shows where it is without you asking:
     checks are marked, muted, as "reported passing" rather than proven.
   - **Checks:** every `eval.md` row and the fast checks, each passing, failing, or not run in the latest proof
     (`proof-final.md`, else `proof-build.md`), with the commit it ran at; Stop-hook blocks; pending findings.
-  - **The PR:** once the task is `READY` or `AWAITING-HUMAN`, the dashboard asks GitHub (`gh pr list --head
-    <branch>`, at most every 2 minutes and right after a `gh pr` command or a push) for the branch's PR, and shows
-    it open, merged, or closed with its link, or that `pr.md` is drafted and no PR is open yet. Without `gh`, or
-    signed out, it shows only whether `pr.md` is drafted.
+  - **The PR:** once the task is `READY` or `AWAITING-HUMAN`, the dashboard asks GitHub about the PR `state.md`
+    records (set when `gh pr create` runs in the session), or else the branch's newest PR, at most every 2 minutes
+    and right after a `gh pr` command or a push. It shows the PR open, merged, or closed with its link, or that
+    `pr.md` is drafted and no PR is open yet. Without `gh`, or signed out, it shows the recorded PR's number and
+    link, or whether `pr.md` is drafted.
   - **Stages**, each with its outcome; each **review round**'s findings and how many the voter kept; and any other
     Quorum agents running or finished.
 - **Toasts** when a task converges, halts, escalates, or is ready for you.
@@ -183,7 +184,8 @@ confirm. The tier decides how many layers the task gets:
 ## Guardrails
 
 - **Proof before done.** The Stop hook blocks finishing during a task until the repo's fast checks pass; after 3
-  failures in a row it lets you go and marks the task `ESCALATED`.
+  failures in a row it lets you go and marks the task `ESCALATED`. A task can't be marked `READY` or
+  `AWAITING-HUMAN` without the prover's `proof-final.md`, run at the current commit, with no failed check.
 - **Quiet outside a task.** The hooks do nothing unless a task is building, in review, or escalated, or a blind
   test is running.
 - **Hard caps.** At most 3 review rounds, then `HALTED` with a post-mortem and two redesign options.
@@ -206,7 +208,7 @@ your-repo/
         ├── eval.md                # runnable pass/fail checks
         ├── plan.md                # files, reuse, tests, docs, a11y, security; approved before building
         ├── mockup.html            # UI tasks only
-        └── state.md               # status, round, SHAs, pending findings
+        └── state.md               # status, round, SHAs, pending findings, the PR once opened
 ```
 
 ## Reference
@@ -260,7 +262,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `.claude-plugin/marketplace.json` | Marketplace manifest (lists this repo as its only plugin) |
 | `skills/` | `init-pipeline`, `spec-and-eval`, `plan`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `pr-draft`, `codify-lesson`, and the model-invocable `pipeline-laws` |
 | `agents/` | `researcher`, `spec-reviewer`, `planner`, `builder`, `prover`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `verifier-voter`, `security-reviewer`, `blind-user`, `friction-triager`, `pr-writer` |
-| `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `stop-verify.sh`, and `dashboard/`, the dashboard's hooks module |
+| `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `stop-verify.sh`, `record-pr.sh`, and `dashboard/`, the dashboard's hooks module |
 | `types/` | The type contract for the values the dashboard keeps in the session |
 | `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state` (on the Bash PATH while the plugin is enabled) |
 | `tests/` | bats tests for every hook and helper, `claude plugin test` tests for the dashboard, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
