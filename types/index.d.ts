@@ -38,6 +38,7 @@ declare module 'claude-code' {
     quorum: {
       task: Shaped<Snapshot | null>
       agents: Shaped<QuorumAgent[]>
+      now: number
     }
   }
 }

@@ -45,11 +45,14 @@ const PANE = {
   props: { title: 'Quorum', isFocused: false, bodyColumns: 50, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
 } as const
 
-// Stands for the engine beneath the plugin: a repo on feat/export-csv with the files in `files`.
-function world(on: On, files: Record<string, string>) {
-  const seen = { status: [] as (string | undefined)[], toasts: [] as string[], opened: 0 }
-  // The engine hands paths over resolved against the working directory.
-  const file = (path: string) => Object.entries(files).find(([name]) => path === name || path.endsWith(`/${name}`))?.[1]
+// Stands for the engine beneath the plugin: a project at /repo holding the files in `files`.
+function world(on: On, files: Record<string, string>, root = '/repo') {
+  const seen = { status: [] as (string | undefined)[], toasts: [] as string[], opened: 0, ticks: 0, live: [] as string[] }
+  const file = (path: string) => (path.startsWith(`${root}/`) ? files[path.slice(root.length + 1)] : undefined)
+  on('session.root', () => ({ value: root }))
+  on('agent.list', () => ({ value: seen.live.map(id => ({ id, description: '', type: 'quorum:code-reviewer', status: 'running' as const })) }))
+  // Each period of $.clock.every is one dispatch; refusing the first ends that interval, so this counts intervals.
+  on('clock.every', () => { seen.ticks++; return { deny: 'test' } })
   on('fs.read', (_, e) => {
     const text = file(e.path)
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
@@ -158,6 +161,12 @@ test('a status change toasts once, and only for statuses worth it', async ($, on
   expect(seen.toasts.length).toBe(1)
 })
 
+test('task files are read from the project root, not the working directory', async ($, on) => {
+  const seen = world(on, repo('IN_REVIEW'), '/work/repo')
+  await $.session.start({ cwd: '/work/repo/app', surface: 'terminal', isInteractive: true })
+  expect(seen.status.at(-1)).toBe('Quorum · export-csv · IN_REVIEW · MEDIUM · round 2/3 · 1 pending')
+})
+
 test('with no task the band is the engine\'s and the status line is clear', async ($, on) => {
   const seen = world(on, { '.git/HEAD': 'ref: refs/heads/main\n' })
   on('ui.render', ($, e) => {
@@ -174,12 +183,14 @@ test('with no task the band is the engine\'s and the status line is clear', asyn
 })
 
 test('quorum agents show while they run and tick when they finish', async ($, on) => {
-  world(on, repo('IN_REVIEW'))
+  const seen = world(on, repo('IN_REVIEW'))
   on('agent.spawn', () => ({ model: 'claude-opus-5-5', agentId: 'a1' }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
+  expect(seen.ticks).toBe(0)
   await $.agent.spawn({ tool_use_id: 't1', prompt: 'review', description: 'Logic hunter', subagentType: 'quorum:code-reviewer', parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
+  expect(seen.ticks).toBe(1)
   let pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /^● $/ })).toBeDefined()
   await pane.unmount()
@@ -188,5 +199,26 @@ test('quorum agents show while they run and tick when they finish', async ($, on
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /^✓ $/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /Logic hunter/ })).toBeDefined()
+  await pane.unmount()
+
+  // The first interval was cancelled when the agent finished, so the next agent starts a new one.
+  await $.agent.spawn({ tool_use_id: 't2', prompt: 'vote', description: 'Voter', subagentType: 'quorum:verifier-voter', parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
+  expect(seen.ticks).toBe(2)
+})
+
+test('a reload marks agents the engine no longer runs as finished', async ($, on) => {
+  const seen = world(on, repo('IN_REVIEW'))
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.description }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const spawn = (description: string) => $.agent.spawn({ tool_use_id: description, prompt: 'review', description, subagentType: 'quorum:code-reviewer', parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
+  await spawn('gone')
+  await spawn('alive')
+  seen.live = ['alive']
+
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const marks = await pane.findAll({ type: 'Text', text: /^[●✓] $/ })
+  // The stage list draws the same glyphs first; the agents are the last two.
+  expect(marks.slice(-2).map(m => m.text)).toEqual(['✓ ', '● '])
   await pane.unmount()
 })

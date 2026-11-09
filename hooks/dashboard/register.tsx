@@ -2,7 +2,7 @@
 // review rounds and running agents. It only reads .tasks/; the skills and bin/ scripts stay the source of truth.
 
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { QuorumAgent, Round, Snapshot, Stage } from '../../types'
 import {
@@ -14,6 +14,9 @@ const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
 const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-1' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-1' })
+// Bumped every second while a Quorum agent runs, so the pane's running times count up.
+const clock = atom({ plugin: 'quorum', key: 'now' } as const, 0)
+let ticker: Timer | null = null
 
 // Statuses worth interrupting for.
 const TOASTS: Record<string, string> = {
@@ -39,23 +42,25 @@ const STATUS_COLOR = (status: string) =>
 const readOr = ($: EngineInterface, path: string) => $.fs.read(path).catch(() => null)
 
 // The slug bin/quorum-active-task would print: a feat/ or fix/ branch with a task folder, then .tasks/.active.
-async function activeSlug($: EngineInterface): Promise<string> {
-  let head = await readOr($, '.git/HEAD')
+// `root` is the session's project root, the CLAUDE_PROJECT_DIR that script resolves against.
+async function activeSlug($: EngineInterface, root: string): Promise<string> {
+  let head = await readOr($, `${root}/.git/HEAD`)
   if (head === null) {
-    // A worktree: .git is a file naming the real git dir.
-    const gitdir = /^gitdir:\s*(.+)$/m.exec((await readOr($, '.git')) ?? '')?.[1]?.trim()
-    head = gitdir ? await readOr($, `${gitdir}/HEAD`) : null
+    // A worktree: .git is a file naming the real git dir, absolute or relative to the worktree.
+    const gitdir = /^gitdir:\s*(.+)$/m.exec((await readOr($, `${root}/.git`)) ?? '')?.[1]?.trim()
+    head = gitdir ? await readOr($, gitdir.startsWith('/') ? `${gitdir}/HEAD` : `${root}/${gitdir}/HEAD`) : null
   }
   const fromBranch = slugFromHead(head ?? '')
-  if (fromBranch && (await $.fs.exists(`.tasks/${fromBranch}/state.md`))) return fromBranch
-  const active = ((await readOr($, '.tasks/.active')) ?? '').split('\n')[0]?.trim() ?? ''
+  if (fromBranch && (await $.fs.exists(`${root}/.tasks/${fromBranch}/state.md`))) return fromBranch
+  const active = ((await readOr($, `${root}/.tasks/.active`)) ?? '').split('\n')[0]?.trim() ?? ''
   return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(active) ? active : ''
 }
 
 async function snapshot($: EngineInterface, maxRounds: number, previous: Snapshot | null): Promise<Snapshot | null> {
-  const slug = await activeSlug($)
+  const root = await $.session.root()
+  const slug = await activeSlug($, root)
   if (!slug) return null
-  const text = await readOr($, `.tasks/${slug}/state.md`)
+  const text = await readOr($, `${root}/.tasks/${slug}/state.md`)
   if (text === null) return null
   const fm = parseFrontmatter(text)
   const status = scalar(fm, 'status')
@@ -64,7 +69,7 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
 
   const rounds: Round[] = []
   for (let n = 1; n <= round; n++) {
-    const dir = `.tasks/${slug}/review/round-${n}`
+    const dir = `${root}/.tasks/${slug}/review/round-${n}`
     const survivors = await readOr($, `${dir}/survivors.md`)
     const candidates = await readOr($, `${dir}/candidates.md`)
     rounds.push({
@@ -132,6 +137,25 @@ async function refresh($: EngineInterface, maxRounds: number): Promise<Snapshot 
   return after
 }
 
+// Tick while any Quorum agent runs, and stop once none does.
+function keepTicking($: EngineInterface, all: QuorumAgent[]) {
+  const isRunning = all.some(a => a.endedAt === null)
+  if (isRunning && ticker === null) {
+    ticker = $.clock.every(1000, () => { void $.clock.now().then(now => update($, clock, () => now)) })
+  } else if (!isRunning && ticker !== null) {
+    ticker.cancel()
+    ticker = null
+  }
+}
+
+// After a reload or resume, mark agents the engine no longer runs as finished, so none ticks forever.
+async function settleAgents($: EngineInterface) {
+  const live = new Set((await $.agent.list()).filter(a => a.status === 'pending' || a.status === 'running').map(a => a.id))
+  const now = await $.clock.now()
+  const all = await update($, agents, list => list.map(a => (a.endedAt === null && !live.has(a.id) ? { ...a, endedAt: now } : a)))
+  keepTicking($, all)
+}
+
 function open($: EngineInterface, focus?: true) {
   return $.ui.open({ id: PANE, title: 'Quorum', ...(focus ? { focus } : {}) })
 }
@@ -141,6 +165,7 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: COMMAND, description: "Show or hide the Quorum task dashboard" })
+    await settleAgents($)
     if (await refresh($, maxRounds)) void open($)
     return next(e)
   })
@@ -154,7 +179,7 @@ export const register: Register = (on, options) => {
     const t = await refresh($, maxRounds)
     await open($)
     return { text: t ? `Quorum dashboard opened for ${t.slug}.` : 'Quorum dashboard opened. No active task yet.' }
-   }).catch(() => ({ text: 'Quorum dashboard: could not open; run claude --debug for the reason.' }))
+  }).catch(() => ({ text: 'Quorum dashboard: could not open; run claude --debug for the reason.' }))
 
   // A /quorum:* command starting: refresh, start a fresh agent list, and open the pane unasked.
   on('skill.prompt', async ($, e, next) => {
@@ -172,7 +197,7 @@ export const register: Register = (on, options) => {
     const ran = await next(e)
     if (/quorum-(state|active-task|branch)|\.tasks\//.test(e.command)) await refresh($, maxRounds)
     return ran
-   }).catch(($, e, next) => next(e))
+  }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
     const spawned = await next(e)
@@ -184,17 +209,17 @@ export const register: Register = (on, options) => {
         startedAt: await $.clock.now(),
         endedAt: null,
       }
-      await update($, agents, all => [...all, agent].slice(-30))
+      keepTicking($, await update($, agents, all => [...all, agent].slice(-30)))
     }
     return spawned
-   }).catch(($, e, next) => next(e))
+  }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     if (e.agentId !== undefined) {
       const id = e.agentId
       const now = await $.clock.now()
-      await update($, agents, all => all.map(a => (a.id === id && a.endedAt === null ? { ...a, endedAt: now } : a)))
+      keepTicking($, await update($, agents, all => all.map(a => (a.id === id && a.endedAt === null ? { ...a, endedAt: now } : a))))
     } else {
       await refresh($, maxRounds)
     }
@@ -241,6 +266,7 @@ export const register: Register = (on, options) => {
       )
     }
     const crew = await read($, agents)
+    await read($, clock) // redraw on each tick
     const now = await $.clock.now()
     const rail = stages(t.status, t.risk, t.stage)
 
