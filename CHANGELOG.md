@@ -26,6 +26,11 @@ copy with `/plugin marketplace update`.
 - When a task past the build has no saved proof, the dashboard says which proof file is missing and shows the round
   log's line about the checks, instead of "not run yet".
 
+- `assets/src/dashboard-demo.sh` builds a demo repo with one task at code review, blind test, or AWAITING-HUMAN, for
+  seeing the dashboard and making its README screenshot.
+- The dashboard flags a proof that ran at a commit older than HEAD as possibly out of date, so a build proof's
+  failure that a review round has since fixed doesn't read as current.
+
 ### Changed
 
 - `quorum-state` refuses `READY` and `AWAITING-HUMAN` unless `.tasks/<slug>/proof-final.md` exists, names the

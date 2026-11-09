@@ -154,7 +154,8 @@ While a task is active, Quorum shows where it is without you asking:
     non-goals). When no proof file was saved but the round log says every check passed, the requirements and
     checks are marked, muted, as "reported passing" rather than proven.
   - **Checks:** every `eval.md` row and the fast checks, each passing, failing, or not run in the latest proof
-    (`proof-final.md`, else `proof-build.md`), with the commit it ran at; Stop-hook blocks; pending findings.
+    (`proof-final.md`, else `proof-build.md`), with the commit it ran at, flagged when that's older than HEAD;
+    Stop-hook blocks; pending findings.
   - **The PR:** once the task is `READY` or `AWAITING-HUMAN`, the dashboard asks GitHub about the PR `state.md`
     records (set when `gh pr create` runs in the session), or else the branch's newest PR, at most every 2 minutes
     and right after a `gh pr` command or a push. It shows the PR open, merged, or closed with its link, or that
@@ -267,7 +268,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state` (on the Bash PATH while the plugin is enabled) |
 | `tests/` | bats tests for every hook and helper, `claude plugin test` tests for the dashboard, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
 | `evals/` | `claude plugin eval` suite: risk tiering, one case per agent, voter false-alarm drops, blind-mode source reads, a near-miss |
-| `assets/` | The README's animations and diagrams, in light and dark versions; `assets/src/diagrams.py` draws the diagrams |
+| `assets/` | The README's animations and diagrams, in light and dark versions; `assets/src/diagrams.py` draws the diagrams, and `assets/src/dashboard-demo.sh` builds a demo task for the dashboard |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`CHANGELOG.md`](CHANGELOG.md) · [`LICENSE`](LICENSE) | Development guide · release notes · MIT license |
 
 </details>

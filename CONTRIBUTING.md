@@ -8,7 +8,7 @@ Hooks read JSON on stdin, so tests feed fixture hook input and check the exit co
 
 ```bash
 bats -r tests/                                # every hook and bin/ helper
-shellcheck hooks/*.sh bin/* evals/run.sh evals/_fixture/make.sh evals/*/scaffold.sh
+shellcheck hooks/*.sh bin/* evals/run.sh evals/_fixture/make.sh evals/*/scaffold.sh assets/src/*.sh
 claude plugin validate --strict .             # manifest, paths, marketplace, the dashboard module; warnings fail
 claude plugin test .                          # the dashboard's tests in tests/dashboard/, against the engine
 ```
@@ -79,6 +79,23 @@ python3 assets/src/diagrams.py
 
 The two animations are plain CSS keyframes, so they play in a README image and show their final frame, without
 motion, to viewers who ask for reduced motion.
+
+## The dashboard demo
+
+`assets/src/dashboard-demo.sh` builds a repo whose `.tasks/` holds one MEDIUM task partway through Quorum, so you
+can see the dashboard and status line without running a real task, and screenshot them for the README. It writes
+every file as the skills would have saved it and calls no model:
+
+```bash
+assets/src/dashboard-demo.sh /tmp/quorum-demo                 # code review round 2, two reviewers in
+assets/src/dashboard-demo.sh /tmp/quorum-demo --stage blind   # blind test run 1 saved
+assets/src/dashboard-demo.sh /tmp/quorum-demo --stage done    # AWAITING-HUMAN, proof at HEAD, PR #42 recorded
+cd /tmp/quorum-demo && claude --plugin-dir <this repo>
+```
+
+Open the pane with `/quorum-dashboard` or the band's **Dashboard** button. If Quorum is also installed, disable it
+for that session so the two copies don't both draw. The demo's PR points at a repository that doesn't exist, so the
+dashboard shows it as `PR #42` without an open or merged state.
 
 ## Releasing
 
