@@ -297,12 +297,13 @@ export function branchFromHead(head: string): string {
 // The PR stage only matters once the task is finished and waiting on a PR.
 export const isPrStage = (status: string) => status === 'READY' || status === 'AWAITING-HUMAN'
 
-// `gh pr list --json number,state,isDraft,url` output: the newest PR for the branch, or NONE.
+// `gh pr list --json number,state,isDraft,url` output (the newest PR for the branch, or NONE), or `gh pr view`'s
+// single object.
 export function parsePr(slug: string, stdout: string, checkedAt: number): PullRequest {
   const none: PullRequest = { slug, number: 0, state: 'NONE', isDraft: false, url: '', checkedAt }
   try {
-    const list: unknown = JSON.parse(stdout)
-    const pr = Array.isArray(list) ? (list[0] as Partial<PullRequest> | undefined) : undefined
+    const parsed: unknown = JSON.parse(stdout)
+    const pr = (Array.isArray(parsed) ? parsed[0] : parsed) as Partial<PullRequest> | undefined | null
     if (!pr || typeof pr.number !== 'number') return none
     const state = pr.state === 'OPEN' || pr.state === 'MERGED' || pr.state === 'CLOSED' ? pr.state : 'UNKNOWN'
     return { slug, number: pr.number, state, isDraft: pr.isDraft === true, url: typeof pr.url === 'string' ? pr.url : '', checkedAt }
@@ -311,11 +312,18 @@ export function parsePr(slug: string, stdout: string, checkedAt: number): PullRe
   }
 }
 
+// The PR state.md records (`pr`, a pull request URL) before or without asking GitHub: its number, state unknown.
+export function prFromUrl(slug: string, url: string): PullRequest | null {
+  const number = Number(/\/pull\/(\d+)$/.exec(url)?.[1] ?? 0)
+  return number > 0 ? { slug, number, state: 'UNKNOWN', isDraft: false, url, checkedAt: 0 } : null
+}
+
 // The PR stage's line, or '' when there is nothing to say.
 export function prDetail(pr: PullRequest | null, isDrafted: boolean): string {
   if (pr && pr.number > 0) {
     if (pr.state === 'MERGED') return `PR #${pr.number} merged`
     if (pr.state === 'CLOSED') return `PR #${pr.number} closed without merging`
+    if (pr.state === 'UNKNOWN') return `PR #${pr.number}`
     return `${pr.isDraft ? 'draft ' : ''}PR #${pr.number} open`
   }
   if (!isDrafted) return ''

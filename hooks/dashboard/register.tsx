@@ -7,14 +7,14 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { Check, Findings, Now, PullRequest, QuorumAgent, Reviewer, Round, Snapshot, Stage } from '../../types'
 import {
-  ROLE_LABEL, STAGES, branchFromHead, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
+  ROLE_LABEL, STAGES, branchFromHead, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, stageOf, stages,
 } from './task'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-5' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-6' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-2' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
 // How long a PR lookup stands before the next refresh asks GitHub again.
@@ -163,6 +163,7 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     slug,
     branch,
     prDrafted: await $.fs.exists(`${dir}/pr.md`),
+    prUrl: scalar(fm, 'pr'),
     risk,
     status,
     stage,
@@ -185,8 +186,8 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
   }
 }
 
-// The task's PR as last looked up, if it is this task's.
-const prOf = (t: Snapshot, known: PullRequest | null) => (known?.slug === t.slug ? known : null)
+// The task's PR as GitHub last reported it, else as state.md records it.
+const prOf = (t: Snapshot, known: PullRequest | null) => (known?.slug === t.slug ? known : prFromUrl(t.slug, t.prUrl))
 
 function statusLine(t: Snapshot | null, known: PullRequest | null): string | undefined {
   if (!t) return undefined
@@ -200,17 +201,20 @@ function statusLine(t: Snapshot | null, known: PullRequest | null): string | und
 // Ask GitHub for the task branch's PR, at most every PR_TTL_MS unless `force`d, and only once the task waits on one.
 // It runs after the hook that started it; a missing or signed-out gh is remembered as UNKNOWN until the TTL passes.
 async function lookupPr($: EngineInterface, t: Snapshot, force: boolean) {
-  if (!isPrStage(t.status) || !t.branch) return
-  const known = prOf(t, await read($, pr))
+  if (!isPrStage(t.status) || (!t.branch && !t.prUrl)) return
+  const known = await read($, pr)
   const now = await $.clock.now()
-  if (!force && known && now - known.checkedAt < PR_TTL_MS) return
-  const ran = await $.process.run(
-    ['gh', 'pr', 'list', '--head', t.branch, '--state', 'all', '--limit', '1', '--json', 'number,state,isDraft,url'],
-    { cwd: await $.session.root(), timeoutMs: 15_000 },
-  ).catch(() => null)
+  // A recorded lookup for this task, and for the PR state.md names if it names one, stands until the TTL.
+  const isFresh = known?.slug === t.slug && (!t.prUrl || known.url === t.prUrl) && now - known.checkedAt < PR_TTL_MS
+  if (!force && isFresh) return
+  // The PR state.md records, else the newest one for the task's branch.
+  const argv = t.prUrl
+    ? ['gh', 'pr', 'view', t.prUrl, '--json', 'number,state,isDraft,url']
+    : ['gh', 'pr', 'list', '--head', t.branch, '--state', 'all', '--limit', '1', '--json', 'number,state,isDraft,url']
+  const ran = await $.process.run(argv, { cwd: await $.session.root(), timeoutMs: 15_000 }).catch(() => null)
   const found: PullRequest = ran && ran.exitCode === 0
     ? parsePr(t.slug, ran.stdout, now)
-    : { slug: t.slug, number: 0, state: 'UNKNOWN', isDraft: false, url: '', checkedAt: now }
+    : { ...(prFromUrl(t.slug, t.prUrl) ?? { slug: t.slug, number: 0, state: 'UNKNOWN', isDraft: false, url: '' }), checkedAt: now }
   const after = await update($, pr, () => found)
   $.ui.status(statusLine(await read($, task), after))
 }

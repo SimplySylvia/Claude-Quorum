@@ -47,6 +47,8 @@ export type Snapshot = {
   branch: string
   // pr.md exists: /quorum:pr-draft has run.
   prDrafted: boolean
+  // state.md's `pr`: the PR's URL once recorded, else ''.
+  prUrl: string
   risk: string
   status: string
   stage: number

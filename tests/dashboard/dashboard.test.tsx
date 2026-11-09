@@ -3,7 +3,7 @@ import type { On } from 'claude-code'
 
 import {
   countFindings, countRequirements, evalRows, isReportedPass, joinChecks, nextStep, parseBlind, parseFrontmatter, parsePr,
-  parseProof, parseSpec, prDetail, prNext,
+  parseProof, parseSpec, prDetail, prFromUrl, prNext,
   requirementState, roleOf,
   roundReviewers, slugFromHead, stageOf, stages,
 } from '../../hooks/dashboard/task'
@@ -223,6 +223,10 @@ describe('task helpers', () => {
     expect(open).toEqual({ slug: 'x', number: 33807, state: 'OPEN', isDraft: false, url: 'https://github.com/o/r/pull/33807', checkedAt: 5 })
     expect(parsePr('x', '[]', 5).state).toBe('NONE')
     expect(parsePr('x', 'not json', 5).state).toBe('UNKNOWN')
+    expect(parsePr('x', '{"number":7,"state":"MERGED","isDraft":false,"url":"u"}', 5).state).toBe('MERGED')
+    expect(prFromUrl('x', 'https://github.com/o/r/pull/42')).toEqual({ slug: 'x', number: 42, state: 'UNKNOWN', isDraft: false, url: 'https://github.com/o/r/pull/42', checkedAt: 0 })
+    expect(prFromUrl('x', '')).toBeNull()
+    expect(prDetail(prFromUrl('x', 'https://github.com/o/r/pull/42'), true)).toBe('PR #42')
     expect(prDetail(open, true)).toBe('PR #33807 open')
     expect(prDetail({ ...open, state: 'MERGED' }, true)).toBe('PR #33807 merged')
     expect(prDetail(parsePr('x', '[]', 5), true)).toBe('pr.md drafted, PR not opened yet')
@@ -477,6 +481,25 @@ test('a finished task shows its PR from GitHub, asking again only after the TTL 
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await band.find({ type: 'Text', text: /^ › ✓ PR$/ })).toBeDefined()
   await band.unmount()
+})
+
+test('a PR recorded in state.md is asked about by its URL, and shown even without gh', async ($, on) => {
+  const files: Record<string, string> = repo('AWAITING-HUMAN')
+  files['.tasks/export-csv/state.md'] = state('AWAITING-HUMAN', 'pr: https://github.com/o/r/pull/42\n')
+  world(on, files)
+  const calls: string[][] = []
+  on('process.run', (_, e) => {
+    calls.push([...e.argv])
+    return { value: { exitCode: 1, stdout: '', stderr: 'gh: not logged in', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await settle()
+  expect(calls[0]).toEqual(['gh', 'pr', 'view', 'https://github.com/o/r/pull/42', '--json', 'number,state,isDraft,url'])
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^PR #42$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^https:\/\/github\.com\/o\/r\/pull\/42$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Get PR #42 reviewed and merged$/ })).toBeDefined()
+  await pane.unmount()
 })
 
 test('without gh, a finished task still says pr.md is drafted, and never claims no PR exists', async ($, on) => {
