@@ -40,3 +40,9 @@ next command. Never start one yourself: every Quorum command is run by the user.
 | LOW | Copy or style, docs, an isolated test, code behind an off-by-default flag | Plan and code review by 1 reviewer, plus 1 per tests, UI, or docs touched; no human line review if green |
 | MEDIUM | A user-facing workflow, an API endpoint, state logic | Research; plan and code review by 4–6 reviewers; blind test; focused human review |
 | HIGH | Auth, money, destructive migrations, security boundaries, core state machines, build pipelines | Research; plan and code review by 4–7 reviewers, including security; blocking security pass; blind test; human architectural sign-off |
+
+## Models
+
+Each task records which model its reviewers and its helpers run on; the skills ask once, at the task's start.
+`${CLAUDE_PLUGIN_ROOT}/skills/pipeline-laws/models.md` has the rules. A command that starts reviewers or helpers,
+run with `--models`, asks again.

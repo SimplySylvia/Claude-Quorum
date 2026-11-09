@@ -4,7 +4,7 @@
 #   quorum-state [--task SLUG] path                  print the state file path
 #   quorum-state --task SLUG init RISK [STATUS]      create state.md (STATUS defaults to BUILDING)
 #   quorum-state [--task SLUG] get KEY               scalar value (empty for null), or list items one per line
-#   quorum-state [--task SLUG] set KEY VALUE         set a scalar (validated: status, risk, counters, pr)
+#   quorum-state [--task SLUG] set KEY VALUE         set a scalar (validated: status, risk, counters, pr, models)
 #   quorum-state [--task SLUG] incr KEY              add 1 to a counter and print the new value
 #   quorum-state [--task SLUG] push KEY VALUE        append to a list (round_shas, pending_findings)
 #   quorum-state [--task SLUG] last KEY              last list item (exit 1 if the list is empty)
@@ -13,6 +13,8 @@
 #
 # Setting status READY or AWAITING-HUMAN needs a proof: .tasks/<slug>/proof-final.md from the prover, run at the
 # current HEAD, with no failed check ("Result: ALL PASS" or "<n> SKIPPED"). `pr` is the task's pull request URL.
+# `reviewer_model` and `helper_model` are the models chosen for the task's agents (skills/pipeline-laws/models.md):
+# `inherit` or a value the Agent tool's `model` parameter accepts.
 #
 # Without --task, the slug comes from quorum-active-task. The frontmatter is rewritten in canonical key order;
 # the body after the closing --- is kept as is. Values may not contain tabs or newlines. Bash 3.2 compatible.
@@ -21,7 +23,7 @@ set -euo pipefail
 die() { echo "quorum-state: $*" >&2; exit 1; }
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-ORDER="slug risk status round base_sha round_shas stop_blocks signoff plan_rounds plan_approved pending_findings blind_runs escalated_from pr"
+ORDER="slug risk status round base_sha round_shas stop_blocks signoff plan_rounds plan_approved pending_findings blind_runs escalated_from reviewer_model helper_model pr"
 LISTS=" round_shas pending_findings "
 COUNTERS=" round stop_blocks plan_rounds blind_runs "
 STATUSES=" DRAFT-AWAITING-VISUAL-SIGNOFF PLANNING BUILDING IN_REVIEW CONVERGED BLIND-TEST READY AWAITING-HUMAN HALTED ESCALATED "
@@ -142,6 +144,8 @@ validate_scalar() { # key value
       case "$2" in READY|AWAITING-HUMAN) require_proof "$2" ;; esac ;;
     risk) is_in "$2" "$RISKS" || die "unknown risk tier: $2 (LOW, MEDIUM, HIGH)" ;;
     pr) printf '%s' "$2" | grep -Eq '^https?://[^[:space:]]+/pull/[0-9]+$' || die "pr must be a pull request URL (https://github.com/<owner>/<repo>/pull/<n>)" ;;
+    reviewer_model|helper_model)
+      printf '%s' "$2" | grep -Eq '^[A-Za-z0-9][]A-Za-z0-9._:@/[-]*$' || die "$1 must be inherit or a model name or ID, with no spaces" ;;
   esac
   if is_in "$1" "$COUNTERS"; then printf '%s' "$2" | grep -Eq '^[0-9]+$' || die "$1 must be a non-negative integer"; fi
   check_value "$2"
@@ -167,7 +171,7 @@ case "$cmd" in
     {
       printf -- '---\nslug: %s\nrisk: %s\nstatus: %s\nround: 0\nbase_sha: null\nround_shas: []\nstop_blocks: 0\n' "$task" "$risk" "$status"
       printf -- 'signoff: null\nplan_rounds: 0\nplan_approved: null\npending_findings: []\nblind_runs: 0\n'
-      printf -- 'escalated_from: null\npr: null\n---\n# %s\n' "$task"
+      printf -- 'escalated_from: null\nreviewer_model: null\nhelper_model: null\npr: null\n---\n# %s\n' "$task"
     } > "$FILE" ;;
 
   get)

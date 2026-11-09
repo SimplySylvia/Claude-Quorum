@@ -14,6 +14,8 @@
     "stop_hook_enabled": { "type": "boolean", "title": "Stop-hook checks", "description": "Run the repo's verify-completion.sh when Claude or the builder finishes during a task.", "default": true },
     "verify_timeout_s": { "type": "number", "title": "Check timeout (seconds)", "description": "Timeout for verify-completion.sh (the hook itself times out at 1800).", "default": 300, "min": 10, "max": 1700 },
     "security_on_medium": { "type": "boolean", "title": "Security pass for MEDIUM", "description": "Also run the security reviewer for MEDIUM-risk tasks (it always runs for HIGH).", "default": false },
+    "reviewer_model": { "type": "string", "title": "Reviewer model", "description": "Model for the spec, plan, and code reviewers, the security reviewer, and the voter: ask (each task asks once), inherit (the session's model), or a model name or ID Claude Code accepts.", "default": "ask" },
+    "helper_model": { "type": "string", "title": "Helper model", "description": "Model for the PR writer and the friction triager: ask (each task asks once), inherit (the session's model), or a model name or ID Claude Code accepts.", "default": "ask" },
     "blind_block_dirs": { "type": "string", "title": "Blind test: blocked folders", "description": "Comma-separated folders the blind user may not read.", "default": "src,app,lib,packages,Source,Content" },
     "blind_block_exts": { "type": "string", "title": "Blind test: blocked file types", "description": "Comma-separated file extensions the blind user may not read.", "default": "ts,tsx,js,jsx,py,rs,go,cpp,h,java,kt,rb" }
   }

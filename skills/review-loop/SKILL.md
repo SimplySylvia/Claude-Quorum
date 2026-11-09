@@ -2,6 +2,7 @@
 name: review-loop
 description: Run Quorum's review loop on the active task. Fresh-context reviewers audit only the new lines, a verifier-voter drops false alarms, and the builder fixes each surviving Pattern Category everywhere it appears, for up to max_rounds rounds. Ends CONVERGED (LOW tasks get their final summary) or HALTED with a post-mortem. Run after /quorum:build and /quorum:simplify-diff, and again after /quorum:blind-test finds problems.
 disable-model-invocation: true
+argument-hint: "[--models]"
 ---
 
 # Review loop
@@ -18,6 +19,11 @@ Settings: `max_rounds` = ${user_config.max_rounds}, `nit_cap` = ${user_config.ni
 `${user_config…}` placeholder, the user hasn't set it: use the defaults, `max_rounds` 3 and `nit_cap` 2.
 
 Keep each round's files in `.tasks/<slug>/review/round-<N>/`.
+
+**Models.** Before the first reviewer, resolve the task's reviewer model as in
+`${CLAUDE_PLUGIN_ROOT}/skills/pipeline-laws/models.md` (configured defaults: `reviewer_model` = ${user_config.reviewer_model}, `helper_model` = ${user_config.helper_model}) (`--models` in
+`$ARGUMENTS` asks again). Start every reviewer and the voter with `reviewer_model`; the builder and the prover run on
+the session's model.
 
 ## 0. Preconditions
 

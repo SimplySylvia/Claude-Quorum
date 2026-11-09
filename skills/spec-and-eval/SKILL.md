@@ -2,7 +2,7 @@
 name: spec-and-eval
 description: Start a Quorum task. Classifies the risk tier, researches the approach (MEDIUM/HIGH), writes the requirements (rd.md) and runnable checks (eval.md), has two spec reviewers check them against the code, creates the task's state.md, and for UI work writes a mockup for sign-off. With --redesign <slug>, restarts a HALTED task from a redesign option. Run before writing any code; /quorum:plan comes next.
 disable-model-invocation: true
-argument-hint: "<what to build> [--research | --no-research] | --redesign <slug>"
+argument-hint: "<what to build> [--research | --no-research] [--models] | --redesign <slug>"
 ---
 
 # Spec a task
@@ -89,16 +89,19 @@ Do this for MEDIUM and HIGH tasks, and for LOW when `$ARGUMENTS` contains `--res
 
 ## 6. Review the spec
 
-1. Start two `quorum:spec-reviewer`s **in one message, in parallel**, personas **Feasibility Critic** and
-   **Spec Improver**. Each gets only:
+1. **Models.** Resolve both of the task's model choices, reviewers and helpers, as in
+   `${CLAUDE_PLUGIN_ROOT}/skills/pipeline-laws/models.md` (configured defaults: `reviewer_model` = ${user_config.reviewer_model}, `helper_model` = ${user_config.helper_model}). Ask them together with
+   the questions from step 5 when you can, so the user is asked once. Every later command reuses them.
+2. Start two `quorum:spec-reviewer`s **in one message, in parallel**, with `reviewer_model`, personas
+   **Feasibility Critic** and **Spec Improver**. Each gets only:
 
    > Persona: <persona>. Task: `<slug>`. Review `.tasks/<slug>/rd.md` and `.tasks/<slug>/eval.md` before any
    > code is written. Read `CLAUDE.md`, `REVIEW.md`, and `.tasks/<slug>/research.md` if it exists.
 
-2. Save the replies verbatim to `.tasks/<slug>/spec-review/feasibility.md` and `improver.md`.
-3. Fix every `[IMPORTANT]` in `rd.md` or `eval.md`, or ask the user about any you think is wrong. Apply the
+3. Save the replies verbatim to `.tasks/<slug>/spec-review/feasibility.md` and `improver.md`.
+4. Fix every `[IMPORTANT]` in `rd.md` or `eval.md`, or ask the user about any you think is wrong. Apply the
    `[NIT]` suggestions you agree with. Run the reviewers once more only if you changed a requirement's meaning.
-4. Show the user both files, what the reviewers found and what you changed, and ask for corrections before going
+5. Show the user both files, what the reviewers found and what you changed, and ask for corrections before going
    on. `quorum-state log` a short block: the two summary lines and what changed.
 
 ## 7. UI work: mockup gate
@@ -120,4 +123,6 @@ Otherwise, the next step is `/quorum:plan`.
    user changes it. Then review the new spec as in step 6; write its `quorum-state log` block after the init in step 4.
 4. `quorum-state --task <slug> init <RISK> PLANNING` (this starts with a fresh round count, round SHAs, plan
    rounds, and findings), then `quorum-active-task --set <slug>`. `base_sha` is set again by `/quorum:build`.
+   Carry over the model choices: `quorum-state set` each of `reviewer_model` and `helper_model` that the halted
+   state file recorded.
 5. The next step is `/quorum:plan`: the old `plan.md` was for the design that halted, so it's planned again.

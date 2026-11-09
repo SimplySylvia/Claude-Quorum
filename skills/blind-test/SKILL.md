@@ -2,6 +2,7 @@
 name: blind-test
 description: Run Quorum's last automated layers on a CONVERGED MEDIUM or HIGH task. A security-only review (HIGH, or MEDIUM with security_on_medium), then a blind user who can't read the source tries the task's goal through the running app, plus a live WCAG 2.2 check for UI changes and a triage of the friction it reports. Problems go back to /quorum:review-loop; a clean run prints the final summary and waits for your review.
 disable-model-invocation: true
+argument-hint: "[--models]"
 ---
 
 # Security pass and blind test
@@ -11,6 +12,11 @@ review the code yourself, and you never give the blind user anything from the so
 
 Don't run git commands that change the working tree, index, or history here (`stash`, `reset`, `checkout`, `commit`,
 `rebase`); agents make the commits. Read-only git (`diff`, `log`, `status`, `show`) is fine.
+
+**Models.** Before the first agent, resolve both of the task's model choices as in
+`${CLAUDE_PLUGIN_ROOT}/skills/pipeline-laws/models.md` (configured defaults: `reviewer_model` = ${user_config.reviewer_model}, `helper_model` = ${user_config.helper_model}) (`--models` in `$ARGUMENTS`
+asks again). Start the security reviewer and the a11y auditor with `reviewer_model` and the friction triager with
+`helper_model`; the blind user and the prover run on the session's model.
 
 ## 0. Preconditions
 

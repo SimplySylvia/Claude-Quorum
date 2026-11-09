@@ -3,6 +3,22 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
+## Unreleased
+
+### Added
+
+- **Choose the models for a task's agents at runtime.** `/quorum:spec-and-eval` asks which model the reviewers use
+  (the spec, plan, code, accessibility, and security reviewers, and the voter) and which the helpers use (the PR
+  writer and the friction triager). The choices come from the models Claude Code offers at the time, not a list in
+  the plugin, so they keep up as models change. The answers are saved in `state.md` (`reviewer_model`,
+  `helper_model`) and every later command passes them on. `--models` on `spec-and-eval`, `plan`, `review-loop`,
+  `blind-test`, or `pr-draft` asks again. The `reviewer_model` and `helper_model` plugin options (default `ask`)
+  set a default and skip the question. The rules are in `skills/pipeline-laws/models.md`.
+
+### Fixed
+
+- The docs auditor's row in the review loop's reviewer table had lost its indent, which could break the table.
+
 ## 0.4.0 (2026-11-09)
 
 ### Added

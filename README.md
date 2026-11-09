@@ -204,6 +204,19 @@ confirm. The tier decides how many layers the task gets:
 - **Asks before writing** to `CLAUDE.md`, `REVIEW.md`, or your global `~/.claude/CLAUDE.md`, with a diff first.
 - **Local data only.** Blind tests and `eval.md` checks use local, temporary, or synthetic data, never production.
 
+## Models
+
+Models change often, so Quorum doesn't name any. When a task starts, `/quorum:spec-and-eval` asks two questions,
+with the models Claude Code offers at that moment as the choices:
+
+- **Reviewers:** the spec, plan, code, accessibility, and security reviewers and the voter. The recommended answer is
+  your session's model, since these decide what gets fixed.
+- **Helpers:** the PR writer and the friction triager, which summarize and sort. The fastest model is recommended.
+
+The answers go in the task's `state.md`, and every later command uses them. Run any command that starts reviewers
+or helpers with `--models` to choose again, or set the `reviewer_model` and `helper_model` plugin options to
+`inherit` or a model name to skip the question. If a recorded model is retired, Quorum asks again.
+
 ## What it sets up in your repo
 
 The plugin never hardcodes a test command; it reads them from these files.
@@ -220,7 +233,7 @@ your-repo/
         ├── eval.md                # runnable pass/fail checks
         ├── plan.md                # files, reuse, tests, docs, a11y, security; approved before building
         ├── mockup.html            # UI tasks only
-        └── state.md               # status, round, SHAs, pending findings, the PR once opened
+        └── state.md               # status, round, SHAs, pending findings, models, the PR once opened
 ```
 
 ## Reference
@@ -260,6 +273,8 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `stop_hook_enabled` | `true` | Turn the Stop-hook check off for a while |
 | `verify_timeout_s` | `300` | Timeout for `verify-completion.sh` |
 | `security_on_medium` | `false` | Also run the security pass for MEDIUM tasks |
+| `reviewer_model` | `ask` | Model for the spec, plan, code, and security reviewers and the voter: `ask`, `inherit`, or a model name |
+| `helper_model` | `ask` | Model for the PR writer and the friction triager: `ask`, `inherit`, or a model name |
 | `blind_block_dirs` | `src,app,lib,packages,Source,Content` | Folders the blind user can't read |
 | `blind_block_exts` | `ts,tsx,js,jsx,py,rs,go,cpp,h,java,kt,rb` | File types the blind user can't read |
 
@@ -293,8 +308,9 @@ Tests, evals, trying a local build, redrawing the diagrams, and releasing are in
 - **Claude Code asks before writing `.claude/hooks/`**, so `init-pipeline` brings one approval prompt.
 - **The blind guard is a safeguard, not a sandbox.** It blocks reading source, but running a script that reads
   source gets through, because running code is how a user runs the app.
-- **Agents use your session's model, and it adds up.** A MEDIUM or HIGH round runs 4–6 reviewers, a voter, and a
-  builder, for up to 3 rounds, after research, two spec reviewers, and up to 2 plan-review rounds.
+- **Agents add up.** A MEDIUM or HIGH round runs 4–6 reviewers, a voter, and a builder, for up to 3 rounds, after
+  research, two spec reviewers, and up to 2 plan-review rounds. Each task asks which model its reviewers and its
+  helpers use (see [Models](#models)); the researcher, planner, builder, prover, and blind user use your session's.
 - **Accessibility checks are partial.** Automated scans find only part of WCAG 2.2; the a11y auditor lists the
   rest under "Needs a human". A clean report isn't a conformance claim.
 - **`verify-completion.sh` should stay fast.** The Stop hook runs it on every finish; put slow suites in `eval.md`.

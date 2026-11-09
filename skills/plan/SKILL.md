@@ -2,7 +2,7 @@
 name: plan
 description: Write and review the implementation plan for the active Quorum task before any code exists. The planner turns rd.md and eval.md into plan.md (files, reuse, tests, docs, accessibility, security); the same reviewers that later check the code check the plan, a voter drops false alarms, and the planner revises, for up to 2 rounds. Ends with your approval and status BUILDING. Run after /quorum:spec-and-eval and before /quorum:build.
 disable-model-invocation: true
-argument-hint: "[slug] [--yes]"
+argument-hint: "[slug] [--yes] [--models]"
 ---
 
 # Plan the task
@@ -43,6 +43,10 @@ Save its reply verbatim to `.tasks/<slug>/plan.md`.
 ## 4. Review the plan
 
 Let N = `quorum-state incr plan_rounds`.
+
+**Models.** In round 1, first resolve the task's reviewer model as in
+`${CLAUDE_PLUGIN_ROOT}/skills/pipeline-laws/models.md` (configured defaults: `reviewer_model` = ${user_config.reviewer_model}, `helper_model` = ${user_config.helper_model}). Start every plan reviewer and
+the voter with `reviewer_model`; the planner runs on the session's model.
 
 1. **Start the plan reviewers in one message, in parallel** (they must not see each other or you). Risk tier from
    `quorum-state get risk`; read `plan.md` to see what it touches:

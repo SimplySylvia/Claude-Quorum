@@ -42,6 +42,25 @@ teardown() { cleanup_repo; }
   run "$BIN/quorum-state" set plan_rounds two; [ "$status" -eq 1 ]
 }
 
+@test "init leaves the model choices unset, and set records them" {
+  "$BIN/quorum-state" --task demo init MEDIUM PLANNING
+  run "$BIN/quorum-state" get reviewer_model; [ "$status" -eq 0 ]; [ -z "$output" ]
+  run "$BIN/quorum-state" get helper_model;   [ "$status" -eq 0 ]; [ -z "$output" ]
+  "$BIN/quorum-state" set reviewer_model inherit
+  "$BIN/quorum-state" set helper_model 'claude-haiku-5-5[1m]'
+  run "$BIN/quorum-state" get reviewer_model; [ "$output" = "inherit" ]
+  run "$BIN/quorum-state" get helper_model;   [ "$output" = "claude-haiku-5-5[1m]" ]
+  "$BIN/quorum-state" clear helper_model
+  run "$BIN/quorum-state" get helper_model;   [ -z "$output" ]
+}
+
+@test "set refuses a model value with spaces or a leading dash" {
+  "$BIN/quorum-state" --task demo init LOW
+  run "$BIN/quorum-state" set reviewer_model "two words"; [ "$status" -eq 1 ]
+  run "$BIN/quorum-state" set helper_model -x;            [ "$status" -eq 1 ]
+  run "$BIN/quorum-state" set helper_model "";            [ "$status" -eq 1 ]
+}
+
 @test "set validates status, risk, and counters" {
   "$BIN/quorum-state" --task demo init LOW
   run "$BIN/quorum-state" set status IN_REVIEW;      [ "$status" -eq 0 ]

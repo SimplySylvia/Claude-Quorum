@@ -2,7 +2,7 @@
 name: pr-draft
 description: Draft the pull request for a finished Quorum task. The PR writer turns the spec, state log, proof, and diff into a description in the repo's PR style, and lists commits that must not ship (such as a local setup commit). Saves it to .tasks/<slug>/pr.md; never pushes or opens the PR. Run when a task is READY or AWAITING-HUMAN.
 disable-model-invocation: true
-argument-hint: "[slug]"
+argument-hint: "[slug] [--models]"
 ---
 
 # Draft the PR
@@ -18,7 +18,9 @@ Don't run git commands that change the working tree, index, or history here, and
    anything failed, say so and stop: a PR shouldn't claim checks that didn't pass.
    If the branch already has a PR (`gh pr view --json url --jq .url` prints one), record it with
    `quorum-state --task <slug> set pr <url>` and say you're drafting a new description for it.
-3. **Run the writer.** Start `quorum:pr-writer` with:
+3. **Run the writer.** Resolve the task's helper model as in
+   `${CLAUDE_PLUGIN_ROOT}/skills/pipeline-laws/models.md` (configured defaults: `reviewer_model` = ${user_config.reviewer_model}, `helper_model` = ${user_config.helper_model}) (`--models` in
+   `$ARGUMENTS` asks again), then start `quorum:pr-writer` with `helper_model` and:
 
    > Task `<slug>`. Base commit `<quorum-state get base_sha>`. Draft the PR title and description, and list any
    > commits that must not ship. Read `CLAUDE.md`, `.tasks/<slug>/rd.md`, `state.md`, `proof-final.md`, and
