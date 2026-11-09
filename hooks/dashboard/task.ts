@@ -2,7 +2,7 @@
 // the stage rail, count findings the way bin/quorum-findings does, and read the specs, proofs, and reports the skills
 // save in .tasks/<slug>/. No `$` here, so tests can call them directly.
 
-import type { Blind, Check, Findings, Frontmatter, Proof, PullRequest, Requirement, Reviewer, Spec, Stage } from '../../types'
+import type { Blind, Check, Findings, Frontmatter, Proof, PullRequest, QuorumAgent, Requirement, Reviewer, Spec, Spend, Stage } from '../../types'
 
 export const STAGES = ['Spec', 'Plan', 'Build', 'Review', 'Blind test', 'PR'] as const
 
@@ -355,3 +355,23 @@ export function packedRef(packed: string, ref: string): string {
 
 // A proof is stale when it ran at a commit other than HEAD (its short sha isn't HEAD's prefix).
 export const isStaleProof = (rev: string, head: string) => rev !== '' && head !== '' && !head.startsWith(rev.toLowerCase())
+
+// What a list of agents used: their token totals, and how many ran on each model, most used first.
+export function spendOf(agents: QuorumAgent[]): Spend {
+  const models = new Map<string, number>()
+  let tokensIn = 0, tokensCached = 0, tokensOut = 0
+  for (const a of agents) {
+    tokensIn += a.tokensIn
+    tokensCached += a.tokensCached
+    tokensOut += a.tokensOut
+    if (a.model) models.set(a.model, (models.get(a.model) ?? 0) + 1)
+  }
+  return { agents: agents.length, tokensIn, tokensCached, tokensOut, models: [...models].sort((x, y) => y[1] - x[1]) }
+}
+
+// A token count in a few characters: 950, 12k, 1.4M.
+export function tokenCount(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 999_500) return `${Math.round(n / 1000)}k`
+  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+}

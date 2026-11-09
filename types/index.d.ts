@@ -90,9 +90,18 @@ export type QuorumAgent = {
   type: string
   role: string
   description: string
+  // The model it runs on, as the engine resolved it.
+  model: string
   startedAt: number
   endedAt: number | null
+  // Tokens its requests used so far: input (cache reads and writes included), the part the cache served, output.
+  tokensIn: number
+  tokensCached: number
+  tokensOut: number
 }
+
+// What the agents since the last /quorum:* command used, and how many ran on each model.
+export type Spend = { agents: number; tokensIn: number; tokensCached: number; tokensOut: number; models: [string, number][] }
 
 declare module 'claude-code' {
   interface PluginState {

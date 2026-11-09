@@ -174,6 +174,9 @@ finished with its PR open.</sub>
     link, or whether `pr.md` is drafted.
   - **Stages**, each with its outcome; each **review round**'s findings and how many the voter kept; and any other
     Quorum agents running or finished.
+  - **Spend:** how many Quorum agents ran since the last `/quorum:*` command, the tokens they used (in, of which
+    cached, and out, added up from each request), and how many ran on each model, which shows the
+    [model choices](#models) at work.
 - **Toasts** when a task converges, halts, escalates, or is ready for you.
 
 The pane sits beside the chat in a wide fullscreen terminal and above the prompt otherwise. Opened by itself, it

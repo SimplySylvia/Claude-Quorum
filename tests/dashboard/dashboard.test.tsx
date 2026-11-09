@@ -5,7 +5,7 @@ import {
   countFindings, countRequirements, evalRows, isReportedPass, isStaleProof, packedRef, joinChecks, nextStep, parseBlind, parseFrontmatter, parsePr,
   parseProof, parseSpec, prDetail, prFromUrl, prNext,
   requirementState, roleOf,
-  roundReviewers, slugFromHead, stageOf, stages,
+  roundReviewers, slugFromHead, spendOf, stageOf, stages, tokenCount,
 } from '../../hooks/dashboard/task'
 
 const state = (status: string, extra = '') => `---
@@ -341,6 +341,64 @@ test('with no task the band is the engine\'s and the status line is clear', asyn
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect((await band.find({ type: 'Text', text: /engine/ }))?.text).toBe('engine')
   await band.unmount()
+})
+
+test('token counts read in a few characters', () => {
+  expect(tokenCount(950)).toBe('950')
+  expect(tokenCount(12_345)).toBe('12k')
+  expect(tokenCount(999_600)).toBe('1M')
+  expect(tokenCount(1_400_000)).toBe('1.4M')
+})
+
+test('spend totals the agents\' tokens and counts them by model, most used first', () => {
+  const agent = (id: string, model: string, tokensIn: number, tokensCached: number, tokensOut: number) =>
+    ({ id, type: 'code-reviewer', role: 'logic', description: id, model, startedAt: 0, endedAt: 1, tokensIn, tokensCached, tokensOut })
+  const spend = spendOf([agent('a', 'opus', 100, 50, 10), agent('b', 'haiku', 20, 0, 5), agent('c', 'haiku', 30, 10, 5)])
+  expect(spend.agents).toBe(3)
+  expect(spend.tokensIn).toBe(150)
+  expect(spend.tokensCached).toBe(60)
+  expect(spend.tokensOut).toBe(20)
+  expect(spend.models).toEqual([['haiku', 2], ['opus', 1]])
+  expect(spendOf([]).agents).toBe(0)
+})
+
+test('the pane shows what the command\'s agents used, from each request, and the model each ran on', async ($, on) => {
+  const files: Record<string, string> = repo('IN_REVIEW')
+  world(on, files)
+  on('agent.spawn', (_, e) => ({ model: e.subagentType === 'quorum:verifier-voter' ? 'claude-haiku-5-5' : 'claude-opus-5-5', agentId: e.tool_use_id }))
+  on('turn.step', async function* (_, e) {
+    return {
+      turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const,
+      usage: { input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 400_000, cache_creation_input_tokens: 99_000, model: e.model },
+    }
+  })
+  const spawn = (id: string, subagentType: string, prompt: string) =>
+    $.agent.spawn({ tool_use_id: id, prompt, description: id, subagentType, parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  let pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^Spend$/ })).toBeUndefined()
+  await pane.unmount()
+
+  await spawn('a1', 'quorum:code-reviewer', 'Persona: Logic & Edge-Case Hunter. Task: export-csv.')
+  await spawn('v1', 'quorum:verifier-voter', 'Task: export-csv.')
+  // A stream runs as it's read: read each to its end, as the engine does.
+  const step = async (agentId: string | undefined, index: number) => {
+    const stream = $.turn.step({ turnId: 't', index, model: 'm', messageCount: 1, agentId })
+    for await (const _ of stream) { /* no chunks */ }
+    return stream.result
+  }
+  await step('a1', 0)
+  await step('a1', 1)
+  await step('v1', 0)
+  await step(undefined, 0) // the main loop's own request isn't an agent's
+
+  pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^Spend$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^2 agents since the last command$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^  1\.5M in \(1\.2M cached\) · 6k out$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^claude-opus-5-5 ×1 · claude-haiku-5-5 ×1$/ })).toBeDefined()
+  await pane.unmount()
 })
 
 test('the round\'s reviewers show waiting, running, then their findings', async ($, on) => {

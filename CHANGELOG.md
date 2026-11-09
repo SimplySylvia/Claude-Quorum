@@ -18,6 +18,9 @@ copy with `/plugin marketplace update`.
   confident findings hardest, never keeps or drops one on its score alone, and replaces the score with its own after
   checking. `quorum-findings cap` keeps the most confident nits instead of the first ones, and
   `quorum-findings check` refuses a score outside 0-100. Findings without a score still parse.
+- **What the agents cost, on the dashboard.** A **Spend** section shows how many Quorum agents ran since the last
+  `/quorum:*` command, their input (and cached) and output tokens, summed from each request they made, and how many
+  ran on each model. Other agents show their own token counts.
 
 ### Fixed
 

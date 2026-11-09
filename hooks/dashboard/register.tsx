@@ -8,14 +8,14 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { Check, Findings, Now, PullRequest, QuorumAgent, Reviewer, Round, Snapshot, Stage } from '../../types'
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
-  parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, stageOf, stages,
+  parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, stageOf, stages, tokenCount,
 } from './task'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
 const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-7' })
-const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-2' })
+const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-3' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
 // How long a PR lookup stands before the next refresh asks GitHub again.
 const PR_TTL_MS = 2 * 60 * 1000
@@ -395,13 +395,33 @@ export const register: Register = (on, options) => {
         type: e.subagentType.slice('quorum:'.length),
         role: roleOf(e.subagentType.slice('quorum:'.length), e.prompt),
         description: e.description,
+        model: spawned.model,
         startedAt: await $.clock.now(),
         endedAt: null,
+        tokensIn: 0,
+        tokensCached: 0,
+        tokensOut: 0,
       }
       keepTicking($, await update($, agents, all => [...all, agent].slice(-30)))
     }
     return spawned
   }).catch(($, e, next) => next(e))
+
+  // Each request a Quorum agent makes: pass the stream through untouched, then add what it used to the agent's
+  // totals. A streaming hook can't fall back with .catch, so a failed update is dropped here instead.
+  on('turn.step', async function* ($, e, next) {
+    const step = yield* next(e)
+    const used = step.usage
+    if (e.agentId !== undefined && used) {
+      const id = e.agentId
+      const cached = used.cache_read_input_tokens
+      const input = used.input_tokens + cached + used.cache_creation_input_tokens
+      await update($, agents, all => all.some(a => a.id === id)
+        ? all.map(a => (a.id === id ? { ...a, tokensIn: a.tokensIn + input, tokensCached: a.tokensCached + cached, tokensOut: a.tokensOut + used.output_tokens } : a))
+        : all).catch(() => undefined)
+    }
+    return step
+  })
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
@@ -497,6 +517,7 @@ export const register: Register = (on, options) => {
             : n.kind === 'blind' ? ['blind', 'a11y', 'security', 'triage'] : [],
     )
     const others = crew.filter(a => !shown.has(a.role)).slice(-6)
+    const spend = spendOf(crew)
     const taskChecks = t.checks.filter(c => c.id !== 'fast').length
     const passed = t.checks.filter(c => c.result === 'PASS').length
     // No proof file, but the round log says every check passed: mark them, muted, as reported rather than proven.
@@ -677,6 +698,17 @@ export const register: Register = (on, options) => {
           </Box>
         )}
 
+        {spend.agents > 0 && (
+          <Box flexDirection="column">
+            <Text bold>Spend</Text>
+            <Text>
+              <Text>{plural(spend.agents, 'agent')} since the last command</Text>
+              <Text dimColor>  {tokenCount(spend.tokensIn)} in ({tokenCount(spend.tokensCached)} cached) · {tokenCount(spend.tokensOut)} out</Text>
+            </Text>
+            <Text dimColor>{spend.models.map(([m, k]) => `${m} ×${k}`).join(' · ')}</Text>
+          </Box>
+        )}
+
         {others.length > 0 && (
           <Box flexDirection="column">
             <Text bold>Other agents</Text>
@@ -684,7 +716,7 @@ export const register: Register = (on, options) => {
               <Text key={a.id}>
                 <Text color={a.endedAt === null ? 'claude' : 'success'}>{a.endedAt === null ? '●' : '✓'} </Text>
                 <Text>{a.type}</Text>
-                <Text dimColor>  {a.description} · {seconds(a, clockNow)}</Text>
+                <Text dimColor>  {a.description} · {seconds(a, clockNow)}{a.tokensIn + a.tokensOut > 0 ? ` · ${tokenCount(a.tokensIn + a.tokensOut)} tokens` : ''}</Text>
               </Text>
             ))}
           </Box>
