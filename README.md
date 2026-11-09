@@ -138,7 +138,18 @@ new lines.
 
 While a task is active, Quorum shows where it is without you asking:
 
-- **Status line:** `Quorum · export-csv · IN_REVIEW · MEDIUM · round 2/3 · 1 pending`.
+<p align="center">
+  <img src="assets/dashboard-review.png" alt="Claude Code with the Quorum dashboard docked on the right, for the task &quot;Export the sales rows as CSV&quot; at IN_REVIEW, MEDIUM risk. Now: code review round 2 of 3, 2 of 4 reviewers replied: Logic and edge cases clean, Architecture and drift 1 NIT, Patterns and Docs waiting, the verifier vote waiting. Requirements: 3 of 4 met, requirement 1 failing. Checks: 5 of 6 pass, with a warning that proof-build.md ran before HEAD so the results may be out of date; check 1b, honors DATA_FILE, failed. Stages: Spec, Plan, and Build done, Review in progress. Review rounds: round 1 kept 1 IMPORTANT and 1 NIT; round 2 reviewing. Above the prompt, the stage rail with reviewers 2/4, checks 5/6, the next command, and a Dashboard button; below it, the status line." width="880">
+</p>
+<p align="center">
+  <img src="assets/dashboard-done.png" alt="The same task finished, at AWAITING-HUMAN. Now: waiting for you, PR #42 with its link. Requirements: 4 of 4 met. Checks: 6 of 6 pass in proof-final.md. Every stage done and the PR stage waiting. Review rounds: round 1 kept 1 IMPORTANT, round 2 0 IMPORTANT. Next: get PR #42 reviewed and merged. The stage rail shows every stage ticked and checks 6/6, and the status line names PR #42." width="880">
+</p>
+
+<sub>Both are the demo task from `assets/src/dashboard-demo.sh` (see [CONTRIBUTING.md](CONTRIBUTING.md)): mid-review, and
+finished with its PR open.</sub>
+
+- **Status line:** `Quorum · csv-export · IN_REVIEW · MEDIUM · round 2/3`, plus pending findings and, once opened,
+  the PR.
 - **Above the prompt:** the stage rail, `✓ Spec › ✓ Plan › ✓ Build › ● Review r2/3 › ○ Blind test › ○ PR`, how many
   of the round's reviewers have replied and how many checks pass (`reviewers 3/4 · checks 6/7`), the next command,
   and a **Dashboard** button.

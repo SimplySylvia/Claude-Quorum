@@ -97,6 +97,10 @@ Open the pane with `/quorum-dashboard` or the band's **Dashboard** button. If Qu
 for that session so the two copies don't both draw. The demo's PR points at a repository that doesn't exist, so the
 dashboard shows it as `PR #42` without an open or merged state.
 
+The README's `assets/dashboard-review.png` and `assets/dashboard-done.png` are the `review` and `done` stages in a
+fullscreen terminal wide enough for the pane to dock beside the chat. Retake them when the dashboard's look changes,
+from a folder whose path you're happy to publish.
+
 ## Releasing
 
 Bump `version` in `.claude-plugin/plugin.json` when you change a skill, agent, or hook, and move the `Unreleased`
