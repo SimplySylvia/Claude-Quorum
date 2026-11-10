@@ -8,6 +8,12 @@ export type Stage = { name: string; state: 'done' | 'active' | 'waiting' | 'stuc
 
 export type Round = { n: number; findings: Findings | null; candidates: number | null }
 
+// One finding the voter kept: its tag, `file:line`, Pattern Category (or the rest of its line), and confidence.
+export type KeptFinding = { tag: 'IMPORTANT' | 'NIT' | 'PRE-EXISTING'; loc: string; title: string; confidence: number | null }
+
+// The pane's foldable sections. Each opens by itself while it holds a problem; a click overrides that.
+export type Section = 'requirements' | 'checks' | 'rounds' | 'spend' | 'agents'
+
 // One reviewer of the current round: `findings` is null until its reply is saved.
 export type Reviewer = { role: string; findings: Findings | null }
 
@@ -37,7 +43,7 @@ export type Spec = { title: string; goal: string; isUi: boolean; requirements: R
 // What the "Now" section shows for the current stage.
 export type Now =
   | { kind: 'spec'; requirements: number; reviewers: Reviewer[] }
-  | { kind: 'plan' | 'review'; round: number; of: number; reviewers: Reviewer[]; voter: Reviewer; survivors: Findings | null }
+  | { kind: 'plan' | 'review'; round: number; of: number; reviewers: Reviewer[]; voter: Reviewer; survivors: Findings | null; kept: KeptFinding[] }
   | { kind: 'build' }
   | { kind: 'blind'; blind: Blind }
   | { kind: 'done' }
@@ -110,6 +116,8 @@ declare module 'claude-code' {
       agents: Shaped<QuorumAgent[]>
       pr: Shaped<PullRequest | null>
       now: number
+      // Sections the person opened or closed, by `<slug>:<section>`; absent, the section's default.
+      sections: Shaped<Record<string, boolean>>
     }
   }
 }

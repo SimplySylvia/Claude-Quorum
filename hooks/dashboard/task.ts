@@ -2,7 +2,7 @@
 // the stage rail, count findings the way bin/quorum-findings does, and read the specs, proofs, and reports the skills
 // save in .tasks/<slug>/. No `$` here, so tests can call them directly.
 
-import type { Blind, Check, Findings, Frontmatter, Proof, PullRequest, QuorumAgent, Requirement, Reviewer, Spec, Spend, Stage } from '../../types'
+import type { Blind, Check, Findings, Frontmatter, KeptFinding, Proof, PullRequest, QuorumAgent, Requirement, Reviewer, Section, Snapshot, Spec, Spend, Stage } from '../../types'
 
 export const STAGES = ['Spec', 'Plan', 'Build', 'Review', 'Blind test', 'PR'] as const
 
@@ -374,4 +374,49 @@ export function tokenCount(n: number): string {
   if (n < 1000) return String(n)
   if (n < 999_500) return `${Math.round(n / 1000)}k`
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+}
+
+// The findings a voter's survivors.md kept, in order: `[TAG] file:line — Pattern Category: X`, then an optional
+// `Confidence: N` line under it, as bin/quorum-findings reads them.
+export function keptFindings(text: string): KeptFinding[] {
+  const out: KeptFinding[] = []
+  for (const line of text.split('\n')) {
+    const m = /^\[(IMPORTANT|NIT|PRE-EXISTING)\]\s+(\S+:\d+)\s*(?:[—-]+\s*)?(.*)$/.exec(line)
+    if (m) {
+      const rest = (m[3] ?? '').trim()
+      out.push({ tag: m[1] as KeptFinding['tag'], loc: m[2] ?? '', title: /Pattern Category:\s*(.+)$/.exec(rest)?.[1]?.trim() ?? rest, confidence: null })
+      continue
+    }
+    const c = /^Confidence:\s*(\d{1,3})\s*$/.exec(line)
+    const last = out[out.length - 1]
+    if (c && last && last.confidence === null) last.confidence = Number(c[1])
+  }
+  return out
+}
+
+// The Quorum command in a "next step" text, for the Next button to put in the prompt; null when there's none.
+export function nextCommand(next: string): string | null {
+  return /\/quorum:[a-z][a-z-]*/.exec(next)?.[0] ?? null
+}
+
+// A title ending in a ticket id in parentheses, "Export the rows (SALES-12)", split into the title and the id.
+export function splitTicket(title: string): { title: string; ticket: string } {
+  const m = /^(.*\S)\s*\(([A-Z][A-Z0-9]*-\d+)\)\s*$/.exec(title)
+  return m ? { title: m[1] ?? title, ticket: m[2] ?? '' } : { title, ticket: '' }
+}
+
+// Which sections open by themselves: those holding a problem, so a fold never hides one.
+export function openByDefault(t: Snapshot): Record<Section, boolean> {
+  const requirements = (t.spec?.requirements ?? []).map(r => requirementState(r.n, t.checks).state)
+  return {
+    requirements: requirements.some(state => state === 'fail' || state === 'none'),
+    checks: (t.proof !== null && t.checks.some(c => c.result === 'FAIL'))
+      || t.isProofStale
+      || (t.proof === null && t.expectedProof !== '')
+      || (t.stopBlocks > 0 && isHookActive(t.status))
+      || t.pending > 0,
+    rounds: t.status === 'HALTED',
+    spend: false,
+    agents: false,
+  }
 }

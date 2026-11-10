@@ -5,18 +5,21 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Check, Findings, Now, PullRequest, QuorumAgent, Reviewer, Round, Snapshot, Stage } from '../../types'
+import type { Check, Findings, KeptFinding, Now, PullRequest, QuorumAgent, Reviewer, Round, Section, Snapshot, Stage } from '../../types'
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, stageOf, stages, tokenCount,
+  keptFindings, nextCommand, openByDefault, splitTicket,
 } from './task'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-7' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-8' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-3' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
+// Sections the person opened or closed in the pane, by `<slug>:<section>`.
+const sections = atom({ plugin: 'quorum', key: 'sections' } as const, {}, { shape: 'sections-1' })
 // How long a PR lookup stands before the next refresh asks GitHub again.
 const PR_TTL_MS = 2 * 60 * 1000
 // Bumped every second while a Quorum agent runs, so the pane's running times count up.
@@ -42,8 +45,6 @@ const GLYPH: Record<Stage['state'], [string, string]> = {
 }
 
 const REQUIREMENT_GLYPH = { pass: ['✓', 'success'], fail: ['✗', 'error'], open: ['○', 'inactive'], none: ['–', 'inactive'] } as const
-
-const CHECK_GLYPH: Record<string, [string, string]> = { PASS: ['✓', 'success'], FAIL: ['✗', 'error'], SKIPPED: ['–', 'warning'] }
 
 const REVIEW_FILES = ['logic.md', 'architecture.md', 'patterns.md', 'docs.md', 'tests.md', 'a11y.md', 'security.md', 'votes.md', 'survivors.md']
 
@@ -103,6 +104,7 @@ async function roundNow($: EngineInterface, dir: string, kind: 'plan' | 'review'
     reviewers: roundReviewers(kind, risk, files),
     voter: reviewer('voter', files['votes.md']),
     survivors: survivors === undefined ? null : countFindings(survivors),
+    kept: survivors === undefined ? [] : keptFindings(survivors),
   }
 }
 
@@ -236,18 +238,17 @@ async function lookupPr($: EngineInterface, t: Snapshot, force: boolean) {
   $.ui.status(statusLine(await read($, task), after))
 }
 
-function stageDetail(t: Snapshot, name: string, known: PullRequest | null): string {
-  switch (name) {
-    case 'Spec': return t.signoff ? `mockup signed off ${t.signoff}` : ''
-    case 'Plan':
-      return [t.planRounds ? `${t.planRounds} review round${t.planRounds === 1 ? '' : 's'}` : '',
-        t.planApproved ? `approved ${t.planApproved}` : ''].filter(Boolean).join(', ')
-    case 'Review': return t.round ? `round ${t.round} of ${t.maxRounds}` : ''
-    case 'Blind test': return t.risk === 'LOW' ? 'not run for LOW' : t.blindRuns ? `${t.blindRuns} run${t.blindRuns === 1 ? '' : 's'}` : ''
-    // The stage is already named PR: "#42 open", not "PR #42 open".
-    case 'PR': return prDetail(known, t.prDrafted).replace(/^PR #/, '#')
-    default: return ''
-  }
+// What the stepper can't say: the mockup sign-off, the plan's rounds and approval, the blind-test runs, and a drafted
+// PR before one is open. One line under the stepper.
+function stageDetails(t: Snapshot, known: PullRequest | null): string {
+  const plan = [t.planRounds ? `${t.planRounds} plan review round${t.planRounds === 1 ? '' : 's'}` : '',
+    t.planApproved ? `approved ${t.planApproved}` : ''].filter(Boolean).join(', ')
+  return [
+    t.signoff ? `mockup signed off ${t.signoff}` : '',
+    plan,
+    t.risk !== 'LOW' && t.blindRuns ? `blind test: ${t.blindRuns} run${t.blindRuns === 1 ? '' : 's'}` : '',
+    isPrStage(t.status) && !(known && known.number > 0) ? prDetail(known, t.prDrafted) : '',
+  ].filter(Boolean).join(' · ')
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
@@ -469,38 +470,67 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Button, Link, Text } = $.ui.resolve(e)
     const t = await read($, task)
     if (!t) {
       return (
-        <Box flexDirection="column">
-          <Text dimColor>No active Quorum task.</Text>
-          <Text dimColor>Start one with /quorum:spec-and-eval.</Text>
+        <Box key="empty" borderStyle="round" borderColor="subtle" flexDirection="column" paddingX={1}>
+          <Text bold>No active Quorum task</Text>
+          <Text dimColor>/quorum:spec-and-eval or /quorum:run starts one; /quorum:review reviews any diff.</Text>
         </Box>
       )
     }
     const crew = await read($, agents)
+    const folds = await read($, sections)
     await read($, clock) // redraw on each tick
     const clockNow = await $.clock.now()
     const known = prOf(t, await read($, pr))
     const rail = railFor(t, known)
     const n = t.now
+    const spec = t.spec
+    const { title, ticket } = splitTicket(spec?.title || t.slug)
+
+    // A small filled label: the severity of a finding, or a check's result.
+    const badge = (key: string, label: string, color: string) => (
+      <Text key={key} backgroundColor={color} color="inverseText" bold> {label} </Text>
+    )
+    const copy = (key: string, text: string) => (
+      <Button key={key} plain dimColor label="copy" onPress={press => void $.ui.copy({ text, surface: press.surface }).catch(() => undefined)} />
+    )
 
     // One line per reviewer or report: ● running, ✓ or ✗ done, ○ waiting.
     const line = (key: string, state: 'running' | 'done' | 'waiting', label: string, detail: string, isBad = false) => (
-      <Text key={key}>
+      <Text key={key} wrap="truncate-end">
         <Text color={state === 'running' ? 'claude' : state === 'waiting' ? 'inactive' : isBad ? 'error' : 'success'}>
           {state === 'running' ? '●' : state === 'waiting' ? '○' : isBad ? '✗' : '✓'}{' '}
         </Text>
-        <Text dimColor={state === 'waiting'}>{label}</Text>
-        {detail ? <Text dimColor>  {detail}</Text> : null}
+        <Text dimColor={state === 'waiting'}>{label.padEnd(22)}</Text>
+        {detail ? <Text dimColor>{detail}</Text> : null}
       </Text>
     )
     const runningAs = (role: string) => crew.findLast(a => a.role === role && a.endedAt === null)
+    const findingsLine = (key: string, label: string, f: Findings, prefix = '') => (
+      <Text key={key} wrap="truncate-end">
+        <Text color={f.important > 0 ? 'error' : 'success'}>{f.important > 0 ? '✗' : '✓'} </Text>
+        <Text>{label.padEnd(22)}</Text>
+        {f.important + f.nit + f.preExisting === 0
+          ? <Text dimColor>{prefix}clean</Text>
+          : (
+            <Text>
+              {prefix ? <Text dimColor>{prefix}</Text> : null}
+              {f.important > 0 ? <Text color="error" bold>{f.important} IMPORTANT</Text> : null}
+              {f.important > 0 && f.nit + f.preExisting > 0 ? <Text dimColor> · </Text> : null}
+              {f.nit > 0 ? <Text dimColor>{f.nit} NIT</Text> : null}
+              {f.nit > 0 && f.preExisting > 0 ? <Text dimColor> · </Text> : null}
+              {f.preExisting > 0 ? <Text color="warning">{f.preExisting} pre-existing</Text> : null}
+            </Text>
+          )}
+      </Text>
+    )
     const reviewerLine = (r: Reviewer) => {
       const agent = runningAs(r.role)
       const label = ROLE_LABEL[r.role] ?? r.role
-      if (r.findings) return line(r.role, 'done', label, r.role === 'voter' ? `kept ${findingsText(r.findings)}` : findingsText(r.findings), r.findings.important > 0)
+      if (r.findings) return findingsLine(r.role, label, r.findings, r.role === 'voter' ? 'kept ' : '')
       if (agent) return line(r.role, 'running', label, `running ${seconds(agent, clockNow)}`)
       return line(r.role, 'waiting', label, 'waiting')
     }
@@ -510,6 +540,14 @@ export const register: Register = (on, options) => {
       if (important !== null) return line(role, 'done', ROLE_LABEL[role] ?? role, detail(important), important > 0)
       return agent ? line(role, 'running', ROLE_LABEL[role] ?? role, `running ${seconds(agent, clockNow)}`) : null
     }
+    const keptLine = (f: KeptFinding, i: number) => (
+      <Box key={`kept-${i}`} flexDirection="row" gap={1}>
+        {badge(`kept-badge-${i}`, f.tag === 'PRE-EXISTING' ? 'PRE' : f.tag, f.tag === 'IMPORTANT' ? 'error' : f.tag === 'NIT' ? 'subtle' : 'warning')}
+        <Text dimColor wrap="truncate-end">{f.loc}</Text>
+        <Box flexGrow={1} flexShrink={1}><Text wrap="truncate-end">{f.title}{f.confidence !== null ? ` (${f.confidence})` : ''}</Text></Box>
+        {copy(`copy-kept-${i}`, f.loc)}
+      </Box>
+    )
 
     const shown = new Set<string>(
       n.kind === 'plan' || n.kind === 'review' ? [...n.reviewers.map(r => r.role), 'voter']
@@ -524,32 +562,98 @@ export const register: Register = (on, options) => {
     // No proof file, but the round log says every check passed: mark them, muted, as reported rather than proven.
     const isReported = !t.proof && isReportedPass(t.checksNote)
     const REPORTED: readonly [string, string] = ['✓', 'subtle']
-    const spec = t.spec
     const requirements = (spec?.requirements ?? []).map(r => ({ ...r, ...requirementState(r.n, t.checks) }))
     const met = requirements.filter(r => r.state === 'pass').length
 
+    // The Now card's border says whose move it is: amber when the task waits on the person, red when it's stuck.
+    const waitsOnYou = t.status === 'READY' || t.status === 'AWAITING-HUMAN' || t.status === 'DRAFT-AWAITING-VISUAL-SIGNOFF'
+    const nowColor = isStuck(t.status) ? 'error' : waitsOnYou ? 'warning' : 'claude'
+    const next = nextFor(t, known)
+    const command = nextCommand(next)
+    // Put the next command in the prompt for the person to send, edit, or add to; never send it. A draft they
+    // already typed stays, after the command, as its arguments.
+    const fillNext = async (cmd: string) => {
+      const draft = ((await $.prompt.read().catch(() => null))?.text ?? '').trim()
+      const text = draft.startsWith(cmd) ? draft : draft ? `${cmd} ${draft}` : `${cmd} `
+      await $.prompt.fill({ text, cursor: text.length }).catch(() => undefined)
+    }
+
+    // A section folds to one row; it opens by itself while it holds a problem, and a click overrides that.
+    const defaults = openByDefault(t)
+    const isOpen = (id: Section) => folds[`${t.slug}:${id}`] ?? defaults[id]
+    const fold = (id: Section, label: string, summary: [string, string], note: string, body: () => unknown) => {
+      const open = isOpen(id)
+      return (
+        <Box key={`section-${id}`} flexDirection="column">
+          <Button
+            key={`toggle-${id}`}
+            plain
+            hover={{ color: 'claude' }}
+            onPress={() => void update($, sections, all => ({ ...all, [`${t.slug}:${id}`]: !open }))}
+          >
+            <Text dimColor>{open ? '▾ ' : '▸ '}</Text>
+            <Text bold>{label.padEnd(15)}</Text>
+            <Text color={summary[1]}>{summary[0]}</Text>
+            {note ? <Text color={defaults[id] ? 'warning' : undefined} dimColor={!defaults[id]}>  {note}</Text> : null}
+          </Button>
+          {open ? <Box flexDirection="column" marginLeft={2}>{body() as never}</Box> : null}
+        </Box>
+      )
+    }
+
+    const failedRequirement = requirements.find(r => r.state === 'fail')
+    const uncheckedRequirement = requirements.find(r => r.state === 'none')
+    const checksSummary: [string, string] = t.proof
+      ? [`${passed}/${t.checks.length} pass`, passed === t.checks.length ? 'success' : 'error']
+      : t.expectedProof ? ['no proof saved', 'warning']
+        : isReported ? [`${t.checks.length} reported passing`, 'subtle'] : [`${taskChecks} not run yet`, 'inactive']
+    const checksNote = t.isProofStale ? 'proof older than HEAD'
+      : !t.proof && t.expectedProof ? `${t.expectedProof} missing`
+        : t.stopBlocks > 0 && isHookActive(t.status) ? `Stop hook blocked ${plural(t.stopBlocks, 'time')}`
+          : t.pending > 0 ? `${plural(t.pending, 'finding')} pending`
+            : (t.checks.find(c => c.result === 'FAIL') ? `✗ ${t.checks.find(c => c.result === 'FAIL')?.id} ${t.checks.find(c => c.result === 'FAIL')?.label}` : '')
+    const lastRound = t.rounds[t.rounds.length - 1]
+    const roundsSummary = t.rounds.map(r => `r${r.n} ${r.findings === null ? 'reviewing' : r.findings.important > 0 ? `${r.findings.important} IMPORTANT` : 'clean'}`).join(' · ')
+    const running = others.filter(a => a.endedAt === null).length
+
     return (
       <Box flexDirection="column" gap={1}>
-        <Box flexDirection="column">
-          <Text bold>{spec?.title || t.slug}</Text>
-          {spec?.title ? <Text dimColor>{t.slug}</Text> : null}
-          <Text>
+        <Box key="header" borderStyle="round" borderColor="subtle" hover={{ borderColor: 'claude' }} flexDirection="column" paddingX={1}>
+          <Box flexDirection="row" justifyContent="space-between" gap={1}>
+            <Box flexShrink={1}><Text bold wrap="truncate-end">{title}</Text></Box>
+            {ticket ? <Text dimColor>{ticket}</Text> : null}
+          </Box>
+          <Text wrap="truncate-end">
+            <Text dimColor>{t.slug} · </Text>
             <Text color={STATUS_COLOR(t.status)} bold>{t.status || 'no status'}</Text>
-            <Text dimColor> · {t.risk || 'no risk tier'} risk{spec?.isUi ? ' · UI change' : ''}</Text>
+            <Text dimColor> · {t.risk || 'no risk tier'}{spec?.isUi ? ' · UI change' : ''}</Text>
           </Text>
+          {spec?.goal ? <Text dimColor wrap="truncate-end">{spec.goal}</Text> : null}
+          <Text>
+            {rail.map((s, i) => {
+              const [glyph, color] = GLYPH[s.state]
+              const label = s.name === 'Review' && t.round > 0 ? `${s.name} ${t.round}/${t.maxRounds}` : s.name
+              return (
+                <Text key={s.name} color={color} bold={s.state === 'active' || s.state === 'stuck'} dimColor={s.state === 'todo' || s.state === 'skipped'}>
+                  {i > 0 ? <Text dimColor> ─ </Text> : null}{glyph}{label}
+                </Text>
+              )
+            })}
+          </Text>
+          {stageDetails(t, known) ? <Text dimColor wrap="truncate-end">{stageDetails(t, known)}</Text> : null}
+          {known && known.number > 0 && known.url ? (
+            <Box flexDirection="row" gap={1}>
+              <Text color={known.state === 'MERGED' ? 'success' : known.state === 'CLOSED' ? 'error' : 'warning'}>{prDetail(known, t.prDrafted)}</Text>
+              <Link href={known.url} label="open" />
+              {copy('copy-pr', known.url)}
+            </Box>
+          ) : null}
         </Box>
 
-        {spec?.goal ? (
-          <Box flexDirection="column">
-            <Text bold>Goal</Text>
-            <Text>{spec.goal}</Text>
-          </Box>
-        ) : null}
-
-        <Box flexDirection="column">
-          <Text>
+        <Box key="now" borderStyle="round" borderColor={nowColor} flexDirection="column" paddingX={1}>
+          <Text wrap="truncate-end">
             <Text bold>Now · </Text>
-            <Text bold color="claude">{nowTitle(n, t.maxRounds)}</Text>
+            <Text bold color={nowColor}>{nowTitle(n, t.maxRounds)}</Text>
           </Text>
           {n.kind === 'spec' && <Text dimColor>{plural(n.requirements, 'requirement')} in rd.md · {plural(taskChecks, 'check')} in eval.md</Text>}
           {n.kind === 'spec' && n.reviewers.map(reviewerLine)}
@@ -558,9 +662,10 @@ export const register: Register = (on, options) => {
               <Text dimColor>{reviewerProgress(n)} replied</Text>
               {n.reviewers.map(reviewerLine)}
               {reviewerLine(n.voter)}
+              {n.kept.filter(f => f.tag !== 'NIT' || n.kept.length <= 4).map(keptLine)}
               {(() => {
                 const v = verdict(n)
-                return v ? <Text color={v[1]}>{v[0]}</Text> : null
+                return v ? <Text color={v[1]} wrap="truncate-end">{v[0]}</Text> : null
               })()}
             </Box>
           )}
@@ -586,104 +691,74 @@ export const register: Register = (on, options) => {
               {reportLine('triage', n.blind.caused, k => k ? `${plural(k, 'item')} caused by this change` : 'nothing caused by this change')}
             </Box>
           )}
-          {n.kind === 'done' && (known && known.number > 0
-            ? (
-              <Box flexDirection="column">
-                <Text color={known.state === 'MERGED' ? 'success' : known.state === 'CLOSED' ? 'error' : 'warning'}>{prDetail(known, t.prDrafted)}</Text>
-                {known.url ? <Text dimColor>{known.url}</Text> : null}
+          {n.kind === 'done' && !(known && known.number > 0) && (
+            <Text dimColor>{t.prDrafted ? 'Every stage is done; pr.md is drafted.' : 'Every stage is done.'}</Text>
+          )}
+          <Box flexDirection="row" gap={1} marginTop={1}>
+            {command
+              ? <Button key="next" variant="primary" label={`▶ Next: ${command}`} onPress={() => void fillNext(command)} />
+              : <Text><Text dimColor>Next: </Text><Text>{next}</Text></Text>}
+            {command ? <Text dimColor wrap="truncate-end">{next === command ? 'fills the prompt' : next}</Text> : null}
+          </Box>
+        </Box>
+
+        <Box flexDirection="column">
+          {requirements.length > 0 && fold('requirements', 'Requirements',
+            t.proof ? [`${met}/${requirements.length} met`, met === requirements.length ? 'success' : 'warning']
+              : isReported ? [`${requirements.length} reported passing`, 'subtle'] : [`${requirements.length} in rd.md`, 'inactive'],
+            failedRequirement ? `✗ ${failedRequirement.n} ${failedRequirement.title}` : uncheckedRequirement ? `${uncheckedRequirement.n} has no check` : '',
+            () => [
+              isReported ? <Text key="reported" dimColor>From the round log, not a saved proof</Text> : null,
+              ...requirements.map(r => {
+                const [glyph, color] = isReported && r.state === 'open' ? REPORTED : REQUIREMENT_GLYPH[r.state]
+                return (
+                  <Text key={`req-${r.n}`} wrap="truncate-end">
+                    <Text color={color}>{glyph} </Text>
+                    <Text dimColor>{r.n}  </Text>
+                    <Text>{r.title}</Text>
+                    {r.state === 'none' ? <Text color="warning">  no check in eval.md</Text> : null}
+                  </Text>
+                )
+              }),
+              ...(spec && spec.nonGoals.length > 0 ? [
+                <Text key="non-head" dimColor bold>Not in scope</Text>,
+                ...spec.nonGoals.slice(0, 4).map((g, i) => <Text key={`non-${i}`} dimColor wrap="truncate-end">- {g}</Text>),
+                spec.nonGoals.length > 4 ? <Text key="non-more" dimColor>and {spec.nonGoals.length - 4} more in rd.md</Text> : null,
+              ] : []),
+            ])}
+
+          {fold('checks', 'Checks', checksSummary, checksNote, () => [
+            t.proof && !t.isProofStale ? <Text key="proof" dimColor>{t.proof.file}{t.proof.rev ? ` at ${t.proof.rev}` : ''}</Text> : null,
+            t.proof && t.isProofStale ? (
+              <Text key="stale" color="warning">
+                {t.proof.file} ran at {t.proof.rev}, before HEAD ({t.head.slice(0, 7)}): these results may be out of date
+              </Text>
+            ) : null,
+            !t.proof && t.expectedProof ? (
+              <Text key="missing" color="warning">
+                {t.expectedProof} is missing{t.expectedProof === 'proof-final.md' ? ', so /quorum:pr-draft will stop' : ''}
+              </Text>
+            ) : null,
+            !t.proof && t.expectedProof && t.checksNote ? <Text key="note" dimColor>Round log: {t.checksNote}</Text> : null,
+            ...t.checks.map(c => (
+              <Box key={`check-${c.id}`} flexDirection="row" gap={1}>
+                {c.result === 'PASS' ? badge(`b-${c.id}`, 'PASS', 'success')
+                  : c.result === 'FAIL' ? badge(`b-${c.id}`, 'FAIL', 'error')
+                    : c.result === 'SKIPPED' ? badge(`b-${c.id}`, 'SKIP', 'warning')
+                      : <Text color={isReported ? 'subtle' : 'inactive'}>{isReported ? '  ✓   ' : '  ○   '}</Text>}
+                <Text dimColor>{c.id.padEnd(4)}</Text>
+                <Box flexShrink={1}><Text dimColor={c.result === null} wrap="truncate-end">{c.label}</Text></Box>
               </Box>
-            )
-            : <Text dimColor>{t.prDrafted ? 'Every stage is done; pr.md is drafted.' : 'Every stage is done.'}</Text>)}
-        </Box>
+            )),
+            t.stopBlocks > 0 && isHookActive(t.status) ? <Text key="blocks" color="warning">Stop hook blocked {plural(t.stopBlocks, 'time')} in a row</Text> : null,
+            t.pending > 0 ? <Text key="pending" color="warning">{plural(t.pending, 'finding')} pending for the builder</Text> : null,
+          ])}
 
-        {requirements.length > 0 && (
-          <Box flexDirection="column">
-            <Text>
-              <Text bold>Requirements · </Text>
-              {t.proof
-                ? <Text color={met === requirements.length ? 'success' : 'warning'}>{met} of {requirements.length} met</Text>
-                : isReported
-                  ? <Text color="subtle">{requirements.length} of {requirements.length} reported passing</Text>
-                  : <Text dimColor>{requirements.length} in rd.md</Text>}
-            </Text>
-            {isReported ? <Text dimColor>From the round log, not a saved proof</Text> : null}
-            {requirements.map(r => {
-              const [glyph, color] = isReported && r.state === 'open' ? REPORTED : REQUIREMENT_GLYPH[r.state]
-              return (
-                <Text key={`req-${r.n}`} wrap="truncate-end">
-                  <Text color={color}>{glyph} </Text>
-                  <Text dimColor>{r.n}  </Text>
-                  <Text>{r.title}</Text>
-                  {r.state === 'none' ? <Text dimColor>  no check in eval.md</Text> : null}
-                </Text>
-              )
-            })}
-          </Box>
-        )}
-
-        {spec && spec.nonGoals.length > 0 && (
-          <Box flexDirection="column">
-            <Text bold>Not in scope</Text>
-            {spec.nonGoals.slice(0, 4).map((g, i) => <Text key={`non-${i}`} dimColor wrap="truncate-end">- {g}</Text>)}
-            {spec.nonGoals.length > 4 ? <Text dimColor>and {spec.nonGoals.length - 4} more in rd.md</Text> : null}
-          </Box>
-        )}
-
-        <Box flexDirection="column">
-          <Text>
-            <Text bold>Checks · </Text>
-            {t.proof
-              ? <Text color={passed === t.checks.length ? 'success' : 'error'}>{passed} of {t.checks.length} pass</Text>
-              : t.expectedProof
-                ? <Text color="warning">{plural(taskChecks, 'check')} in eval.md, no proof saved</Text>
-                : <Text dimColor>{plural(taskChecks, 'check')} in eval.md, not run yet</Text>}
-          </Text>
-          {t.proof && !t.isProofStale && <Text dimColor>{t.proof.file}{t.proof.rev ? ` at ${t.proof.rev}` : ''}</Text>}
-          {t.proof && t.isProofStale && (
-            <Text color="warning">
-              {t.proof.file} ran at {t.proof.rev}, before HEAD ({t.head.slice(0, 7)}): these results may be out of date
-            </Text>
-          )}
-          {!t.proof && t.expectedProof && (
-            <Text color="warning">
-              {t.expectedProof} is missing{t.expectedProof === 'proof-final.md' ? ', so /quorum:pr-draft will stop' : ''}
-            </Text>
-          )}
-          {!t.proof && t.expectedProof && t.checksNote && <Text dimColor>Round log: {t.checksNote}</Text>}
-          {t.checks.map(c => {
-            const [glyph, color] = c.result ? CHECK_GLYPH[c.result] ?? ['○', 'inactive'] : isReported ? REPORTED : ['○', 'inactive']
-            return (
-              <Text key={`check-${c.id}`} wrap="truncate-end">
-                <Text color={color}>{glyph} </Text>
-                <Text dimColor>{c.id}  </Text>
-                <Text dimColor={c.result === null}>{c.label}</Text>
-              </Text>
-            )
-          })}
-          {t.stopBlocks > 0 && isHookActive(t.status) && <Text color="warning">Stop hook blocked {plural(t.stopBlocks, 'time')} in a row</Text>}
-          {t.pending > 0 && <Text color="warning">{plural(t.pending, 'finding')} pending for the builder</Text>}
-        </Box>
-
-        <Box flexDirection="column">
-          <Text bold>Stages</Text>
-          {rail.map(s => {
-            const [glyph, color] = GLYPH[s.state]
-            const detail = stageDetail(t, s.name, known)
-            return (
-              <Text key={s.name}>
-                <Text color={color}>{glyph} </Text>
-                <Text bold={s.state === 'active' || s.state === 'stuck'} dimColor={s.state === 'todo' || s.state === 'skipped'}>{s.name}</Text>
-                {detail ? <Text dimColor>  {detail}</Text> : null}
-              </Text>
-            )
-          })}
-        </Box>
-
-        {t.rounds.length > 0 && (
-          <Box flexDirection="column">
-            <Text bold>Review rounds</Text>
-            {t.rounds.map(r => (
-              <Text key={`round-${r.n}`}>
+          {t.rounds.length > 0 && fold('rounds', 'Review rounds',
+            [roundsSummary, lastRound?.findings && lastRound.findings.important > 0 ? 'error' : 'text'],
+            t.status === 'HALTED' ? 'HALTED: see the post-mortem' : '',
+            () => t.rounds.map(r => (
+              <Text key={`round-${r.n}`} wrap="truncate-end">
                 <Text dimColor>Round {r.n}  </Text>
                 {r.findings === null
                   ? <Text dimColor>{r.candidates === null ? 'reviewing…' : `${r.candidates} candidates, voting…`}</Text>
@@ -695,38 +770,25 @@ export const register: Register = (on, options) => {
                     </Text>
                   )}
               </Text>
-            ))}
-          </Box>
-        )}
+            )))}
 
-        {spend.agents > 0 && (
-          <Box flexDirection="column">
-            <Text bold>Spend</Text>
-            <Text>
-              <Text>{plural(spend.agents, 'agent')} since the last command</Text>
-              <Text dimColor>  {tokenCount(spend.tokensIn)} in ({tokenCount(spend.tokensCached)} cached) · {tokenCount(spend.tokensOut)} out</Text>
-            </Text>
-            <Text dimColor>{spend.models.map(([m, k]) => `${m} ×${k}`).join(' · ')}</Text>
-          </Box>
-        )}
+          {spend.agents > 0 && fold('spend', 'Spend',
+            [`${plural(spend.agents, 'agent')} · ${tokenCount(spend.tokensIn)} in · ${tokenCount(spend.tokensOut)} out`, 'text'], '',
+            () => [
+              <Text key="since" dimColor>Since the last command; {tokenCount(spend.tokensCached)} of the input was cached</Text>,
+              <Text key="models" dimColor wrap="truncate-end">{spend.models.map(([m, k]) => `${m} ×${k}`).join(' · ')}</Text>,
+            ])}
 
-        {others.length > 0 && (
-          <Box flexDirection="column">
-            <Text bold>Other agents</Text>
-            {others.map(a => (
-              <Text key={a.id}>
+          {others.length > 0 && fold('agents', 'Other agents',
+            [running > 0 ? `${running} running · ${others.length - running} done` : `${others.length} done`, running > 0 ? 'claude' : 'text'], '',
+            () => others.map(a => (
+              <Text key={a.id} wrap="truncate-end">
                 <Text color={a.endedAt === null ? 'claude' : 'success'}>{a.endedAt === null ? '●' : '✓'} </Text>
                 <Text>{a.type}</Text>
                 <Text dimColor>  {a.description} · {seconds(a, clockNow)}{a.tokensIn + a.tokensOut > 0 ? ` · ${tokenCount(a.tokensIn + a.tokensOut)} tokens` : ''}</Text>
               </Text>
-            ))}
-          </Box>
-        )}
-
-        <Text>
-          <Text dimColor>Next: </Text>
-          <Text>{nextFor(t, known)}</Text>
-        </Text>
+            )))}
+        </Box>
       </Box>
     )
   })

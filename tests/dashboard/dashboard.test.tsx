@@ -6,6 +6,7 @@ import {
   parseProof, parseSpec, prDetail, prFromUrl, prNext,
   requirementState, roleOf,
   roundReviewers, slugFromHead, spendOf, stageOf, stages, tokenCount,
+  keptFindings, nextCommand, openByDefault, splitTicket,
 } from '../../hooks/dashboard/task'
 
 const state = (status: string, extra = '') => `---
@@ -123,7 +124,7 @@ const settle = async () => {
 
 // Stands for the engine beneath the plugin: a project at /repo holding the files in `files`.
 function world(on: On, files: Record<string, string>, root = '/repo') {
-  const seen = { status: [] as (string | undefined)[], toasts: [] as string[], opened: 0, ticks: 0, live: [] as string[] }
+  const seen = { status: [] as (string | undefined)[], toasts: [] as string[], opened: 0, ticks: 0, live: [] as string[], copied: [] as string[], filled: [] as string[], draft: '' }
   const file = (path: string) => (path.startsWith(`${root}/`) ? files[path.slice(root.length + 1)] : undefined)
   on('session.root', () => ({ value: root }))
   on('agent.list', () => ({ value: seen.live.map(id => ({ id, description: '', type: 'quorum:code-reviewer', status: 'running' as const })) }))
@@ -142,6 +143,9 @@ function world(on: On, files: Record<string, string>, root = '/repo') {
   on('command.register', () => ({ value: { command: 'quorum-dashboard' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('tool.call', () => ({ result: {} }))
+  on('ui.copy', (_, e) => { seen.copied.push(e.text); return { value: { isCopied: true as const } } })
+  on('prompt.read', () => ({ value: { text: seen.draft, cursor: seen.draft.length } }))
+  on('prompt.fill', (_, e) => { seen.filled.push(e.text); return { isFilled: true, origin: e.origin } })
   return seen
 }
 
@@ -280,10 +284,14 @@ test('the status line, band and pane show the active task', async ($, on) => {
   await band.unmount()
 
   const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /2 review rounds, approved 2026-11-08/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /2 plan review rounds, approved 2026-11-08/ })).toBeDefined()
+  // Checks holds a problem (a pending finding), so it opens by itself; the rounds stay folded to their summary.
+  expect(await pane.find({ type: 'Text', text: /1 finding pending/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^r1 1 IMPORTANT · r2 reviewing$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /voter kept 2 of 4/ })).toBeUndefined()
+  await pane.press({ key: 'toggle-rounds' })
   expect(await pane.find({ type: 'Text', text: /voter kept 2 of 4/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /2 candidates, voting/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /1 finding pending/ })).toBeDefined()
   await pane.unmount()
 })
 
@@ -302,7 +310,7 @@ test('a HALTED or ESCALATED task stays on the stage it stopped at, across a rest
   expect(await band.find({ type: 'Text', text: /^ › ✗ Blind test$/ })).toBeDefined()
   await band.unmount()
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /2 runs/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /blind test: 2 runs/ })).toBeDefined()
   await pane.unmount()
 })
 
@@ -343,6 +351,84 @@ test('with no task the band is the engine\'s and the status line is clear', asyn
   await band.unmount()
 })
 
+test('kept findings read with their tag, location, Pattern Category, and confidence', () => {
+  const kept = keptFindings(`Summary: 1 IMPORTANT, 1 NIT, 0 PRE-EXISTING
+
+[IMPORTANT] app/report.py:42 — Pattern Category: Unescaped CSV fields
+Confidence: 95
+Mechanism: a comma splits a row.
+
+[NIT] app/report.py:7 — naming
+
+## Dropped
+DROP [IMPORTANT] app/report.py:5 — (b) handled by the caller
+`)
+  expect(kept).toEqual([
+    { tag: 'IMPORTANT', loc: 'app/report.py:42', title: 'Unescaped CSV fields', confidence: 95 },
+    { tag: 'NIT', loc: 'app/report.py:7', title: 'naming', confidence: null },
+  ])
+})
+
+test('the next step names the command the Next button fills, if any', () => {
+  expect(nextCommand('/quorum:review-loop')).toBe('/quorum:review-loop')
+  expect(nextCommand('Review mockup.html, then /quorum:plan')).toBe('/quorum:plan')
+  expect(nextCommand('Get PR #42 reviewed and merged')).toBeNull()
+})
+
+test('a ticket id in the title moves out of it', () => {
+  expect(splitTicket('Export customers as CSV (CARE-42)')).toEqual({ title: 'Export customers as CSV', ticket: 'CARE-42' })
+  expect(splitTicket('Export customers as CSV')).toEqual({ title: 'Export customers as CSV', ticket: '' })
+  expect(splitTicket('Fix (some) parsing')).toEqual({ title: 'Fix (some) parsing', ticket: '' })
+})
+
+test('sections open by themselves only while they hold a problem', () => {
+  const base = { spec: null, checks: [], proof: null, isProofStale: false, expectedProof: '', stopBlocks: 0, status: 'IN_REVIEW', pending: 0 }
+  const t = (extra: object) => ({ ...base, ...extra }) as unknown as Parameters<typeof openByDefault>[0]
+  expect(openByDefault(t({}))).toEqual({ requirements: false, checks: false, rounds: false, spend: false, agents: false })
+  expect(openByDefault(t({ isProofStale: true })).checks).toBe(true)
+  expect(openByDefault(t({ expectedProof: 'proof-final.md' })).checks).toBe(true)
+  expect(openByDefault(t({ pending: 1 })).checks).toBe(true)
+  expect(openByDefault(t({ stopBlocks: 2, status: 'BUILDING' })).checks).toBe(true)
+  expect(openByDefault(t({ stopBlocks: 2, status: 'AWAITING-HUMAN' })).checks).toBe(false)
+  expect(openByDefault(t({ status: 'HALTED' })).rounds).toBe(true)
+})
+
+test('the Next button puts the command in the prompt, after nothing or before a draft, and never sends it', async ($, on) => {
+  const seen = world(on, repo('IN_REVIEW'))
+  let sent = 0
+  on('session.send', () => { sent++; return { value: { isSent: false } } as never })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await pane.find({ type: 'Button', key: 'next' }))?.text).toBe('▶ Next: /quorum:review-loop')
+
+  await pane.press({ key: 'next' })
+  await settle()
+  seen.draft = 'focus on the CSV quoting'
+  await pane.press({ key: 'next' })
+  await settle()
+  seen.draft = '/quorum:review-loop --models'
+  await pane.press({ key: 'next' })
+  await settle()
+  expect(seen.filled).toEqual(['/quorum:review-loop ', '/quorum:review-loop focus on the CSV quoting', '/quorum:review-loop --models'])
+  expect(sent).toBe(0)
+  await pane.unmount()
+})
+
+test('a section the person closes stays closed, even while it holds a problem', async ($, on) => {
+  world(on, repo('IN_REVIEW'))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // A pending finding opens Checks by itself.
+  expect(await pane.find({ type: 'Text', text: /1 finding pending for the builder/ })).toBeDefined()
+  await pane.press({ key: 'toggle-checks' })
+  expect(await pane.find({ type: 'Text', text: /1 finding pending for the builder/ })).toBeUndefined()
+  // Folded, its row still names the worst of what's wrong: the missing proof before the pending finding.
+  expect(await pane.find({ type: 'Text', text: /proof-build\.md missing$/ })).toBeDefined()
+  await pane.press({ key: 'toggle-checks' })
+  expect(await pane.find({ type: 'Text', text: /1 finding pending for the builder/ })).toBeDefined()
+  await pane.unmount()
+})
+
 test('token counts read in a few characters', () => {
   expect(tokenCount(950)).toBe('950')
   expect(tokenCount(12_345)).toBe('12k')
@@ -377,7 +463,7 @@ test('the pane shows what the command\'s agents used, from each request, and the
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
   let pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /^Spend$/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^Spend\s*$/ })).toBeUndefined()
   await pane.unmount()
 
   await spawn('a1', 'quorum:code-reviewer', 'Persona: Logic & Edge-Case Hunter. Task: export-csv.')
@@ -394,9 +480,10 @@ test('the pane shows what the command\'s agents used, from each request, and the
   await step(undefined, 0) // the main loop's own request isn't an agent's
 
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /^Spend$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^2 agents since the last command$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^  1\.5M in \(1\.2M cached\) · 6k out$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Spend\s*$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^2 agents · 1\.5M in · 6k out$/ })).toBeDefined()
+  await pane.press({ key: 'toggle-spend' })
+  expect(await pane.find({ type: 'Text', text: /^Since the last command; 1\.2M of the input was cached$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^claude-opus-5-5 ×1 · claude-haiku-5-5 ×1$/ })).toBeDefined()
   await pane.unmount()
 })
@@ -428,7 +515,7 @@ test('the round\'s reviewers show waiting, running, then their findings', async 
   await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/review/round-2/logic.md', content: SURVIVORS })
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /reviewers 1\/4 replied/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^  1 IMPORTANT · 1 NIT$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✗ Logic & edge cases\s+1 IMPORTANT · 1 NIT$/ })).toBeDefined()
   await pane.unmount()
 
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -445,6 +532,12 @@ test('the round\'s reviewers show waiting, running, then their findings', async 
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /kept 1 IMPORTANT · 1 NIT/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /1 IMPORTANT finding survives: the builder fixes them/ })).toBeDefined()
+  // Each kept finding, with its severity badge, file:line, Pattern Category, and a copy button for the location.
+  expect(await pane.find({ type: 'Text', text: /^ IMPORTANT $/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^app\/report\.py:42$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Unescaped CSV fields$/ })).toBeDefined()
+  await pane.press({ key: 'copy-kept-0' })
+  expect(seen.copied).toEqual(['app/report.py:42'])
   await pane.unmount()
 })
 
@@ -453,9 +546,14 @@ test('the pane opens with what the task is: title, goal, requirements, and what 
   world(on, files)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   let pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /^Export customers as CSV \(CARE-42\)$/ })).toBeDefined()
+  // The ticket id moves out of the title, to the header's right.
+  expect(await pane.find({ type: 'Text', text: /^Export customers as CSV$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^CARE-42$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^Users can run export to get every customer as a CSV file\.$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^3 in rd\.md$/ })).toBeDefined()
+  // Nothing wrong with the requirements yet, so they're folded until clicked.
+  expect(await pane.find({ type: 'Text', text: /^○ 2  Commas are quoted$/ })).toBeUndefined()
+  await pane.press({ key: 'toggle-requirements' })
   expect(await pane.find({ type: 'Text', text: /^○ 2  Commas are quoted$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^- No Excel output\.$/ })).toBeDefined()
   await pane.unmount()
@@ -463,7 +561,8 @@ test('the pane opens with what the task is: title, goal, requirements, and what 
   files['.tasks/export-csv/proof-build.md'] = PROOF
   await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/proof-build.md', content: PROOF })
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /^2 of 3 met$/ })).toBeDefined()
+  // A failed requirement opens the section by itself.
+  expect(await pane.find({ type: 'Text', text: /^2\/3 met$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^✗ 2  Commas are quoted$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^✓ 3  Docs: add export to README\.md\.$/ })).toBeDefined()
   await pane.unmount()
@@ -474,15 +573,18 @@ test('checks join eval.md with the latest proof', async ($, on) => {
   world(on, files)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   let pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /3 checks in eval.md, not run yet/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^3 not run yet$/ })).toBeDefined()
   await pane.unmount()
 
   files['.tasks/export-csv/proof-build.md'] = PROOF
   await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/proof-build.md', content: PROOF })
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /^4 of 5 pass$/ })).toBeDefined()
+  // A failed check opens Checks by itself, with a FAIL badge on its row.
+  expect(await pane.find({ type: 'Text', text: /^4\/5 pass$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /proof-build.md at 1a2b3c4/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^✗ 2  quotes commas$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^ FAIL $/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^quotes commas$/ })).toBeDefined()
+  expect(await pane.findAll({ type: 'Text', text: /^ PASS $/ })).toHaveLength(4)
   await pane.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await band.find({ type: 'Text', text: /^checks 4\/5$/ })).toBeDefined()
@@ -496,13 +598,14 @@ test('a finished task with no proof file says so, shows the log, and hides stale
   world(on, files)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /3 checks in eval.md, no proof saved/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^no proof saved$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /proof-final.md is missing, so \/quorum:pr-draft will stop/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /Round log: All eval checks pass on 673fa13/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /not run yet/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /Stop hook blocked/ })).toBeUndefined()
   // The log says every check passed: requirements and checks are marked, muted, as reported.
-  expect(await pane.find({ type: 'Text', text: /^3 of 3 reported passing$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^3 reported passing$/ })).toBeDefined()
+  await pane.press({ key: 'toggle-requirements' })
   expect(await pane.find({ type: 'Text', text: /^From the round log, not a saved proof$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^✓ 2  Commas are quoted$/ })).toBeDefined()
   await pane.unmount()
@@ -522,7 +625,7 @@ test('a finished task shows its PR from GitHub, asking again only after the TTL 
   await settle()
   expect(calls[0]).toEqual(['gh', 'pr', 'list', '--head', 'feat/export-csv', '--state', 'all', '--limit', '1', '--json', 'number,state,isDraft,url'])
   let pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /^  pr\.md drafted, PR not opened yet$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /pr\.md drafted, PR not opened yet$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^Push the branch and open the PR/ })).toBeDefined()
   await pane.unmount()
 
@@ -538,9 +641,10 @@ test('a finished task shows its PR from GitHub, asking again only after the TTL 
   expect(seen.status.at(-1)).toBe('export-csv · AWAITING-HUMAN · MEDIUM · round 2/3 · 1 pending · PR #33807 open')
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /^PR #33807 open$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^https:\/\/github\.com\/o\/r\/pull\/33807$/ })).toBeDefined()
+  expect((await pane.find({ type: 'Link' }))?.props.href).toBe('https://github.com/o/r/pull/33807')
   expect(await pane.find({ type: 'Text', text: /^Get PR #33807 reviewed and merged$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^  #33807 open$/ })).toBeDefined()
+  await pane.press({ key: 'copy-pr' })
+  expect(seen.copied).toEqual(['https://github.com/o/r/pull/33807'])
   await pane.unmount()
 
   answer = answer.replace('OPEN', 'MERGED')
@@ -565,7 +669,7 @@ test('a PR recorded in state.md is asked about by its URL, and shown even withou
   expect(calls[0]).toEqual(['gh', 'pr', 'view', 'https://github.com/o/r/pull/42', '--json', 'number,state,isDraft,url'])
   const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /^PR #42$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^https:\/\/github\.com\/o\/r\/pull\/42$/ })).toBeDefined()
+  expect((await pane.find({ type: 'Link' }))?.props.href).toBe('https://github.com/o/r/pull/42')
   expect(await pane.find({ type: 'Text', text: /^Get PR #42 reviewed and merged$/ })).toBeDefined()
   await pane.unmount()
 })
@@ -578,7 +682,7 @@ test('without gh, a finished task still says pr.md is drafted, and never claims 
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   await settle()
   const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /^  pr\.md drafted$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /pr\.md drafted$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /not opened/ })).toBeUndefined()
   await pane.unmount()
 })
@@ -609,8 +713,8 @@ test('the spec and blind-test stages show their own reports', async ($, on) => {
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   let pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /3 requirements in rd.md · 3 checks in eval.md/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^✓ Feasibility critic  clean$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^○ Spec improver  waiting$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✓ Feasibility critic\s+clean$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^○ Spec improver\s+waiting$/ })).toBeDefined()
   await pane.unmount()
 
   files['.tasks/export-csv/state.md'] = state('BLIND-TEST').replace('blind_runs: 0', 'blind_runs: 1')
@@ -635,8 +739,10 @@ test('a reload marks agents the engine no longer runs as finished', async ($, on
 
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^1 running · 1 done$/ })).toBeDefined()
+  await pane.press({ key: 'toggle-agents' })
   const marks = await pane.findAll({ type: 'Text', text: /^[●✓] $/ })
-  // The stage list draws the same glyphs first; the two builders, under Other agents, are last.
+  // The two builders, under Other agents, are drawn last.
   expect(marks.slice(-2).map(m => m.text)).toEqual(['✓ ', '● '])
   await pane.unmount()
 })
