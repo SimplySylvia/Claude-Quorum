@@ -53,12 +53,15 @@ and the stage commands share them. Still to do:
 
 ## 4. Worktrees: what's left
 
-A worktree per task is built (unreleased). Still to do before releasing it:
+A worktree per task shipped in 0.9.0. A real headless `/quorum:run --worktree` on `tests/e2e/sales-app` reached
+`READY` inside the worktree with the main working tree untouched, and the `run-worktree-fallback` and
+`run-worktree-second-task` evals pass (2026-11-10). Still to do:
 
-- **A real run.** The helpers, hooks, and dashboard are tested, and a headless probe confirmed that `EnterWorktree`
-  moves the hooks and agents into the worktree while `CLAUDE_PROJECT_DIR` stays the main tree. A whole
-  `/quorum:run --worktree` on `tests/e2e/sales-app`, with a second task specced meanwhile, hasn't been done; the
-  `run-worktree-low` and `run-worktree-second-task` evals haven't run either.
+- **Fewer refused commands.** In the real run, Claude Code refused 11 compound Bash commands in the worktree that it
+  couldn't show stay inside it; the model split them and went on, at the cost of turns. The stages now ask for one
+  simple command per call. Count the refusals again on the next real run.
+- **An eval that enters the worktree.** Evals never offer `EnterWorktree`, so only the fallback has an eval; the
+  path through the worktree was checked by hand.
 - **Blind tests side by side** can clash on the dev server's port. Pass a free port through the start command, or
   note it in `CLAUDE.md`.
 - **Lessons reach a worktree late.** `/quorum:codify-lesson` writes the main working tree's `REVIEW.md`; a task's

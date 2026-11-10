@@ -6,10 +6,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Check, Findings, KeptFinding, Now, PullRequest, QuorumAgent, Review, Reviewer, Round, Section, Snapshot, Stage } from '../../types'
+import type { Check, Findings, KeptFinding, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, Section, Snapshot, Stage } from '../../types'
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
-  parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, stageOf, stages, tokenCount,
+  parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, stageOf, stages, tokenCount,
   keptFindings, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange,
 } from './task'
 
@@ -20,6 +20,7 @@ const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'ta
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-3' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
 const reviews = atom({ plugin: 'quorum', key: 'reviews' } as const, [], { shape: 'reviews-1' })
+const otherTasks = atom({ plugin: 'quorum', key: 'others' } as const, [], { shape: 'others-1' })
 // Sections the person opened or closed in the pane, by `<slug>:<section>`.
 const sections = atom({ plugin: 'quorum', key: 'sections' } as const, {}, { shape: 'sections-1' })
 // How long a PR lookup stands before the next refresh asks GitHub again.
@@ -53,19 +54,29 @@ const REVIEW_FILES = ['logic.md', 'architecture.md', 'patterns.md', 'docs.md', '
 
 const readOr = ($: EngineInterface, path: string) => $.fs.read(path).catch(() => null)
 
-// The slug bin/quorum-active-task would print: a feat/ or fix/ branch with a task folder, then .tasks/.active.
-// `root` is the session's project root, the CLAUDE_PROJECT_DIR that script resolves against.
-async function activeSlug($: EngineInterface, root: string): Promise<{ slug: string; branch: string; head: string }> {
-  // A worktree's .git is a file naming the real git dir, absolute or relative to the worktree.
+// The session's git dir, and the root whose .tasks/ it uses (bin/quorum-active-task --root): for a linked worktree,
+// whose .git is a file naming its git dir and whose commondir leads to the main one, the main working tree.
+async function gitPaths($: EngineInterface, root: string): Promise<{ gitdir: string; tasksRoot: string; isLinked: boolean }> {
   const pointer = /^gitdir:\s*(.+)$/m.exec((await readOr($, `${root}/.git`)) ?? '')?.[1]?.trim()
-  const gitdir = !pointer ? `${root}/.git` : pointer.startsWith('/') ? pointer : `${root}/${pointer}`
+  if (!pointer) return { gitdir: `${root}/.git`, tasksRoot: root, isLinked: false }
+  const gitdir = pointer.startsWith('/') ? pointer : normalizePath(`${root}/${pointer}`)
+  const common = ((await readOr($, `${gitdir}/commondir`)) ?? '').trim()
+  const main = common ? normalizePath(common.startsWith('/') ? common : `${gitdir}/${common}`) : ''
+  return main.endsWith('/.git') ? { gitdir, tasksRoot: main.slice(0, -'/.git'.length), isLinked: true } : { gitdir, tasksRoot: root, isLinked: false }
+}
+
+// The slug bin/quorum-active-task would print: a feat/ or fix/ branch with a task folder, then .tasks/.active,
+// which belongs to the main working tree, so a linked worktree never falls back to it. `root` is the session's
+// project root, which follows the session into a worktree.
+async function activeSlug($: EngineInterface, root: string): Promise<{ slug: string; branch: string; head: string; tasksRoot: string }> {
+  const { gitdir, tasksRoot, isLinked } = await gitPaths($, root)
   const headFile = (await readOr($, `${gitdir}/HEAD`)) ?? ''
   const branch = branchFromHead(headFile)
   const head = await headCommit($, gitdir, headFile, branch)
   const fromBranch = slugFromHead(headFile)
-  if (fromBranch && (await $.fs.exists(`${root}/.tasks/${fromBranch}/state.md`))) return { slug: fromBranch, branch, head }
-  const active = ((await readOr($, `${root}/.tasks/.active`)) ?? '').split('\n')[0]?.trim() ?? ''
-  return { slug: /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(active) ? active : '', branch, head }
+  if (fromBranch && (await $.fs.exists(`${tasksRoot}/.tasks/${fromBranch}/state.md`))) return { slug: fromBranch, branch, head, tasksRoot }
+  const active = isLinked ? '' : ((await readOr($, `${tasksRoot}/.tasks/.active`)) ?? '').split('\n')[0]?.trim() ?? ''
+  return { slug: /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(active) ? active : '', branch, head, tasksRoot }
 }
 
 // HEAD's commit: detached, the branch's loose ref, or packed-refs; a worktree's refs live in its commondir.
@@ -136,8 +147,7 @@ async function nowFor($: EngineInterface, dir: string, t: Pick<Snapshot, 'stage'
 }
 
 async function snapshot($: EngineInterface, maxRounds: number, previous: Snapshot | null): Promise<Snapshot | null> {
-  const root = await $.session.root()
-  const { slug, branch, head } = await activeSlug($, root)
+  const { slug, branch, head, tasksRoot: root } = await activeSlug($, await $.session.root())
   if (!slug) return null
   const text = await readOr($, `${root}/.tasks/${slug}/state.md`)
   if (text === null) return null
@@ -205,6 +215,27 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     expectedProof: expectedProof(status, stage),
     checksNote: proof ? '' : checksNoteFromLog(text),
   }
+}
+
+// How many other tasks the pane lists.
+const OTHERS_SHOWN = 6
+
+// The repo's other unfinished tasks (not standalone reviews), newest first: what else is in flight, in this working
+// tree or in a worktree of its own.
+async function othersSnapshot($: EngineInterface, root: string, current: string): Promise<OtherTask[]> {
+  const tasks = `${root}/.tasks`
+  // A task with its own worktree is a link to its folder there.
+  const dirs = (await $.fs.list(tasks).catch(() => [])).filter(e => (e.kind === 'dir' || e.isLink) && e.name !== current && !isReviewId(e.name))
+  const out: OtherTask[] = []
+  for (const e of dirs) {
+    const changedAt = (await $.fs.stat(`${tasks}/${e.name}/state.md`).catch(() => null))?.mtimeMs ?? -1
+    if (changedAt < 0) continue
+    const fm = parseFrontmatter((await readOr($, `${tasks}/${e.name}/state.md`)) ?? '')
+    const status = scalar(fm, 'status')
+    if (scalar(fm, 'kind') === 'review' || !status || isFinished(status)) continue
+    out.push({ slug: e.name, status, risk: scalar(fm, 'risk'), worktree: scalar(fm, 'worktree'), changedAt })
+  }
+  return out.sort((a, b) => b.changedAt - a.changedAt).slice(0, OTHERS_SHOWN)
 }
 
 // How many reviews the dashboard keeps: the live one and the history under it.
@@ -353,14 +384,17 @@ const nextFor = (t: Snapshot, known: PullRequest | null) => (isPrStage(t.status)
 
 const seconds = (a: QuorumAgent, now: number) => `${Math.max(0, Math.round(((a.endedAt ?? now) - a.startedAt) / 1000))}s`
 
-// Re-read the task and the reviews, redraw, and toast a status change worth interrupting for.
+// Re-read the task, the reviews, and the other tasks, redraw, and toast a status change worth interrupting for.
 async function refresh($: EngineInterface, maxRounds: number, forcePr = false): Promise<Snapshot | null> {
   const before = await read($, task)
   const after = await snapshot($, maxRounds, before)
   await update($, task, () => after)
   const session = await $.session.id().catch(() => '')
-  const found = await reviewsSnapshot($, await $.session.root(), session)
+  const { tasksRoot } = await gitPaths($, await $.session.root())
+  const found = await reviewsSnapshot($, tasksRoot, session)
   await update($, reviews, () => found)
+  const elsewhere = await othersSnapshot($, tasksRoot, after?.slug ?? '')
+  await update($, otherTasks, () => elsewhere)
   // In the background, so a slow GitHub never holds up the turn; a failed lookup just leaves the last answer.
   if (after) void lookupPr($, after, forcePr).catch(() => undefined)
   const message = after && TOASTS[after.status]
@@ -629,7 +663,7 @@ export const register: Register = (on, options) => {
     // Spend opens while an agent ran on another model than the task chose.
     const mismatches = t ? modelMismatches(crew, t.reviewerModel, t.helperModel) : []
     const defaults: Record<Section, boolean> = t ? { ...openByDefault(t), spend: mismatches.length > 0 }
-      : { requirements: false, checks: false, rounds: false, reviews: true, spend: false, agents: false }
+      : { tasks: true, requirements: false, checks: false, rounds: false, reviews: true, spend: false, agents: false }
     const scope = t?.slug ?? ''
     const isOpen = (id: Section) => folds[`${scope}:${id}`] ?? defaults[id]
     const fold = (id: Section, label: string, summary: [string, string], note: string, body: () => unknown) => {
@@ -682,6 +716,18 @@ export const register: Register = (on, options) => {
         </Box>
       )
     }
+    // The repo's other unfinished tasks, one row each: where it is, and whether it has a worktree of its own.
+    const rest = await read($, otherTasks)
+    const inWorktrees = rest.filter(o => o.worktree).length
+    const tasksFold = rest.length > 0 && fold('tasks', 'Other tasks',
+      [`${plural(rest.length, 'unfinished task')}${inWorktrees ? ` · ${inWorktrees} in worktrees` : ''}`, 'text'], '',
+      () => rest.map(o => (
+        <Text key={`other-${o.slug}`} wrap="truncate-end">
+          <Text>{o.slug}</Text>
+          <Text dimColor>  {[o.status, o.risk, o.worktree ? 'own worktree' : '', ago(clockNow, o.changedAt)].filter(Boolean).join(' · ')}</Text>
+        </Text>
+      )))
+
     const stalled = past.filter(r => r.status === 'INTERRUPTED' || isElsewhere(r)).length
     const reviewsFold = past.length > 0 && fold('reviews', 'Reviews',
       [`${plural(past.length, 'review')} · newest ${ago(clockNow, past[0]?.changedAt ?? clockNow)}`, 'text'],
@@ -728,6 +774,7 @@ export const register: Register = (on, options) => {
             </Box>
           )}
           {reviewsFold}
+          {tasksFold}
         </Box>
       )
     }
@@ -935,6 +982,8 @@ export const register: Register = (on, options) => {
             )))}
 
           {reviewsFold}
+
+          {tasksFold}
 
           {spend.agents > 0 && fold('spend', 'Spend',
             [`${plural(spend.agents, 'agent')} · ${tokenCount(spend.tokensIn)} in · ${tokenCount(spend.tokensOut)} out`, 'text'],

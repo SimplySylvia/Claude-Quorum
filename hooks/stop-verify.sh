@@ -9,6 +9,8 @@
 #    wrote it: the builder's SubagentStop is checked against that review's state instead of the active task's. A
 #    marker from another session, or naming a review that isn't FIXING, is left over from an interrupted --fix: it's
 #    ignored, and the active task is checked as usual.
+#    The task is the one the session's directory (the input's cwd) resolves: in a task's git worktree, that
+#    worktree's. Its checks run in the task's worktree when it has one, with that worktree's verify-completion.sh.
 # 2. Run verify-completion.sh with a timeout (verify_timeout_s, default 300).
 # 3. On failure, count it in stop_blocks and exit 2 with the failing output, so Claude keeps working.
 # 4. Loop guard: on the 3rd failure in a row, let the stop through, save the status in escalated_from, set
@@ -28,10 +30,12 @@ case "$(printf '%s' "${CLAUDE_PLUGIN_OPTION_STOP_HOOK_ENABLED:-true}" | tr '[:up
   false|0|no|off) exit 0 ;;
 esac
 
-ROOT=${CLAUDE_PROJECT_DIR:-$(pwd)}
+cwd=$(printf '%s' "$input" | jq -r '.cwd // ""' 2>/dev/null || true)
+if [ -n "$cwd" ] && [ -d "$cwd" ]; then cd "$cwd" || exit 0; fi
+ROOT=$("$BIN/quorum-active-task" --root 2>/dev/null) || ROOT=${CLAUDE_PROJECT_DIR:-$(pwd)}
+CODE=$("$BIN/quorum-active-task" --code 2>/dev/null) || CODE=$ROOT
 export CLAUDE_PROJECT_DIR="$ROOT"
-VERIFY="$ROOT/.claude/hooks/verify-completion.sh"
-[ -f "$VERIFY" ] || exit 0
+[ -f "$ROOT/.claude/hooks/verify-completion.sh" ] || [ -f "$CODE/.claude/hooks/verify-completion.sh" ] || exit 0
 
 task=""
 FIX_MARKER="$ROOT/.tasks/.review-fix-active"
@@ -49,6 +53,10 @@ state() { "$BIN/quorum-state" --task "$task" "$@"; }
 status=$(state get status 2>/dev/null) || exit 0
 case "$status" in BUILDING|IN_REVIEW|ESCALATED|FIXING) ;; *) exit 0 ;; esac
 if [ "$event" = Stop ] && [ -n "$(state get pending_findings 2>/dev/null)" ]; then exit 0; fi
+worktree=$(state get worktree 2>/dev/null || true)
+if [ -n "$worktree" ] && [ -d "$worktree" ]; then CODE=$worktree; fi
+VERIFY="$CODE/.claude/hooks/verify-completion.sh"
+[ -f "$VERIFY" ] || VERIFY="$ROOT/.claude/hooks/verify-completion.sh"
 
 timeout_s=${CLAUDE_PLUGIN_OPTION_VERIFY_TIMEOUT_S:-300}
 case "$timeout_s" in ''|*[!0-9]*) timeout_s=300 ;; esac

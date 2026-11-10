@@ -34,6 +34,12 @@ through these stages in order when the user starts it.
 | `HALTED` | The user picks a redesign from the post-mortem, then `/quorum:spec-and-eval --redesign <slug>` |
 | `ESCALATED` | The Stop-hook checks failed 3 times in a row. Fix the environment or the failing checks; the next pass restores the previous status |
 
+A task can build in its own git worktree (`/quorum:build --worktree`, `/quorum:run --worktree`, or the `worktrees`
+setting): its branch is checked out at `.claude/worktrees/<slug>` (`quorum-state get worktree`), and the stages after
+the build work there. The main working tree stays free for specs, plans, and other tasks. The task's folder moves
+into the worktree (a session moved into a worktree can only write inside it), and the main working tree's
+`.tasks/<slug>` links to it.
+
 ## Risk tiers
 
 | Tier | Typical changes | Gets |

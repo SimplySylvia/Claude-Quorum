@@ -1,5 +1,6 @@
 ## Verification Commands
 <!-- Managed by /quorum:init-pipeline. Keep in sync with .claude/hooks/verify-completion.sh, which runs the fast checks. -->
+- **Setup:** {{SETUP}}
 - **Build:** {{BUILD}}
 - **Typecheck:** {{TYPECHECK}}
 - **Lint:** {{LINT}}

@@ -8,6 +8,11 @@ as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers alr
 
 Use the slug in `<arguments>`, or `quorum-active-task`. Work from the repo root.
 
+**Worktree.** If `quorum-state get worktree` prints a path and `quorum-active-task --code` prints another, the
+task's code is in its own git worktree: call `EnterWorktree` with that `path` first, so you and the agents you start
+work there. In a worktree, run one simple command per Bash call, with no `&&`, pipes into `bash` or `python`, or
+variables in a git command: Claude Code refuses a command it can't show stays inside the worktree.
+
 **Unfinished reviews.** First run `quorum-reviews heal <session>`. It marks any `/quorum:review` this session left
 unfinished as `INTERRUPTED`, and removes a `--fix` marker it left, which would otherwise point this task's builder
 at the review. If it prints ids, mention them in one line.
@@ -21,9 +26,28 @@ the `pipeline-laws` skill's stage map), then stop.
 
 ## 2. Branch
 
-Run `quorum-branch start <slug>` (add `--fix` when `rd.md` describes a bug fix). It creates or switches to the
-branch and records `base_sha`. If it refuses because of uncommitted changes, show `git status` and ask the user
-to commit or stash. Never discard their changes.
+**In its own worktree** when `<worktrees>` is `true` or `<arguments>` contains `--worktree` (a setting that reads as
+a placeholder is off). The task's branch gets its own git worktree, so this working tree stays free: you can spec or
+build another task here meanwhile.
+
+1. `quorum-branch start <slug> --worktree` (add `--fix` when `rd.md` describes a bug fix). It prints the branch,
+   then the worktree's path, and records both `base_sha` and `worktree`. Exit 3 means `CLAUDE.md`, `REVIEW.md`, or
+   the check script isn't committed (a worktree gets committed files only): show what it printed, say the task
+   builds in this working tree instead, and go on below.
+2. **Set it up.** A new worktree has no installed dependencies. Run the **Setup** command from `CLAUDE.md`'s
+   Verification Commands in the worktree: `cd <path> && <setup>`. If `CLAUDE.md` has no Setup line, ask the user
+   once what a fresh checkout needs (offer `quorum-detect-stack`'s `setup`, and "nothing"), run it, and offer to add
+   the answer as `- **Setup:** <command>` to `CLAUDE.md`'s Verification Commands in the main working tree. If it
+   fails, show the output and stop: the checks can't pass without it.
+3. **Move in.** Call `EnterWorktree` with `path` set to the worktree, so this session and every agent after it
+   work there, and run one simple command per Bash call from then on (see **Worktree** above). Say where the task
+   is, in one line. If you have no `EnterWorktree` tool (some hosts, such as plugin
+   evals, don't offer it), the agents can't follow the task into the worktree: run `quorum-branch remove <slug>`
+   (the branch stays), say why in one line, and go on below, which checks that branch out in this working tree.
+
+**Otherwise,** run `quorum-branch start <slug>` (add `--fix` when `rd.md` describes a bug fix). It creates or
+switches to the branch and records `base_sha`. If it refuses because of uncommitted changes, show `git status` and
+ask the user to commit or stash. Never discard their changes.
 
 ## 3. Run the builder
 

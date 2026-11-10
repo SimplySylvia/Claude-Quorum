@@ -171,7 +171,8 @@ def draw_map(theme):
            size=TAG, color="back", anchor="middle")
 
     # 3 · Build: the builder, from the plan, then the prover's proof.
-    t = band("build", "3", "Build", "/quorum:build", 100, ["then /quorum:simplify-diff"])
+    t = band("build", "3", "Build", "/quorum:build", 116, ["then /quorum:simplify-diff",
+                                                         "--worktree: in its own worktree"])
     s.row(CONTENT, t + 28, [("builder", "follows plan.md; checks must pass", False),
                             ("prover", "runs every eval.md check", False)])
 
@@ -341,7 +342,13 @@ def draw_tiers(theme):
         s.text(lx + 22, ly + 4, label, size=TAG + 0.5, color="muted")
     s.text(W - LEFT, ly + 4, "When in doubt between two tiers, Quorum picks the higher one.", size=TAG + 0.5,
            color="muted", anchor="end")
-    return s.svg(int(ly + 16), "Quorum risk tiers: what LOW, MEDIUM, and HIGH tasks get")
+    ly += 24
+    s.text(LEFT + 4, ly + 4, "/quorum:run --fast", size=TAG + 0.5, mono=True, weight=600)
+    s.text(LEFT + 4 + mono_w("/quorum:run --fast", TAG + 0.5) + 8, ly + 4,
+           "LOW only: no spec reviewers and no plan round, 1 code reviewer + voter; the checks and the proof stay.",
+           size=TAG + 0.5, color="muted")
+    return s.svg(int(ly + 16), "Quorum risk tiers: what LOW, MEDIUM, and HIGH tasks get. /quorum:run --fast gives "
+                 "a LOW task no spec reviewers, no plan round, and one code reviewer plus the voter.")
 
 
 def draw_loop(theme):
@@ -697,11 +704,19 @@ def draw_run(theme):
     ly += 24
     s.text(LEFT + 4, ly + 4, "--until <stage> stops after a stage; /quorum:run again continues from the task's status, "
            "so it mixes with the single-stage commands.", size=TAG + 0.5, color="muted")
+    for flag, text in (("--fast", "LOW only: spec without reviewers, no plan stage, build, one reviewer, proof, PR draft."),
+                       ("--worktree", "builds in its own git worktree, .claude/worktrees/<slug>; this one stays free "
+                                      "for another task.")):
+        ly += 22
+        s.text(LEFT + 4, ly + 4, flag, size=TAG + 0.5, mono=True, weight=600)
+        s.text(LEFT + 4 + mono_w("--worktree", TAG + 0.5) + 10, ly + 4, text, size=TAG + 0.5, color="muted")
     return s.svg(int(ly + 16), "/quorum:run: spec, plan, build, simplify, review loop, blind test, PR draft, in order. "
                  "It stops to ask at the spec (slug, tier, research, models, docs; --yes accepts all but a HIGH tier) "
                  "and the plan (mockup sign-off for UI, plan approval; --yes approves a clean plan except for HIGH), "
                  "and for your review of MEDIUM and HIGH tasks after the PR draft. It stops if the review loop or the "
-                 "blind test halts. Blind-test blockers go back to the review loop. It never pushes or opens the PR.")
+                 "blind test halts. Blind-test blockers go back to the review loop. It never pushes or opens the PR. "
+                 "--fast takes a LOW task through without spec reviewers or a plan stage, with one reviewer; "
+                 "--worktree builds the task in its own git worktree.")
 
 
 if __name__ == "__main__":

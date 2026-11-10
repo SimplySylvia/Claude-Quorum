@@ -17,6 +17,9 @@ state() { CLAUDE_PROJECT_DIR="$DEMO/$1" "$BIN/quorum-state" --task csv-export "$
   [ ! -e "$DEMO/review/.tasks/csv-export/review/round-2/votes.md" ]
   grep -q '^Result: 1 FAIL' "$DEMO/review/.tasks/csv-export/proof-build.md"
   [ -z "$(git -C "$DEMO/review" status --porcelain)" ]
+  # another task builds in its own worktree, for the pane's Other tasks list
+  [ "$(CLAUDE_PROJECT_DIR="$DEMO/review" "$BIN/quorum-state" --task summary-dollars get status)" = BUILDING ]
+  [ "$(git -C "$DEMO/review/.claude/worktrees/summary-dollars" branch --show-current)" = feat/summary-dollars ]
 }
 
 @test "blind: the review converged and blind run 1 is saved" {

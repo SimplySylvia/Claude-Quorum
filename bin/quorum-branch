@@ -2,13 +2,28 @@
 # Git helpers for Quorum tasks.
 #
 #   quorum-branch default                 print the default branch (origin/HEAD, else main, else master)
-#   quorum-branch start SLUG [--fix]      switch to feat/SLUG (fix/SLUG with --fix), creating it from the default
-#                                         branch; record base_sha in the task's state.md; print the branch
+#   quorum-branch start SLUG [--fix] [--worktree]
+#                                         switch to feat/SLUG (fix/SLUG with --fix), creating it from the default
+#                                         branch; record base_sha in the task's state.md; print the branch.
+#                                         With --worktree, check it out in its own git worktree instead, at
+#                                         .claude/worktrees/SLUG under the root, and leave this working tree as it
+#                                         is: print the branch, then the worktree's path, and record it as the
+#                                         task's `worktree`. Exit 3 if REVIEW.md, CLAUDE.md, or
+#                                         .claude/hooks/verify-completion.sh isn't committed on the branch the
+#                                         worktree starts from (a worktree only gets committed files)
+#   quorum-branch remove SLUG             remove the task's worktree (git worktree remove) and clear `worktree`; the
+#                                         branch stays. Exit 3 if it has uncommitted changes
+#   quorum-branch merged                  tasks whose worktree is still there though their work merged: SLUG<TAB>PATH.
+#                                         Merged means GitHub says the task's `pr` merged (gh), or else that its
+#                                         branch has commits and all of them are on the default branch
 #   quorum-branch range                   the diff range to review now: base_sha..HEAD before any builder round,
 #                                         then round_shas[-1]..HEAD (convergence Rule 2: new lines only)
 #   quorum-branch record                  push HEAD onto round_shas (call just before each builder run)
 #
-# Refuses to switch branches with uncommitted changes. Bash 3.2 compatible.
+# The task's folder moves into the worktree's own .tasks/, and the main tree's .tasks/<slug> becomes a link to it: a
+# session Claude Code moves into the worktree may write only inside it. The worktree's .tasks/ and .claude/worktrees/
+# go in the repository's info/exclude, so git never shows or commits them. remove moves the folder back first. Refuses to switch branches with uncommitted changes.
+# Bash 3.2 compatible.
 set -euo pipefail
 
 die() { echo "quorum-branch: $*" >&2; exit 1; }
@@ -16,7 +31,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # Through quorum-git, so a sandbox that hides the real git behind Apple's launcher doesn't break this script.
 git() { "$HERE/quorum-git" "$@"; }
 ROOT=$("$HERE/quorum-active-task" --root)
-cd "$ROOT"
+MAIN=$("$HERE/quorum-active-task" --main)
+cd "$("$HERE/quorum-active-task" --code)"
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a git repo: $ROOT"
 
 default_branch() {
@@ -34,8 +50,53 @@ case "${1:-}" in
 
   start)
     slug=${2:-}; [ -n "$slug" ] || die "start needs a slug"
-    prefix=feat; [ "${3:-}" = "--fix" ] && prefix=fix
-    [ -f ".tasks/$slug/state.md" ] || die "no state file for task $slug (run /quorum:spec-and-eval first)"
+    prefix=feat; wt=0
+    for arg in "${@:3}"; do
+      case "$arg" in --fix) prefix=fix ;; --worktree) wt=1 ;; *) die "unknown option: $arg" ;; esac
+    done
+    [ -f "$ROOT/.tasks/$slug/state.md" ] || die "no state file for task $slug (run /quorum:spec-and-eval first)"
+    state() { "$HERE/quorum-state" --task "$slug" "$@"; }
+    def=$(default_branch)
+    if [ "$wt" = 1 ]; then
+      branch="$prefix/$slug"
+      for b in "feat/$slug" "fix/$slug"; do git show-ref --verify --quiet "refs/heads/$b" && { branch=$b; break; }; done
+      from=$def; git show-ref --verify --quiet "refs/heads/$branch" && from=$branch
+      missing=""
+      for f in REVIEW.md CLAUDE.md .claude/hooks/verify-completion.sh; do
+        git cat-file -e "$from:$f" 2>/dev/null || missing="$missing $f"
+      done
+      if [ -n "$missing" ]; then
+        echo "quorum-branch: can't make a worktree: not committed on $from:$missing. A worktree only gets committed files; commit them, or build in this working tree." >&2
+        exit 3
+      fi
+      path="$MAIN/.claude/worktrees/$slug"
+      common=$(git rev-parse --path-format=absolute --git-common-dir)
+      if [ -d "$path" ] && [ "$(git -C "$path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" = "$common" ]; then
+        :
+      elif git show-ref --verify --quiet "refs/heads/$branch"; then
+        git worktree add -q "$path" "$branch" || die "couldn't check out $branch in a worktree (is it checked out elsewhere?)"
+      else
+        git worktree add -q -b "$branch" "$path" "$def"
+      fi
+      mkdir -p "$common/info"
+      for pat in /.claude/worktrees/ /.tasks; do
+        grep -qxF -- "$pat" "$common/info/exclude" 2>/dev/null || printf '%s\n' "$pat" >> "$common/info/exclude"
+      done
+      # The path as git and `quorum-active-task --code` print it, with symlinks resolved (macOS /var is /private/var).
+      path=$(cd "$path" && pwd -P)
+      if [ ! -L "$MAIN/.tasks/$slug" ]; then
+        [ ! -e "$path/.tasks/$slug" ] || die "$path/.tasks/$slug already exists"
+        mkdir -p "$path/.tasks"
+        mv "$MAIN/.tasks/$slug" "$path/.tasks/$slug"
+        ln -s "$path/.tasks/$slug" "$MAIN/.tasks/$slug"
+      fi
+      if [ -z "$(state get base_sha)" ]; then
+        state set base_sha "$(git -C "$path" merge-base HEAD "$def" 2>/dev/null || git -C "$path" rev-parse HEAD)"
+      fi
+      state set worktree "$path"
+      printf '%s\n%s\n' "$branch" "$path"
+      exit 0
+    fi
     cur=$(git branch --show-current)
     case "$cur" in
       "feat/$slug"|"fix/$slug") branch=$cur ;;
@@ -47,17 +108,55 @@ case "${1:-}" in
         if git show-ref --verify --quiet "refs/heads/$branch"; then
           git switch -q "$branch"
         else
-          git switch -q -c "$branch" "$(default_branch)"
+          git switch -q -c "$branch" "$def"
         fi ;;
     esac
-    base=$("$HERE/quorum-state" --task "$slug" get base_sha)
+    base=$(state get base_sha)
     if [ -z "$base" ]; then
-      def=$(default_branch)
       if [ "$branch" = "$def" ]; then die "refusing to work on the default branch $def"; fi
       base=$(git merge-base HEAD "$def" 2>/dev/null || git rev-parse HEAD)
-      "$HERE/quorum-state" --task "$slug" set base_sha "$base"
+      state set base_sha "$base"
     fi
     printf '%s\n' "$branch" ;;
+
+  remove)
+    slug=${2:-}; [ -n "$slug" ] || die "remove needs a slug"
+    path=$("$HERE/quorum-state" --task "$slug" get worktree)
+    [ -n "$path" ] || die "task $slug has no worktree"
+    if [ -d "$path" ]; then
+      [ "$(cd "$path" && pwd -P)" != "$(pwd -P)" ] || die "you're in $slug's worktree; remove it from the main working tree"
+      if [ -n "$(git -C "$path" status --porcelain)" ]; then
+        echo "quorum-branch: $slug's worktree has uncommitted changes; commit or discard them first:" >&2
+        git -C "$path" status --short >&2
+        exit 3
+      fi
+      if [ -L "$MAIN/.tasks/$slug" ] && [ -d "$path/.tasks/$slug" ]; then
+        rm "$MAIN/.tasks/$slug"
+        mv "$path/.tasks/$slug" "$MAIN/.tasks/$slug"
+      fi
+      rm -rf "$path/.tasks"
+      git worktree remove "$path"
+    fi
+    "$HERE/quorum-state" --task "$slug" clear worktree
+    echo "removed $path (the branch stays)" ;;
+
+  merged)
+    def=$(default_branch)
+    "$HERE/quorum-active-task" --list | while IFS="$(printf '\t')" read -r slug _ path; do
+      [ -n "$path" ] && [ -d "$path" ] || continue
+      pr=$("$HERE/quorum-state" --task "$slug" get pr)
+      merged=0
+      if [ -n "$pr" ] && command -v gh >/dev/null 2>&1; then
+        [ "$(gh pr view "$pr" --json state -q .state 2>/dev/null)" = MERGED ] && merged=1
+      else
+        branch=$(git -C "$path" branch --show-current 2>/dev/null)
+        base=$("$HERE/quorum-state" --task "$slug" get base_sha)
+        if [ -n "$branch" ] && [ -n "$base" ] && [ "$(git rev-parse "$branch")" != "$base" ] \
+          && git merge-base --is-ancestor "$branch" "$def" 2>/dev/null; then merged=1; fi
+      fi
+      [ "$merged" = 1 ] && printf '%s\t%s\n' "$slug" "$path"
+    done
+    exit 0 ;;
 
   range)
     base=$("$HERE/quorum-state" get base_sha)
@@ -72,5 +171,5 @@ case "${1:-}" in
     "$HERE/quorum-state" push round_shas "$(git rev-parse HEAD)"
     git rev-parse HEAD ;;
 
-  *) die "usage: quorum-branch default | start SLUG [--fix] | range | record" ;;
+  *) die "usage: quorum-branch default | start SLUG [--fix] [--worktree] | remove SLUG | merged | range | record" ;;
 esac

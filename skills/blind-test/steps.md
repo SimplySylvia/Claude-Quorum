@@ -9,6 +9,11 @@ as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers alr
 Work on the active task (`quorum-active-task`) from the repo root. You orchestrate: you don't test the app or
 review the code yourself, and you never give the blind user anything from the source.
 
+**Worktree.** If `quorum-state get worktree` prints a path and `quorum-active-task --code` prints another, the
+task's code is in its own git worktree: call `EnterWorktree` with that `path` first, so you and the agents you start
+work there. In a worktree, run one simple command per Bash call, with no `&&`, pipes into `bash` or `python`, or
+variables in a git command: Claude Code refuses a command it can't show stays inside the worktree.
+
 Don't run git commands that change the working tree, index, or history here (`stash`, `reset`, `checkout`, `commit`,
 `rebase`); agents make the commits. Read-only git (`diff`, `log`, `status`, `show`) is fine.
 
@@ -38,7 +43,8 @@ Save its reply verbatim to `blind/security-<run>.md`. Every finding in it blocks
 
 1. Read the **user goal for the blind test** from `rd.md` and the dev/start command and entry point from
    `CLAUDE.md`. If `rd.md` has no goal, write one from the requirements: one sentence, what a user would try.
-2. Turn on blind mode: `touch .tasks/.blind-mode-active`. Whatever happens next, remove it at the end (sub-step 5 below).
+2. Turn on blind mode: `touch .tasks/<slug>/.blind-mode-active`. It blinds this task's sessions only, so other
+   tasks' work goes on. Whatever happens next, remove it at the end (sub-step 5 below).
 3. If the app is a server, start it in the background with its dev command, logging to `blind/server-<run>.log`,
    and wait until it answers. Use local, temporary, or synthetic data only; never production or shared databases.
    A CLI needs no start.
@@ -47,7 +53,7 @@ Save its reply verbatim to `blind/security-<run>.md`. Every finding in it blocks
    > Goal: <goal>. Start here: <URL or command>. You're a first-time user; reach the goal through the app.
 
    Save its report verbatim to `blind/blind-<run>.md`.
-5. Turn off blind mode: `rm -f .tasks/.blind-mode-active`. Do this even if the blind user failed or errored.
+5. Turn off blind mode: `rm -f .tasks/<slug>/.blind-mode-active`. Do this even if the blind user failed or errored.
 6. **Accessibility, for UI changes** (`rd.md` says "UI change: yes", or `git diff --name-only <base_sha>..HEAD`
    changes markup, components, or styles). With the app still running, start `quorum:a11y-auditor`:
 
@@ -55,7 +61,7 @@ Save its reply verbatim to `blind/security-<run>.md`. Every finding in it blocks
    > `REVIEW.md`, and `.tasks/<slug>/rd.md` first.
 
    Save its reply verbatim to `blind/a11y-<run>.md`. A CLI-only change skips this step.
-7. **Tear down, always:** stop the server if you started one, and check `.tasks/.blind-mode-active` is gone.
+7. **Tear down, always:** stop the server if you started one, and check `.tasks/<slug>/.blind-mode-active` is gone.
 
 ## 3. Triage friction
 

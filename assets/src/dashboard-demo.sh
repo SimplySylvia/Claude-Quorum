@@ -8,6 +8,8 @@
 #   review  (default) code review round 2: two reviewers replied, two to go; round 1 sent one finding back
 #   blind   the review converged and blind test run 1 is in: goal reached, friction triaged
 #   done    AWAITING-HUMAN: a passing proof-final.md at HEAD, pr.md drafted, and the PR recorded
+# At every stage, a second task, "summary-dollars" (LOW), is building in its own git worktree, so the pane's Other
+# tasks list has a row.
 # Nothing here calls a model; every file is written as is. Then open Claude Code in DEST with this plugin:
 #   cd DEST && claude --plugin-dir <this repo>
 # Bash 3.2 compatible.
@@ -326,6 +328,15 @@ MD
 proof-final.md: ALL PASS. Waiting for your review.
 MD
 fi
+
+# ---------------------------------------------------------------- another task, in its own worktree
+other=summary-dollars
+mkdir -p ".tasks/$other"
+"$bin/quorum-state" --task "$other" init LOW BUILDING
+# shellcheck disable=SC2016  # the backticks are literal Markdown
+printf '# Show summary totals as dollars\n\n## Requirements\n1. `report.py summary` prints each total as dollars.\n' > ".tasks/$other/rd.md"
+"$bin/quorum-state" --task "$other" set plan_approved 2026-11-09
+"$bin/quorum-branch" start "$other" --worktree >/dev/null
 
 echo "Demo repo ready at $dest (stage: $stage, status: $(state get status))."
 echo "Open it with the dashboard:  cd $dest && claude --plugin-dir $repo"

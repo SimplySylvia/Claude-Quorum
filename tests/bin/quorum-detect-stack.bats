@@ -67,3 +67,10 @@ cmd() { detect "$1" | jq -r ".commands.$2 // \"null\""; }
   run detect node-ts
   echo "$output" | jq -e '.sources.typecheck == "package.json scripts.type-check"'
 }
+
+@test "setup installs from the lockfile, for a fresh worktree" {
+  [ "$(cmd node-ts setup)" = "pnpm install --frozen-lockfile" ]
+  [ "$(cmd node-npm-default setup)" = "npm ci" ]
+  [ "$(cmd python-uv setup)" = "uv sync" ]
+  [ "$(cmd rust setup)" = "null" ]
+}

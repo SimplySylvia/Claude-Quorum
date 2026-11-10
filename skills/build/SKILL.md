@@ -2,7 +2,7 @@
 name: build
 description: Start the first build for the active Quorum task from its approved plan. Creates the feat/<slug> or fix/<slug> branch, records base_sha, and runs the builder agent, which follows plan.md and can't finish until the repo's checks pass. Run after /quorum:plan.
 disable-model-invocation: true
-argument-hint: "[slug]"
+argument-hint: "[slug] [--worktree]"
 ---
 
 # Build the active task
@@ -14,3 +14,4 @@ The steps use these values. A setting that still reads as `${user_config…}` wa
 
 - `<arguments>`: `$ARGUMENTS`
 - `<session>`: `${CLAUDE_SESSION_ID}`
+- `<worktrees>`: ${user_config.worktrees} (default `false`)

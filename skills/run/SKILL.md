@@ -2,7 +2,7 @@
 name: run
 description: Take a Quorum task through the whole pipeline in one command, from spec to drafted PR, stopping only where you must decide (the tier, the models, docs, mockup sign-off, plan approval, a halt, and the human review). Starts a new task from a request, or continues the active one from wherever it stopped. With --fast, a LOW task takes the fast path: a short spec, a build, one reviewer, and the proof, with no plan round. Follows the same steps as each stage command, keeps every gate and check, and never pushes, opens, or merges a PR.
 disable-model-invocation: true
-argument-hint: "[<what to build>] [--fast] [--until spec|plan|build|review|blind|pr] [--yes] [--research | --no-research] [--models]"
+argument-hint: "[<what to build>] [--fast] [--worktree] [--until spec|plan|build|review|blind|pr] [--yes] [--research | --no-research] [--models]"
 ---
 
 # Run the pipeline
@@ -25,11 +25,15 @@ The stage steps use these. A setting that still reads as `${user_config…}` was
 - `<security_on_medium>`: ${user_config.security_on_medium} (default `false`)
 - `<reviewer_model>`: ${user_config.reviewer_model} (default `ask`)
 - `<helper_model>`: ${user_config.helper_model} (default `ask`)
+- `<worktrees>`: ${user_config.worktrees} (default `false`)
 - `<arguments>`: what this skill passes to each stage (the **Arguments** column below), not its own.
 
 This run's own arguments: `$ARGUMENTS`. They hold an optional request (what to build), and these flags:
-`--until <stage>`, `--yes` (only when the user typed it), `--research` or `--no-research`, `--models`, and
-`--fast`.
+`--until <stage>`, `--yes` (only when the user typed it), `--research` or `--no-research`, `--models`, `--fast`,
+and `--worktree`.
+
+**`--worktree`** builds the task in its own git worktree (as the `worktrees` setting does for every task): the build
+stage gets it, and the stages after it work there. This working tree stays free for another task meanwhile.
 
 **`--fast`** puts a new LOW task on the fast path: a short spec with no spec reviewers, no mockup, no plan round, a
 build, a review by the Logic & Edge-Case Hunter alone (still with the voter and the round cap), the proof, and the PR
@@ -43,7 +47,10 @@ run starts a new task; for a MEDIUM or HIGH task it's dropped.
 - **A request and an active task** (`quorum-active-task` prints a slug whose status isn't `READY`,
   `AWAITING-HUMAN`, or `HALTED`): ask whether to continue that task or start the new one. Starting the new one
   leaves the old task's files as they are; it only stops being active (`quorum-active-task --clear`).
-- **No request and no active task:** ask what to build, then go on with the answer as the request.
+- **No request and no active task:** if `quorum-active-task --list` shows unfinished tasks (a status other than
+  `READY`, `AWAITING-HUMAN`, and `HALTED`), for example ones building in their own worktrees, ask whether to
+  continue one of them (`quorum-active-task --set <slug>`) or start a new task. Otherwise ask what to build, then go
+  on with the answer as the request.
 - Tell the user, in one line, what will happen: the stages ahead (on the fast path: spec, build, review, PR), where it will stop to ask, and that `--until`
   stops it earlier.
 
@@ -64,11 +71,11 @@ says stop, after the stage `--until` names, or after 12 stages in one run (then 
 |---|---|---|---|
 | no task | `spec-and-eval` | the request, plus `--research`, `--no-research`, `--models`, `--yes`, and `--fast` as given | `spec` |
 | `DRAFT-AWAITING-VISUAL-SIGNOFF`, `PLANNING` | `plan` | the slug, plus `--yes` as given unless the risk is HIGH | `plan` |
-| `BUILDING`, `base_sha` not set | `build` | the slug | `build` |
+| `BUILDING`, `base_sha` not set | `build` | the slug, plus `--worktree` as given | `build` |
 | `BUILDING`, `base_sha` set | `simplify-diff`, then `review-loop` | none | `build` (before the review loop) |
 | `IN_REVIEW` | `review-loop` | none | `review` |
 | `CONVERGED` | `blind-test` | none | `blind` |
-| `BLIND-TEST` | an earlier blind test was cut off: `rm -f .tasks/.blind-mode-active`, stop any server it left running, `quorum-state set status CONVERGED`, say so, and follow `blind-test` | none | `blind` |
+| `BLIND-TEST` | an earlier blind test was cut off: `rm -f .tasks/<slug>/.blind-mode-active .tasks/.blind-mode-active`, stop any server it left running, `quorum-state set status CONVERGED`, say so, and follow `blind-test` | none | `blind` |
 | `READY`, `AWAITING-HUMAN` | `pr-draft`, unless `.tasks/<slug>/pr.md` already exists; then stop | the slug | `pr` |
 | `HALTED` | stop: show the post-mortem's two redesign options, and say `/quorum:spec-and-eval --redesign <slug>` restarts it | | |
 | `ESCALATED` | stop: show the last check failure; the user fixes the environment or the checks, then runs `/quorum:run` again | | |

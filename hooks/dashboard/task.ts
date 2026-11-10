@@ -402,6 +402,20 @@ export function modelMismatches(agents: QuorumAgent[], reviewerModel: string, he
   })
 }
 
+// An absolute path with its `.` and `..` segments resolved, as git's relative commondir needs.
+export function normalizePath(path: string): string {
+  const out: string[] = []
+  for (const part of path.split('/')) {
+    if (part === '' || part === '.') continue
+    if (part === '..') out.pop()
+    else out.push(part)
+  }
+  return `/${out.join('/')}`
+}
+
+// Statuses a task has once its work is done, or stopped for a redesign.
+export const isFinished = (status: string) => status === 'READY' || status === 'AWAITING-HUMAN' || status === 'HALTED'
+
 // A token count in a few characters: 950, 12k, 1.4M.
 export function tokenCount(n: number): string {
   if (n < 1000) return String(n)
@@ -470,6 +484,7 @@ export const shortRange = (range: string) => range.replace(/\b([0-9a-f]{7})[0-9a
 export function openByDefault(t: Snapshot): Record<Section, boolean> {
   const requirements = (t.spec?.requirements ?? []).map(r => requirementState(r.n, t.checks).state)
   return {
+    tasks: false,
     requirements: requirements.some(state => state === 'fail' || state === 'none'),
     checks: (t.proof !== null && t.checks.some(c => c.result === 'FAIL'))
       || t.isProofStale

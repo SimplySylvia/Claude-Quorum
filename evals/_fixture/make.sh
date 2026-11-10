@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Seed an eval workspace (the current directory) with the sales-app fixture, bootstrapped for Quorum.
 #   make.sh [--task SLUG RISK STATUS]   also create a task folder with state.md and make it active
+#   make.sh [--worktree-task SLUG RISK STATUS]
+#                                       also create a task with a commit on its own branch in its own git worktree
+#                                       (quorum-branch start --worktree), not active in the main working tree
 #   make.sh [--bug]                     also commit a runtime-only bug: export ignores DATA_FILE
 #   make.sh [--bug --hollow-fix]        then fix it, with a test that passes on the buggy code too
 #   make.sh [--money]                   also commit a money() helper on main that summary uses for dollar amounts
@@ -27,6 +30,7 @@ cat > CLAUDE.md <<'MD'
 Python CLI: `python3 app/report.py summary [DATA_FILE]`. Data lives in `data/sales.json`.
 
 ## Verification Commands
+- **Setup:** none
 - **Build:** none
 - **Typecheck:** none
 - **Lint:** `make lint`
@@ -50,6 +54,16 @@ while [ $# -gt 0 ]; do
       printf '# %s\n\n## Requirements\n1. `report.py export [DATA_FILE]` prints the rows of DATA_FILE (default data/sales.json) as RFC 4180 CSV.\n' "$slug" > ".tasks/$slug/rd.md"
       # shellcheck disable=SC2016  # the backticks are literal Markdown
       printf '# Eval\n\n| # | Command | Passes when |\n|---|---|---|\n| 1 | `python3 app/report.py export data/sales.json` | 3 data rows |\n' > ".tasks/$slug/eval.md" ;;
+    --worktree-task)
+      slug=$2 risk=$3 status=$4; shift 4
+      mkdir -p ".tasks/$slug"
+      "$bin/quorum-state" --task "$slug" init "$risk" BUILDING
+      # shellcheck disable=SC2016  # the backticks are literal Markdown
+      printf '# %s\n\n## Requirements\n1. `report.py export [DATA_FILE]` prints the rows of DATA_FILE as RFC 4180 CSV.\n' "$slug" > ".tasks/$slug/rd.md"
+      wt=$("$bin/quorum-branch" start "$slug" --worktree | sed -n 2p)
+      (cd "$wt" && printf '\n# export: work in progress\n' >> app/report.py && git commit -qam "Start export")
+      "$bin/quorum-state" --task "$slug" set status "$status"
+      "$bin/quorum-state" --task "$slug" set round 1 ;;
     --bug)
       shift
       git switch -q -c feat/csv-export

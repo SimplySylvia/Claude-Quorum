@@ -9,6 +9,11 @@ as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers alr
 Reviewers should see the smallest, clearest change that meets the spec. Work on the active task
 (`quorum-active-task`) from the repo root.
 
+**Worktree.** If `quorum-state get worktree` prints a path and `quorum-active-task --code` prints another, the
+task's code is in its own git worktree: call `EnterWorktree` with that `path` first, so you and the agents you start
+work there. In a worktree, run one simple command per Bash call, with no `&&`, pipes into `bash` or `python`, or
+variables in a git command: Claude Code refuses a command it can't show stays inside the worktree.
+
 1. Status must be `BUILDING` or `IN_REVIEW`, and `base_sha` must be set (`quorum-state get base_sha`). Otherwise
    say which command comes next and stop.
 2. Read `.tasks/<slug>/rd.md` and `eval.md`. Then read the whole change: `git diff <base_sha>` (committed and

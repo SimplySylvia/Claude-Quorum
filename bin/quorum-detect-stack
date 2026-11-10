@@ -3,11 +3,12 @@
 #
 #   { "root": "...", "stacks": ["node", ...], "profile": "node", "package_manager": "pnpm",
 #     "monorepo": "nx" | "turbo" | null,
-#     "commands": { "build": "...", "typecheck": "...", "lint": "...", "test": "...", "dev": "..." },
+#     "commands": { "setup": "...", "build": "...", "typecheck": "...", "lint": "...", "test": "...", "dev": "..." },
 #     "sources": { "test": "package.json scripts.test", ... },
 #     "skip_paths": ["pnpm-lock.yaml", "dist/", ...] }
 #
-# A command is null when nothing in the repo defines it; init-pipeline then asks the user. Detection only reads
+# A command is null when nothing in the repo defines it; init-pipeline then asks the user. `setup` installs the
+# dependencies a fresh checkout lacks (a task's new git worktree has only committed files), from the lockfile. Detection only reads
 # files; it never runs the repo's tools. Bash 3.2 compatible.
 #
 #   quorum-detect-stack [DIR]      (default: the repo root from quorum-active-task --root)
@@ -19,8 +20,8 @@ ROOT=${1:-$("$HERE/quorum-active-task" --root)}
 cd "$ROOT"
 
 stacks=""; profile=""; pm="null"; mono="null"
-c_build=""; c_typecheck=""; c_lint=""; c_test=""; c_dev=""
-s_build=""; s_typecheck=""; s_lint=""; s_test=""; s_dev=""
+c_setup=""; c_build=""; c_typecheck=""; c_lint=""; c_test=""; c_dev=""
+s_setup=""; s_build=""; s_typecheck=""; s_lint=""; s_test=""; s_dev=""
 skip=""
 
 add_stack() { stacks="$stacks $1"; [ -n "$profile" ] || profile=$1; }
@@ -45,6 +46,12 @@ if has package.json; then
     declared=$(jq -r '.packageManager // empty' package.json 2>/dev/null | sed 's/@.*//')
     case "$declared" in pnpm|yarn|bun|npm) pm=$declared ;; *) pm=npm ;; esac
   fi
+  case $pm in
+    pnpm) set_cmd setup "pnpm install --frozen-lockfile" "pnpm-lock.yaml" ;;
+    yarn) if has .yarnrc.yml; then set_cmd setup "yarn install --immutable" "yarn.lock"; else set_cmd setup "yarn install --frozen-lockfile" "yarn.lock"; fi ;;
+    bun) set_cmd setup "bun install --frozen-lockfile" "bun lockfile" ;;
+    npm) if has package-lock.json; then set_cmd setup "npm ci" "package-lock.json"; else set_cmd setup "npm install" "package.json"; fi ;;
+  esac
   script() { jq -r --arg k "$1" '.scripts[$k] // empty' package.json 2>/dev/null; }
   first_script() { for k in "$@"; do if [ -n "$(script "$k")" ]; then printf '%s\n' "$k"; return 0; fi; done; return 1; }
   if k=$(first_script build); then set_cmd build "$pm run $k" "package.json scripts.$k"; fi
@@ -66,8 +73,8 @@ fi
 # ---------------------------------------------------------------- Python
 if has pyproject.toml || has setup.py || has setup.cfg || has requirements.txt; then
   add_stack python
-  if has uv.lock; then run="uv run"; [ "$pm" != null ] || pm=uv
-  elif has poetry.lock; then run="poetry run"; [ "$pm" != null ] || pm=poetry
+  if has uv.lock; then run="uv run"; [ "$pm" != null ] || pm=uv; set_cmd setup "uv sync" "uv.lock"
+  elif has poetry.lock; then run="poetry run"; [ "$pm" != null ] || pm=poetry; set_cmd setup "poetry install" "poetry.lock"
   else run="python -m"; [ "$pm" != null ] || pm=pip
   fi
   pyfiles="pyproject.toml setup.cfg requirements.txt requirements-dev.txt"
@@ -82,6 +89,7 @@ fi
 # ---------------------------------------------------------------- Go
 if has go.mod; then
   add_stack go
+  set_cmd setup "go mod download" "go.mod"
   set_cmd build "go build ./..." "go.mod"
   set_cmd typecheck "go vet ./..." "go.mod"
   if has .golangci.yml || has .golangci.yaml || has .golangci.toml; then set_cmd lint "golangci-lint run" "golangci-lint configured"; fi
@@ -118,6 +126,7 @@ fi
 # ---------------------------------------------------------------- Makefile (fills gaps only)
 if has Makefile; then
   target() { grep -Eq "^$1:" Makefile; }
+  if target setup; then set_cmd setup "make setup" "Makefile target setup"; fi
   for name in build typecheck lint test dev; do
     if target "$name"; then set_cmd "$name" "make $name" "Makefile target $name"; fi
   done
@@ -140,6 +149,7 @@ jq -n \
   --arg profile "$profile" \
   --argjson pm "$(null_or_str "$pm")" \
   --argjson mono "$(null_or_str "$mono")" \
+  --argjson setup "$(json_or_null "$c_setup")" --argjson ssetup "$(json_or_null "$s_setup")" \
   --argjson build "$(json_or_null "$c_build")" --argjson typecheck "$(json_or_null "$c_typecheck")" \
   --argjson lint "$(json_or_null "$c_lint")" --argjson test "$(json_or_null "$c_test")" \
   --argjson dev "$(json_or_null "$c_dev")" \
@@ -148,6 +158,6 @@ jq -n \
   --argjson sdev "$(json_or_null "$s_dev")" \
   --argjson skip "$(list_json "$skip")" \
   '{root: $root, stacks: $stacks, profile: $profile, package_manager: $pm, monorepo: $mono,
-    commands: {build: $build, typecheck: $typecheck, lint: $lint, test: $test, dev: $dev},
-    sources: ({build: $sbuild, typecheck: $stypecheck, lint: $slint, test: $stest, dev: $sdev} | with_entries(select(.value != null))),
+    commands: {setup: $setup, build: $build, typecheck: $typecheck, lint: $lint, test: $test, dev: $dev},
+    sources: ({setup: $ssetup, build: $sbuild, typecheck: $stypecheck, lint: $slint, test: $stest, dev: $sdev} | with_entries(select(.value != null))),
     skip_paths: $skip}'

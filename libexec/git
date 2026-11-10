@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# The `git` git's own child processes find while quorum-git runs a real git by full path (see bin/quorum-git):
+# it runs that same git, so a subcommand git starts (git worktree add runs git branch, update-ref, and reset) doesn't
+# land on the broken launcher again. Bash 3.2 compatible.
+exec "${QUORUM_REAL_GIT:?quorum-git sets QUORUM_REAL_GIT}" "$@"

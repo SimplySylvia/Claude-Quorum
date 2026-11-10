@@ -6,7 +6,7 @@ import {
   parseProof, parseSpec, prDetail, prFromUrl, prNext,
   requirementState, roleOf,
   roundReviewers, slugFromHead, spendOf, stageOf, stages, tokenCount,
-  keptFindings, modelMismatches, choiceLabel, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, latestRun, liveReview, shortRange,
+  keptFindings, normalizePath, modelMismatches, choiceLabel, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, latestRun, liveReview, shortRange,
 } from '../../hooks/dashboard/task'
 
 const state = (status: string, extra = '') => `---
@@ -124,19 +124,25 @@ const settle = async () => {
 
 // Stands for the engine beneath the plugin: a project at /repo holding the files in `files`, each last changed at
 // `mtimes[path]` (1 when not given). Folders are the ones those paths imply.
-function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Record<string, number> = {}) {
+// `links`: absolute folders that list as symbolic links, as a task's folder in the main tree does once it has a worktree.
+function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Record<string, number> = {}, links: string[] = []) {
   const seen = { status: [] as (string | undefined)[], toasts: [] as string[], opened: 0, ticks: 0, live: [] as string[], copied: [] as string[], filled: [] as string[], draft: '' }
-  const file = (path: string) => (path.startsWith(`${root}/`) ? files[path.slice(root.length + 1)] : undefined)
+  // Paths are relative to `root`, or absolute (a worktree's session reads the main working tree's .tasks/).
+  const abs = (path: string) => (path.startsWith('/') ? path : `${root}/${path}`)
+  const file = (path: string) => Object.entries(files).find(([k]) => abs(k) === path)?.[1]
+  const mtime = (path: string) => Object.entries(mtimes).find(([k]) => abs(k) === path)?.[1] ?? 1
   // The entries directly under `dir`, from the paths beneath it.
   const entries = (dir: string) => {
-    const prefix = dir === root ? '' : `${dir.slice(root.length + 1)}/`
+    const prefix = `${dir}/`
     const names = new Map<string, 'file' | 'dir'>()
-    for (const path of Object.keys(files)) {
+    for (const path of Object.keys(files).map(abs)) {
       if (!path.startsWith(prefix)) continue
       const [name, ...rest] = path.slice(prefix.length).split('/')
       if (name) names.set(name, rest.length > 0 ? 'dir' : 'file')
     }
-    return [...names].map(([name, kind]) => ({ name, kind, size: 0, mtimeMs: kind === 'file' ? mtimes[`${prefix}${name}`] ?? 1 : 0, isLink: false }))
+    return [...names].map(([name, kind]) => (links.includes(`${prefix}${name}`)
+      ? { name, kind: 'other' as const, size: 0, mtimeMs: 0, isLink: true }
+      : { name, kind, size: 0, mtimeMs: kind === 'file' ? mtime(`${prefix}${name}`) : 0, isLink: false }))
   }
   on('fs.list', (_, e) => {
     const found = entries(e.path)
@@ -145,7 +151,7 @@ function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Re
   })
   on('fs.stat', (_, e) => {
     if (file(e.path) === undefined) throw new Error(`ENOENT: ${e.path}`)
-    return { value: { kind: 'file' as const, size: 0, mtimeMs: mtimes[e.path.slice(root.length + 1)] ?? 1, isLink: false } }
+    return { value: { kind: 'file' as const, size: 0, mtimeMs: mtime(e.path), isLink: false } }
   })
   on('session.root', () => ({ value: root }))
   on('session.id', () => ({ value: 'sess-a' }))
@@ -558,6 +564,49 @@ test('a status change toasts once, and only for statuses worth it', async ($, on
   expect(seen.toasts.length).toBe(1)
 })
 
+test('in a task\'s worktree, the pane shows that task, from the main tree\'s .tasks/, and lists the others', async ($, on) => {
+  const other = (status: string, extra = '') => `---\nslug: x\nrisk: LOW\nstatus: ${status}\n${extra}---\n`
+  world(on, {
+    // The session moved into the worktree: its .git names its git dir, whose commondir leads to the main one.
+    '.git': 'gitdir: /repo/.git/worktrees/export-csv\n',
+    '/repo/.git/worktrees/export-csv/HEAD': 'ref: refs/heads/feat/export-csv\n',
+    '/repo/.git/worktrees/export-csv/commondir': '../..\n',
+    '/repo/.tasks/.active': 'import-xls\n',
+    '/repo/.tasks/export-csv/state.md': state('IN_REVIEW', 'worktree: /repo/.claude/worktrees/export-csv\n'),
+    '/repo/.tasks/export-csv/rd.md': RD,
+    '/repo/.tasks/import-xls/state.md': other('PLANNING'),
+    '/repo/.tasks/ui-copy/state.md': other('BUILDING', 'worktree: /repo/.claude/worktrees/ui-copy\n'),
+    '/repo/.tasks/old-fix/state.md': other('READY'),
+    '/repo/.tasks/review-pr-3/state.md': other('REVIEWING', 'kind: review\n'),
+  }, '/repo/.claude/worktrees/export-csv', { '/repo/.tasks/ui-copy/state.md': 900, '/repo/.tasks/import-xls/state.md': 800 },
+  ['/repo/.tasks/export-csv', '/repo/.tasks/ui-copy'])
+  await $.session.start({ cwd: '/repo/.claude/worktrees/export-csv', surface: 'terminal', isInteractive: true })
+
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^export-csv · $/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^2 unfinished tasks · 1 in worktrees$/ })).toBeDefined()
+  await pane.press({ key: 'toggle-tasks' })
+  expect(await pane.find({ type: 'Text', text: /^ui-copy\s+BUILDING · LOW · own worktree · just now$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^import-xls\s+PLANNING · LOW · just now$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /old-fix|review-pr-3/ })).toBeUndefined()
+  await pane.unmount()
+})
+
+test('a worktree on a branch with no task shows no task, even with .tasks/.active set', async ($, on) => {
+  world(on, {
+    '.git': 'gitdir: /repo/.git/worktrees/side\n',
+    '/repo/.git/worktrees/side/HEAD': 'ref: refs/heads/feat/unrelated\n',
+    '/repo/.git/worktrees/side/commondir': '../..\n',
+    '/repo/.tasks/.active': 'export-csv\n',
+    '/repo/.tasks/export-csv/state.md': state('IN_REVIEW'),
+  }, '/repo/.claude/worktrees/side')
+  await $.session.start({ cwd: '/repo/.claude/worktrees/side', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^No active Quorum task$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^1 unfinished task$/ })).toBeDefined()
+  await pane.unmount()
+})
+
 test('task files are read from the project root, not the working directory', async ($, on) => {
   const seen = world(on, repo('IN_REVIEW'), '/work/repo')
   await $.session.start({ cwd: '/work/repo/app', surface: 'terminal', isInteractive: true })
@@ -612,7 +661,7 @@ test('a ticket id in the title moves out of it', () => {
 test('sections open by themselves only while they hold a problem', () => {
   const base = { spec: null, checks: [], proof: null, isProofStale: false, expectedProof: '', stopBlocks: 0, status: 'IN_REVIEW', pending: 0 }
   const t = (extra: object) => ({ ...base, ...extra }) as unknown as Parameters<typeof openByDefault>[0]
-  expect(openByDefault(t({}))).toEqual({ requirements: false, checks: false, rounds: false, reviews: false, spend: false, agents: false })
+  expect(openByDefault(t({}))).toEqual({ tasks: false, requirements: false, checks: false, rounds: false, reviews: false, spend: false, agents: false })
   expect(openByDefault(t({ isProofStale: true })).checks).toBe(true)
   expect(openByDefault(t({ expectedProof: 'proof-final.md' })).checks).toBe(true)
   expect(openByDefault(t({ pending: 1 })).checks).toBe(true)
@@ -680,6 +729,11 @@ test('a section the person closes stays closed, even while it holds a problem', 
   await pane.press({ key: 'toggle-checks' })
   expect(await pane.find({ type: 'Text', text: /1 finding pending for the builder/ })).toBeDefined()
   await pane.unmount()
+})
+
+test('git\'s relative paths resolve', () => {
+  expect(normalizePath('/repo/.git/worktrees/a/../..')).toBe('/repo/.git')
+  expect(normalizePath('/repo/./.claude//worktrees/a')).toBe('/repo/.claude/worktrees/a')
 })
 
 test('token counts read in a few characters', () => {

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # PreToolUse hook: keep the blind user out of the source code.
 #
-# Active when the tool call comes from the quorum:blind-user agent, or while .tasks/.blind-mode-active exists
-# (the fallback /quorum:blind-test creates). Otherwise it exits 0 at once.
+# Active when the tool call comes from the quorum:blind-user agent, or while the blind-mode marker /quorum:blind-test
+# creates as a fallback exists: .tasks/<slug>/.blind-mode-active, for calls in the session whose directory (the
+# input's cwd) resolves to that task, so a blind test in one task's worktree doesn't blind a session working on
+# another; or .tasks/.blind-mode-active, from older runs, for every call. Otherwise it exits 0 at once.
+# Paths count relative to the working tree the call is in (a task's worktree, or the root).
 #
 # In blind mode it blocks (exit 2):
 #   - Read, Edit, Write, NotebookEdit of a source path;
@@ -20,11 +23,20 @@
 set -uo pipefail
 
 ROOT=${CLAUDE_PROJECT_DIR:-$(pwd)}
+BIN="$(cd "$(dirname "$0")" && pwd)/../bin"
 input=$(cat)
 
 agent=$(printf '%s' "$input" | jq -r '.agent_type // empty' 2>/dev/null)
-if [ "$agent" != "quorum:blind-user" ] && [ ! -e "$ROOT/.tasks/.blind-mode-active" ]; then exit 0; fi
+markers() { for m in "$ROOT"/.tasks/.blind-mode-active "$ROOT"/.tasks/*/.blind-mode-active; do [ -e "$m" ] && return 0; done; return 1; }
+if [ "$agent" != "quorum:blind-user" ] && ! markers; then exit 0; fi
+cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
+if [ -n "$cwd" ] && [ -d "$cwd" ]; then cd "$cwd" 2>/dev/null || true; fi
+if [ "$agent" != "quorum:blind-user" ] && [ ! -e "$ROOT/.tasks/.blind-mode-active" ]; then
+  task=$("$BIN/quorum-active-task" 2>/dev/null) || exit 0
+  [ -e "$ROOT/.tasks/$task/.blind-mode-active" ] || exit 0
+fi
 strict=0; [ "$agent" = "quorum:blind-user" ] && strict=1
+CODE=$("$BIN/quorum-active-task" --code 2>/dev/null) || CODE=$ROOT
 
 dirs=${CLAUDE_PLUGIN_OPTION_BLIND_BLOCK_DIRS:-src,app,lib,packages,Source,Content}
 exts=${CLAUDE_PLUGIN_OPTION_BLIND_BLOCK_EXTS:-ts,tsx,js,jsx,py,rs,go,cpp,h,java,kt,rb}
@@ -42,7 +54,7 @@ block() {
 is_source() {
   local p=$1 d e
   p=${p#\"}; p=${p%\"}; p=${p#\'}; p=${p%\'}
-  case "$p" in "$ROOT"/*) p=${p#"$ROOT"/} ;; esac
+  case "$p" in "$CODE"/*) p=${p#"$CODE"/} ;; "$ROOT"/*) p=${p#"$ROOT"/} ;; esac
   while [ "${p#./}" != "$p" ]; do p=${p#./}; done
   [ -n "$p" ] || return 1
   if [ "$strict" -eq 1 ]; then
@@ -70,7 +82,8 @@ case "$tool" in
 
   Grep|Glob)
     path=$(printf '%s' "$input" | jq -r '.tool_input.path // empty')
-    if [ "$strict" -eq 0 ]; then case "${path#"$ROOT"/}" in .tasks|.tasks/*) exit 0 ;; esac; fi
+    rel=${path#"$CODE"/}; rel=${rel#"$ROOT"/}
+    if [ "$strict" -eq 0 ]; then case "$rel" in .tasks|.tasks/*) exit 0 ;; esac; fi
     block "$tool is disabled in blind mode" ;;
 
   Bash)

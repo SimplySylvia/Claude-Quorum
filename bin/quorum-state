@@ -15,7 +15,8 @@
 # current HEAD, with no failed check ("Result: ALL PASS" or "<n> SKIPPED"). `pr` is the task's pull request URL.
 # `reviewer_model` and `helper_model` are the models chosen for the task's agents (skills/pipeline-laws/models.md):
 # `inherit` or a value the Agent tool's `model` parameter accepts. `fast: true` marks a LOW task on the fast path
-# (/quorum:run --fast): no plan round, and one reviewer.
+# (/quorum:run --fast): no plan round, and one reviewer. `worktree` is the git worktree the task's code is in, when
+# quorum-branch start --worktree made one; its HEAD is the one the proof must match.
 # A standalone review (/quorum:review) keeps its state in .tasks/review-<id>/ with `kind: review`, the `range` it
 # reviewed, the `session` running it (a Claude Code session id), and status REVIEWING, FIXING (its builder is fixing
 # the kept findings), REVIEWED, or INTERRUPTED (a run that never finished; see quorum-reviews). No `kind` is a task.
@@ -29,7 +30,7 @@ die() { echo "quorum-state: $*" >&2; exit 1; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 # Through quorum-git, so a sandbox that hides the real git behind Apple's launcher doesn't break this script.
 git() { "$HERE/quorum-git" "$@"; }
-ORDER="slug kind range session risk fast status round base_sha round_shas stop_blocks signoff plan_rounds plan_approved pending_findings blind_runs escalated_from reviewer_model helper_model pr"
+ORDER="slug kind range session risk fast status worktree round base_sha round_shas stop_blocks signoff plan_rounds plan_approved pending_findings blind_runs escalated_from reviewer_model helper_model pr"
 LISTS=" round_shas pending_findings "
 COUNTERS=" round stop_blocks plan_rounds blind_runs "
 STATUSES=" DRAFT-AWAITING-VISUAL-SIGNOFF PLANNING BUILDING IN_REVIEW CONVERGED BLIND-TEST READY AWAITING-HUMAN HALTED ESCALATED REVIEWING FIXING REVIEWED INTERRUPTED "
@@ -137,7 +138,10 @@ require_proof() { # status
   case "$result" in *FAIL*) die "proof-final.md says \"Result: $result\"; fix the failures and run the prover again before $1" ;; esac
   rev=$(sed -n 's/^Proof:.* at \([0-9a-fA-F]\{7,40\}\).*/\1/p' "$proof" | head -n 1)
   [ -n "$rev" ] || die "proof-final.md doesn't name the commit it ran at (\"Proof: <slug> at <sha>\"); run the prover again"
-  if head=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null); then
+  local code=""
+  [ -f "$FILE" ] && code=$(parse "$FILE" | awk -F '\t' '$1 == "S" && $2 == "worktree" && $3 != "null" { print $3 }')
+  [ -n "$code" ] && [ -d "$code" ] || code=$("$HERE/quorum-active-task" --code)
+  if head=$(git -C "$code" rev-parse HEAD 2>/dev/null); then
     case "$head" in "$rev"*) ;; *) die "proof-final.md is for $rev, but HEAD is $(printf '%s' "$head" | cut -c1-12); run the prover again before $1" ;; esac
   fi
 }
@@ -151,6 +155,7 @@ validate_scalar() { # key value
     risk) is_in "$2" "$RISKS" || die "unknown risk tier: $2 (LOW, MEDIUM, HIGH)" ;;
     kind) case "$2" in task|review) ;; *) die "kind must be task or review" ;; esac ;;
     fast) case "$2" in true|false) ;; *) die "fast must be true or false" ;; esac ;;
+    worktree) case "$2" in /*) ;; *) die "worktree must be an absolute path" ;; esac ;;
     range) printf '%s' "$2" | grep -Eq '^[^[:space:]]+$' || die "range must be one git range, with no spaces" ;;
     session) printf '%s' "$2" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_-]*$' || die "session must be a session id: letters, digits, - and _" ;;
     pr) printf '%s' "$2" | grep -Eq '^https?://[^[:space:]]+/pull/[0-9]+$' || die "pr must be a pull request URL (https://github.com/<owner>/<repo>/pull/<n>)" ;;

@@ -28,6 +28,16 @@ If `REVIEW.md` or `.claude/hooks/verify-completion.sh` is missing, stop and sugg
 
 If `<arguments>` starts with `--redesign`, go to [Redesign](#redesign).
 
+**Start in the main working tree.** A new task's spec and plan live there, not in another task's worktree: if
+`quorum-active-task --code` and `quorum-active-task --main` differ, call `ExitWorktree` with action `keep`. If it says
+this session didn't enter a worktree, ask the user to start the new task from the main working tree
+(`quorum-active-task --main`), and stop.
+
+**Merged worktrees.** `quorum-branch merged` lists tasks whose work merged while their git worktree is still there.
+If it lists any, ask the user which to remove (AskUserQuestion, one option per task, any number). For each yes, run
+`quorum-branch remove <slug>`; exit 3 means it has uncommitted changes: show them and leave it. Remove nothing
+without a yes.
+
 ## 2. Name the task
 
 Propose a short kebab-case slug (for example `csv-export-button`). It must match `[a-z0-9][a-z0-9.-]*` and not

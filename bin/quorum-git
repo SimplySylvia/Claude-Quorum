@@ -6,13 +6,21 @@
 # Claude Code's macOS sandbox can make `git` on PATH resolve to Apple's /usr/bin/git launcher, which fails with an
 # xcode-select or xcrun error because it can't write its cache. Then this tries a real git by full path:
 # /opt/homebrew/bin/git, then /usr/local/bin/git (QUORUM_GIT_CANDIDATES, space-separated, replaces that list).
-# With none working, it runs plain `git` so the caller sees the real error. Bash 3.2 compatible.
+# With none working, it runs plain `git` so the caller sees the real error.
+#
+# Some git commands start git again as a child, found on PATH (git worktree add runs git branch, update-ref, and
+# reset), and in that sandbox a PATH lookup can't see Homebrew's git either. So with a candidate, PATH starts with
+# the plugin's libexec/, whose `git` runs the same candidate (QUORUM_REAL_GIT). Bash 3.2 compatible.
 set -uo pipefail
 
+HERE=$(cd "$(dirname "$0")" && pwd)
 works() { "$1" --version >/dev/null 2>&1; }
 
 if works git; then exec git "$@"; fi
 for candidate in ${QUORUM_GIT_CANDIDATES:-/opt/homebrew/bin/git /usr/local/bin/git}; do
-  if [ -x "$candidate" ] && works "$candidate"; then exec "$candidate" "$@"; fi
+  if [ -x "$candidate" ] && works "$candidate"; then
+    export QUORUM_REAL_GIT="$candidate" PATH="$HERE/../libexec:$PATH"
+    exec "$candidate" "$@"
+  fi
 done
 exec git "$@"

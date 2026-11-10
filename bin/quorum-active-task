@@ -4,9 +4,21 @@
 #   quorum-active-task            print the active slug (exit 1 if none)
 #   quorum-active-task --set S    write S to .tasks/.active (the task folder must exist)
 #   quorum-active-task --clear    remove .tasks/.active
-#   quorum-active-task --root     print the repo root Quorum uses
+#   quorum-active-task --root     print the repo root Quorum uses: where .tasks/ lives
+#   quorum-active-task --code     print the working tree the code is in: the root, or the git worktree you're in
+#   quorum-active-task --main     print the repository's main working tree
+#   quorum-active-task --list     every task (not standalone reviews): SLUG<TAB>STATUS<TAB>WORKTREE, one per line
 #
-# Resolution order: a feat/<slug> or fix/<slug> branch whose .tasks/<slug>/ exists, then .tasks/.active.
+# Resolution order: a feat/<slug> or fix/<slug> branch whose .tasks/<slug>/ exists, then .tasks/.active. In a
+# task's git worktree (quorum-branch start --worktree) only the branch counts: .tasks/.active is the main working
+# tree's, so a session there and one in a worktree each have their own active task.
+#
+# The root is CLAUDE_PROJECT_DIR, else the repository the current directory is in, else the current directory; for
+# a linked git worktree, the main working tree. The code is in the worktree the current directory is in, when it
+# belongs to the same repository; else in the root's. A task's own worktree is its own root: quorum-branch start
+# --worktree moves the task's folder into the worktree's .tasks/ and links it from the main tree's, because Claude
+# Code lets a session it has moved into a worktree write only inside it. Everyone else reaches the task through the
+# main tree's .tasks/<slug> link.
 # Bash 3.2 compatible (macOS default).
 set -euo pipefail
 
@@ -16,24 +28,56 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # Through quorum-git, so a sandbox that hides the real git behind Apple's launcher doesn't break this script.
 git() { "$HERE/quorum-git" "$@"; }
 
-repo_root() {
-  if [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "$CLAUDE_PROJECT_DIR" ]; then
-    printf '%s\n' "$CLAUDE_PROJECT_DIR"
-  elif git rev-parse --show-toplevel >/dev/null 2>&1; then
-    git rev-parse --show-toplevel
-  else
-    pwd
-  fi
+toplevel() { git -C "$1" rev-parse --show-toplevel 2>/dev/null; }
+common_dir() { git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null; }
+# A linked worktree has its own git dir under the main one's worktrees/.
+is_linked() {
+  local d c
+  d=$(git -C "$1" rev-parse --path-format=absolute --git-dir 2>/dev/null) && c=$(common_dir "$1") && [ "$d" != "$c" ]
+}
+# The main working tree of the repository $1 is in: the folder holding its .git.
+main_tree() {
+  local c; c=$(common_dir "$1")
+  case "$c" in */.git) dirname "$c" ;; *) printf '%s\n' "$1" ;; esac
 }
 
 valid_slug() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$'; }
 
-ROOT=$(repo_root)
+if [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "$CLAUDE_PROJECT_DIR" ]; then project=$CLAUDE_PROJECT_DIR
+elif project=$(toplevel .); then :
+else project=$(pwd)
+fi
+ROOT=$project
+if is_linked "$project"; then ROOT=$(main_tree "$project"); fi
+MAIN=$ROOT
+
+# The code: the first of the current directory's worktree, the project's, and the root that is in the root's repo.
+CODE=$ROOT
+if repo=$(common_dir "$ROOT"); then
+  for dir in . "$project"; do
+    top=$(toplevel "$dir") || continue
+    if [ "$(common_dir "$top")" = "$repo" ]; then CODE=$top; break; fi
+  done
+fi
+if [ "$CODE" != "$ROOT" ] && is_linked "$CODE" && [ -d "$CODE/.tasks" ] && [ ! -L "$CODE/.tasks" ]; then ROOT=$CODE; fi
 TASKS="$ROOT/.tasks"
 
 case "${1:-}" in
   --root)
     printf '%s\n' "$ROOT"; exit 0 ;;
+  --code)
+    printf '%s\n' "$CODE"; exit 0 ;;
+  --main)
+    printf '%s\n' "$MAIN"; exit 0 ;;
+  --list)
+    for file in "$TASKS"/*/state.md; do
+      [ -f "$file" ] || continue
+      slug=$(basename "$(dirname "$file")")
+      [ "$("$HERE/quorum-state" --task "$slug" get kind 2>/dev/null)" = review ] && continue
+      printf '%s\t%s\t%s\n' "$slug" "$("$HERE/quorum-state" --task "$slug" get status 2>/dev/null)" \
+        "$("$HERE/quorum-state" --task "$slug" get worktree 2>/dev/null)"
+    done
+    exit 0 ;;
   --set)
     slug=${2:-}
     [ -n "$slug" ] || die "--set needs a slug"
@@ -47,7 +91,7 @@ case "${1:-}" in
   *) die "unknown argument: $1" ;;
 esac
 
-branch=$(git -C "$ROOT" branch --show-current 2>/dev/null || true)
+branch=$(git -C "$CODE" branch --show-current 2>/dev/null || true)
 case "$branch" in
   feat/*|fix/*)
     slug=${branch#*/}
@@ -56,7 +100,7 @@ case "$branch" in
     fi ;;
 esac
 
-if [ -f "$TASKS/.active" ]; then
+if ! is_linked "$CODE" && [ -f "$TASKS/.active" ]; then
   slug=$(head -n 1 "$TASKS/.active" | tr -d '[:space:]')
   if [ -n "$slug" ] && valid_slug "$slug" && [ -d "$TASKS/$slug" ]; then
     printf '%s\n' "$slug"; exit 0

@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: run-worktree-second-task
+description: With one task in review in its own git worktree, /quorum:run starts and specs a second task in the main working tree, and leaves the first task's worktree, branch, and state alone.
+tags: [run, worktree]
+context:
+  scaffold_script: scaffold.sh

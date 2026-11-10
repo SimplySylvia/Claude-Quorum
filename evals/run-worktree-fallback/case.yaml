@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: run-worktree-fallback
+description: In a host with no EnterWorktree tool (plugin evals), /quorum:run --worktree still makes the task's git worktree inside Claude Code's sandbox, then removes it, says why, and builds the task in place to READY with a proof at HEAD and a drafted PR.
+tags: [run, worktree]
+context:
+  scaffold_script: scaffold.sh

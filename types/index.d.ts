@@ -12,7 +12,7 @@ export type Round = { n: number; findings: Findings | null; candidates: number |
 export type KeptFinding = { tag: 'IMPORTANT' | 'NIT' | 'PRE-EXISTING'; loc: string; title: string; confidence: number | null }
 
 // The pane's foldable sections. Each opens by itself while it holds a problem; a click overrides that.
-export type Section = 'requirements' | 'checks' | 'rounds' | 'reviews' | 'spend' | 'agents'
+export type Section = 'tasks' | 'requirements' | 'checks' | 'rounds' | 'reviews' | 'spend' | 'agents'
 
 // One reviewer of the current round: `findings` is null until its reply is saved.
 export type Reviewer = { role: string; findings: Findings | null }
@@ -103,6 +103,10 @@ export type Review = {
   kept: KeptFinding[]
 }
 
+// Another unfinished task in this repo, for the pane's list: its status and tier, and the git worktree its code is
+// in ('' when it builds in the main working tree, or hasn't been built yet).
+export type OtherTask = { slug: string; status: string; risk: string; worktree: string; changedAt: number }
+
 // The task branch's pull request on GitHub, as `gh pr list` last reported it. NONE: no PR yet; UNKNOWN: gh is
 // missing, signed out, or failed.
 export type PullRequest = {
@@ -140,6 +144,8 @@ declare module 'claude-code' {
       pr: Shaped<PullRequest | null>
       // The newest reviews first, a few at most.
       reviews: Shaped<Review[]>
+      // Other unfinished tasks, newest first, a few at most.
+      others: Shaped<OtherTask[]>
       now: number
       // Sections the person opened or closed, by `<slug>:<section>`; absent, the section's default.
       sections: Shaped<Record<string, boolean>>

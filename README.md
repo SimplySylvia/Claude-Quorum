@@ -85,6 +85,7 @@ Or let one command take a task through every stage, stopping only where you must
 ```
 /quorum:run Add a CSV export to the sales report   # spec → plan → build → review → blind test → PR draft
 /quorum:run --fast Fix the typo in the help text   # LOW only: spec → build → one reviewer → PR draft
+/quorum:run --worktree Add a CSV export             # build in its own git worktree; keep working here meanwhile
 /quorum:run                                        # continue the active task from wherever it stopped
 ```
 
@@ -188,6 +189,34 @@ the Logic & Edge-Case Hunter alone (still with the voter and the round cap), the
 ceremony, not checks: the Stop hook and the proof before `READY` hold as always. A task the spec puts at MEDIUM or
 HIGH takes the full pipeline instead. The dashboard shows the Plan stage as skipped.
 
+## More than one task at a time
+
+With `--worktree` (`/quorum:build --worktree` or `/quorum:run --worktree`), or the **A worktree per task** option
+for every task, the build checks the task's branch out in its own git worktree, at `.claude/worktrees/<slug>`. Then
+it runs the repo's **Setup** command there (from `CLAUDE.md`'s Verification Commands, for example
+`pnpm install --frozen-lockfile`) and moves the session in. Every stage after that works in the worktree, and your
+main working tree stays as it was. While one task is in review or a blind test, you can spec, plan, or build another
+in the main working tree or in another session.
+
+- **One `.tasks/`.** The task's folder moves into its worktree, because Claude Code lets a session in a worktree
+  write only inside it. The main working tree's `.tasks/<slug>` becomes a link to it, so you, other sessions, and
+  the dashboard still find every task in one place. Git never sees either. The dashboard shows the task of the
+  worktree you're in, and lists the repo's other unfinished tasks.
+- **Each place has its own active task.** In a worktree, it's the worktree's branch. In the main working tree, it's
+  the last task started there. `/quorum:run` with no request asks which unfinished task to continue.
+- **The Stop hook checks the right tree.** It runs the task's worktree's `verify-completion.sh`, and a blind test
+  only blinds the sessions working on its own task.
+- **It needs the bootstrap committed.** A worktree gets committed files only, so `CLAUDE.md`, `REVIEW.md`, and
+  `.claude/hooks/verify-completion.sh` must be committed. If they aren't, the build says so and builds in the main
+  working tree.
+- **Cleanup asks first.** A task's worktree stays until its PR merges. The next task Quorum starts then offers to
+  remove it (`git worktree remove`; the branch stays), and removes nothing without your yes. The task's folder moves
+  back into the main working tree first, with its whole history.
+
+Two tasks' blind tests at once can clash if both start the app on the same port. A lesson
+`/quorum:codify-lesson` writes goes into the main working tree's `REVIEW.md`; a worktree's reviewers see it once
+it's committed and the task's branch has it.
+
 ## Reviewing any diff
 
 `/quorum:review` runs the review loop's reviewers and voter on a diff that isn't a Quorum task: the current
@@ -251,7 +280,7 @@ confirm. The tier decides how many layers the task gets:
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/risk-tiers-dark.svg">
-    <img src="assets/risk-tiers-light.svg" alt="Risk tiers. LOW, for changes a user can't reach: research only with --research, two spec reviewers, one plan reviewer and one code reviewer plus one for each of tests, UI, or docs it touches, no security pass, no blind test, no human review if green. MEDIUM, for anything a user can see or run: research, two spec reviewers, four to six plan reviewers and four to six code reviewers with the voter, a security pass only with security_on_medium, a blind test with live accessibility checks and friction triage, and a focused human review. HIGH, for data, money, or security: everything MEDIUM gets, the security reviewer on the plan, a blocking security pass, and an architectural sign-off." width="880">
+    <img src="assets/risk-tiers-light.svg" alt="Risk tiers. LOW, for changes a user can't reach: research only with --research, two spec reviewers, one plan reviewer and one code reviewer plus one for each of tests, UI, or docs it touches, no security pass, no blind test, no human review if green. MEDIUM, for anything a user can see or run: research, two spec reviewers, four to six plan reviewers and four to six code reviewers with the voter, a security pass only with security_on_medium, a blind test with live accessibility checks and friction triage, and a focused human review. HIGH, for data, money, or security: everything MEDIUM gets, the security reviewer on the plan, a blocking security pass, and an architectural sign-off. /quorum:run --fast gives a LOW task no spec reviewers, no plan round, and one code reviewer plus the voter; the checks and the proof stay." width="880">
   </picture>
 </p>
 
@@ -354,6 +383,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `stop-verify.sh`, `record-pr.sh`, and `dashboard/`, the dashboard's hooks module |
 | `types/` | The type contract for the values the dashboard keeps in the session |
 | `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state`, `quorum-reviews`, `quorum-lessons`, `quorum-git` (on the Bash PATH while the plugin is enabled) |
+| `libexec/` | `git`, which `quorum-git` puts first on PATH when it runs a real git by full path, so git's own child processes (`git worktree add` starts some) reach it too |
 | `tests/` | bats tests for every hook and helper, `claude plugin test` tests for the dashboard, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
 | `evals/` | `claude plugin eval` suite: risk tiering, one case per agent, voter false-alarm drops, blind-mode source reads, a near-miss |
 | `assets/` | The README's animations and diagrams, in light and dark versions; `assets/src/diagrams.py` draws the diagrams, and `assets/src/dashboard-demo.sh` builds a demo task for the dashboard |

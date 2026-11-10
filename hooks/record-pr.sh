@@ -20,7 +20,9 @@ output=$(printf '%s' "$input" | jq -r '.tool_response | if type == "object" then
 url=$(printf '%s' "$output" | grep -Eo 'https?://[^[:space:]"]+/pull/[0-9]+' | head -n 1)
 [ -n "$url" ] || exit 0
 
-export CLAUDE_PROJECT_DIR=${CLAUDE_PROJECT_DIR:-$(pwd)}
+# The task of the directory the command ran in: a task's worktree resolves to that task.
+cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
+if [ -n "$cwd" ] && [ -d "$cwd" ]; then cd "$cwd" 2>/dev/null || exit 0; fi
 task=$("$BIN/quorum-active-task" 2>/dev/null) || exit 0
 "$BIN/quorum-state" --task "$task" set pr "$url" >/dev/null 2>&1 || true
 exit 0

@@ -11,6 +11,11 @@ whose status is `READY` or `AWAITING-HUMAN`, and say which. Work from the repo r
 
 Don't run git commands that change the working tree, index, or history here, and don't push or create the PR.
 
+**Worktree.** If `quorum-state --task <slug> get worktree` prints a path and `quorum-active-task --code` prints
+another, the task's branch is checked out in its own git worktree: call `EnterWorktree` with that `path` first, so
+the writer reads that branch and the push commands run from it. There, run one simple command per Bash call:
+Claude Code refuses a command it can't show stays inside the worktree.
+
 1. **Check the status.** `quorum-state --task <slug> get status` must be `READY` or `AWAITING-HUMAN`. Otherwise
    say which command comes next (`pipeline-laws` has the stage map) and stop.
 2. **Check the proof.** `.tasks/<slug>/proof-final.md` must exist with no failed check: `Result: ALL PASS`, or
@@ -29,7 +34,8 @@ Don't run git commands that change the working tree, index, or history here, and
    > reasons>. List them as not run.">
 
 4. **Save and show.** Save its reply verbatim to `.tasks/<slug>/pr.md`, and the description alone (everything
-   after the `---` line) to `.tasks/<slug>/pr-body.md`. Show the reply.
+   after the `---` line) to `.tasks/<slug>/pr-body.md`, both by that relative path. Check that both are there
+(`ls .tasks/<slug>/pr.md .tasks/<slug>/pr-body.md`) before going on. Show the reply.
 5. **Next steps for the user,** without running them:
    - If commits are listed under "Drop before merging", give the exact command to remove them (for example
      `git rebase --onto <sha> <sha>^`, or an interactive rebase they run themselves), and say to rerun the fast
@@ -38,3 +44,5 @@ Don't run git commands that change the working tree, index, or history here, and
      `gh pr create --title "<title>" --body-file .tasks/<slug>/pr-body.md`). When `gh pr create` runs in this
      session, Quorum records the new PR's URL as the task's `pr`. If they open it another way, give
      `quorum-state --task <slug> set pr <url>` to record it.
+   - If the task has a worktree, that it stays until the PR merges; the next task Quorum starts offers to remove
+     it then.

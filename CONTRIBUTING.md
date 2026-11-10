@@ -58,6 +58,8 @@ each run's workspace and bootstraps for Quorum.
 | `review-standalone-finds-bug` | `/quorum:review` on a branch with no task keeps the planted bug through the voter and records the run in `.tasks/review-<id>/` |
 | `run-low-to-ready` | `/quorum:run --yes` takes a LOW task through every stage to `READY`, with a proof at HEAD and a drafted PR, and pushes nothing |
 | `run-fast-low` | `/quorum:run --fast --yes` takes a LOW task to `READY` with no spec reviewers, no plan round, and the Logic Hunter as the only reviewer, with a proof at HEAD and a drafted PR |
+| `run-worktree-fallback` | Evals offer no `EnterWorktree`, so `/quorum:run --worktree --yes` makes the task's worktree inside the sandbox, removes it, says why, and builds the LOW task in place to `READY` |
+| `run-worktree-second-task` | With one task in review in its own worktree, `/quorum:run` specs a new task in the main working tree and leaves the first task alone |
 | `run-high-asks-tier` | Even with `--yes`, `/quorum:run` asks the user to confirm a HIGH tier and builds nothing before an answer |
 | `nearmiss-no-auto-review-loop` | An ordinary "look at my commit" request never starts a Quorum command |
 
@@ -100,7 +102,8 @@ motion, to viewers who ask for reduced motion.
 
 ## The dashboard demo
 
-`assets/src/dashboard-demo.sh` builds a repo whose `.tasks/` holds one MEDIUM task partway through Quorum, so you
+`assets/src/dashboard-demo.sh` builds a repo whose `.tasks/` holds one MEDIUM task partway through Quorum, and a
+LOW one building in its own git worktree for the pane's **Other tasks** list, so you
 can see the dashboard and the band above the prompt without running a real task, and screenshot them for the README. It writes
 every file as the skills would have saved it and calls no model:
 

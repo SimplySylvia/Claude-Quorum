@@ -12,6 +12,11 @@ fixes. Your job is to give each of them exactly the right inputs, keep the recor
 Work on the active task (`quorum-active-task`) from the repo root. Use `quorum-state`, `quorum-branch`, and
 `quorum-findings` (on your PATH) for state, ranges, and counting; never hand-edit `state.md` frontmatter.
 
+**Worktree.** If `quorum-state get worktree` prints a path and `quorum-active-task --code` prints another, the
+task's code is in its own git worktree: call `EnterWorktree` with that `path` first, so you and the agents you start
+work there. In a worktree, run one simple command per Bash call, with no `&&`, pipes into `bash` or `python`, or
+variables in a git command: Claude Code refuses a command it can't show stays inside the worktree.
+
 Don't run git commands that change the working tree, index, or history here (`stash`, `reset`, `checkout`, `commit`,
 `rebase`); agents make the commits. Read-only git (`diff`, `log`, `status`, `show`) is fine.
 Settings: `max_rounds` = <max_rounds>, `nit_cap` = <nit_cap>.

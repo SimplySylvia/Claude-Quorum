@@ -6,7 +6,8 @@ setup() {
   make_repo
   FAKE="$BATS_TEST_TMPDIR/fake"; mkdir -p "$FAKE/shim" "$FAKE/real"
   printf '#!/bin/sh\necho "xcode-select: Failed to locate '"'"'git'"'"'" >&2\nexit 72\n' > "$FAKE/shim/git"
-  printf '#!/bin/sh\n[ "$1" = --version ] && { echo "git version 9"; exit 0; }\necho "real git: $*"\n' > "$FAKE/real/git"
+  # The "real" git starts git again from PATH for `child`, as git worktree add does.
+  printf '#!/bin/sh\n[ "$1" = --version ] && { echo "git version 9"; exit 0; }\n[ "$1" = child ] && exec git --version\necho "real git: $*"\n' > "$FAKE/real/git"
   chmod +x "$FAKE/shim/git" "$FAKE/real/git"
 }
 teardown() { cleanup_repo; }
@@ -33,4 +34,9 @@ teardown() { cleanup_repo; }
   run env PATH="$FAKE/shim:$BIN:/usr/bin:/bin" QUORUM_GIT_CANDIDATES="$FAKE/real/git" CLAUDE_PROJECT_DIR="$WORK" "$BIN/quorum-branch" default
   [ "$status" -eq 0 ]
   [[ "$output" == *"real git: symbolic-ref"* ]]
+}
+
+@test "a git the candidate starts as a child process runs the candidate too, not the broken PATH git" {
+  run env PATH="$FAKE/shim:/usr/bin:/bin" QUORUM_GIT_CANDIDATES="$FAKE/real/git" "$BIN/quorum-git" child
+  [ "$status" -eq 0 ]; [ "$output" = "git version 9" ]
 }

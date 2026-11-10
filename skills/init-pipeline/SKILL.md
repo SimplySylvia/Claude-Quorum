@@ -27,7 +27,7 @@ Templates live in `${CLAUDE_PLUGIN_ROOT}/skills/init-pipeline/templates/`. The `
 ## 2. Detect the stack
 
 Run `quorum-detect-stack` and show the user a short table: stack, package manager, monorepo tool, and for each of
-build, typecheck, lint, test, dev: the command and where it came from (`sources`). Detection only reads files.
+setup, build, typecheck, lint, test, dev: the command and where it came from (`sources`). Detection only reads files.
 
 ## 3. Confirm the commands
 
@@ -35,6 +35,9 @@ build, typecheck, lint, test, dev: the command and where it came from (`sources`
   apply. For a `null` command, ask what to use, or "none".
 - In a monorepo (`monorepo` is `nx` or `turbo`), point out that whole-repo commands can be slow, and offer the
   affected-only form if the user wants it (for example `npx nx affected -t test`).
+- **Setup** is what a fresh checkout needs before the checks can run, usually installing dependencies from the
+  lockfile. A task built in its own git worktree (the `worktrees` option, or `--worktree`) runs it there first.
+  "none" is fine when the checks need nothing installed.
 - The fast checks are **typecheck, lint, and test**. At least one must be set, or the Stop hook has nothing to run;
   if all three are "none", stop and explain.
 
@@ -65,6 +68,8 @@ confirm before writing (skip with `--yes`).
 ## 6. Write
 
 Write the files, `chmod +x .claude/hooks/verify-completion.sh`, and `mkdir -p .tasks`. Don't commit; the user decides.
+Say that a task can only get its own git worktree once `CLAUDE.md`, `REVIEW.md`, and
+`.claude/hooks/verify-completion.sh` are committed: a worktree gets committed files only.
 Claude Code treats `.claude/` as a protected folder and asks before writing there; tell the user to expect that
 prompt. If the write is refused, don't write the other files either: a half-set-up repo is worse than none. Say
 what's left to do.
