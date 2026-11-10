@@ -216,7 +216,7 @@ While a task is active, Quorum shows where it is without you asking:
 <sub>Both are the demo task from `assets/src/dashboard-demo.sh` (see [CONTRIBUTING.md](CONTRIBUTING.md)): mid-review, and
 finished with its PR open.</sub>
 
-- **Status line:** `Quorum · csv-export · IN_REVIEW · MEDIUM · round 2/3`, plus pending findings and, once opened,
+- **Status line:** `quorum: csv-export · IN_REVIEW · MEDIUM · round 2/3`, plus pending findings and, once opened,
   the PR.
 - **Above the prompt:** the stage rail, `✓ Spec › ✓ Plan › ✓ Build › ● Review r2/3 › ○ Blind test › ○ PR`, how many
   of the round's reviewers have replied and how many checks pass (`reviewers 3/4 · checks 6/7`), the next command,

@@ -49,6 +49,8 @@ copy with `/plugin marketplace update`.
 
 ### Fixed
 
+- The status line and toasts said "Quorum" twice (`quorum: Quorum · csv-export · …`): Claude Code already draws
+  them under the plugin's name. They now start with the task's slug.
 - Quorum's helpers (`quorum-branch`, `quorum-state`, `quorum-active-task`, the session hook) failed where a sandbox
   hides the real git behind Apple's `/usr/bin/git` launcher, and `quorum-state` then skipped its check that the
   proof ran at HEAD. A new `quorum-git` runs git, falling back to a real git by full path; the helpers go through it,

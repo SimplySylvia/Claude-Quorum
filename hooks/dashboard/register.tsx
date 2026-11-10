@@ -205,9 +205,10 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
 // The task's PR as GitHub last reported it, else as state.md records it.
 const prOf = (t: Snapshot, known: PullRequest | null) => (known?.slug === t.slug ? known : prFromUrl(t.slug, t.prUrl))
 
+// Claude Code draws the status line and toasts under the plugin's name ("quorum"), so neither repeats it.
 function statusLine(t: Snapshot | null, known: PullRequest | null): string | undefined {
   if (!t) return undefined
-  const parts = [`Quorum · ${t.slug}`, t.status || 'no status', t.risk]
+  const parts = [t.slug, t.status || 'no status', t.risk]
   if (t.round > 0) parts.push(`round ${t.round}/${t.maxRounds}`)
   if (t.pending > 0) parts.push(`${t.pending} pending`)
   if (isPrStage(t.status)) parts.push(prDetail(prOf(t, known), t.prDrafted))
@@ -305,7 +306,7 @@ async function refresh($: EngineInterface, maxRounds: number, forcePr = false): 
   if (after) void lookupPr($, after, forcePr).catch(() => undefined)
   const message = after && TOASTS[after.status]
   if (message && before?.slug === after.slug && before.status !== after.status) {
-    $.ui.toast(`Quorum · ${after.slug}: ${message}`)
+    $.ui.toast(`${after.slug}: ${message}`)
   }
   return after
 }

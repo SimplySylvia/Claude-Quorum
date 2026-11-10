@@ -271,7 +271,7 @@ test('the status line, band and pane show the active task', async ($, on) => {
   const seen = world(on, repo('IN_REVIEW'))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  expect(seen.status.at(-1)).toBe('Quorum · export-csv · IN_REVIEW · MEDIUM · round 2/3 · 1 pending')
+  expect(seen.status.at(-1)).toBe('export-csv · IN_REVIEW · MEDIUM · round 2/3 · 1 pending')
   expect(seen.opened).toBe(1)
 
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -314,7 +314,7 @@ test('a status change toasts once, and only for statuses worth it', async ($, on
 
   files['.tasks/export-csv/state.md'] = state('CONVERGED')
   await $.tool.call({ tool: 'Bash', command: 'quorum-state set status CONVERGED' })
-  expect(seen.toasts).toEqual(['Quorum · export-csv: review converged'])
+  expect(seen.toasts).toEqual(['export-csv: review converged'])
 
   // An unrelated command doesn't re-read.
   files['.tasks/export-csv/state.md'] = state('HALTED')
@@ -325,7 +325,7 @@ test('a status change toasts once, and only for statuses worth it', async ($, on
 test('task files are read from the project root, not the working directory', async ($, on) => {
   const seen = world(on, repo('IN_REVIEW'), '/work/repo')
   await $.session.start({ cwd: '/work/repo/app', surface: 'terminal', isInteractive: true })
-  expect(seen.status.at(-1)).toBe('Quorum · export-csv · IN_REVIEW · MEDIUM · round 2/3 · 1 pending')
+  expect(seen.status.at(-1)).toBe('export-csv · IN_REVIEW · MEDIUM · round 2/3 · 1 pending')
 })
 
 test('with no task the band is the engine\'s and the status line is clear', async ($, on) => {
@@ -535,7 +535,7 @@ test('a finished task shows its PR from GitHub, asking again only after the TTL 
   await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "x" --body-file .tasks/export-csv/pr-body.md' })
   await settle()
   expect(calls.length).toBe(2)
-  expect(seen.status.at(-1)).toBe('Quorum · export-csv · AWAITING-HUMAN · MEDIUM · round 2/3 · 1 pending · PR #33807 open')
+  expect(seen.status.at(-1)).toBe('export-csv · AWAITING-HUMAN · MEDIUM · round 2/3 · 1 pending · PR #33807 open')
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /^PR #33807 open$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^https:\/\/github\.com\/o\/r\/pull\/33807$/ })).toBeDefined()
