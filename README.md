@@ -222,29 +222,34 @@ finished with its PR open.</sub>
   of the round's reviewers have replied and how many checks pass (`reviewers 3/4 · checks 6/7`), the next command,
   and a **Dashboard** button.
 - **A dashboard pane**, which opens by itself when a session starts on a task and when a `/quorum:*` command runs;
-  `/quorum-dashboard` shows or hides it:
-  - **The task:** its title and goal from `rd.md`, so it's clear what the work is for.
-  - **Now:** what the current stage is doing. In spec, plan, and code review, each reviewer the round runs for the
-    task's tier, as waiting, running (with its time), or done with its findings, then the voter's result and what it
-    means for the round. In the build, the builder and the prover. In the blind test, whether the blind user reached
-    the goal, its blockers and friction, and the accessibility, security, and triage reports.
-  - **Requirements:** each numbered requirement in `rd.md`, met when every `eval.md` row for it passes in the
-    latest proof, failing when one fails, and flagged when no row checks it; then what's out of scope (the
-    non-goals). When no proof file was saved but the round log says every check passed, the requirements and
-    checks are marked, muted, as "reported passing" rather than proven.
-  - **Checks:** every `eval.md` row and the fast checks, each passing, failing, or not run in the latest proof
-    (`proof-final.md`, else `proof-build.md`), with the commit it ran at, flagged when that's older than HEAD;
-    Stop-hook blocks; pending findings.
-  - **The PR:** once the task is `READY` or `AWAITING-HUMAN`, the dashboard asks GitHub about the PR `state.md`
-    records (set when `gh pr create` runs in the session), or else the branch's newest PR, at most every 2 minutes
-    and right after a `gh pr` command or a push. It shows the PR open, merged, or closed with its link, or that
-    `pr.md` is drafted and no PR is open yet. Without `gh`, or signed out, it shows the recorded PR's number and
-    link, or whether `pr.md` is drafted.
-  - **Stages**, each with its outcome; each **review round**'s findings and how many the voter kept; and any other
-    Quorum agents running or finished.
-  - **Spend:** how many Quorum agents ran since the last `/quorum:*` command, the tokens they used (in, of which
-    cached, and out, added up from each request), and how many ran on each model, which shows the
-    [model choices](#models) at work.
+  `/quorum-dashboard` shows or hides it. It's two cards and a list of sections that fold:
+  - **The task card:** its title (the ticket id to the right) and goal from `rd.md`, so it's clear what the work is
+    for; the slug, status, and risk tier; a stepper through the stages (`✓Spec ─ ✓Plan ─ ✓Build ─ ●Review 2/3 ─
+    ○Blind test ─ ○PR`); what the stepper can't say (the plan's review rounds and approval, the blind-test runs, a
+    drafted `pr.md`); and the task's PR, once there is one, as a link with a copy button. Once the task is `READY` or
+    `AWAITING-HUMAN`, the dashboard asks GitHub about the PR `state.md` records (set when `gh pr create` runs in the
+    session), or else the branch's newest PR, at most every 2 minutes and right after a `gh pr` command or a push.
+    Without `gh`, or signed out, it shows the recorded PR, or whether `pr.md` is drafted.
+  - **The Now card:** what the current stage is doing, its border amber when the task waits on you and red when it's
+    halted or escalated. In spec, plan, and code review, each reviewer the round runs for the task's tier, as
+    waiting, running (with its time), or done with its findings; then the voter's result, each finding it kept (a
+    severity badge, its `file:line` with a copy button, its Pattern Category and confidence), and what that means for
+    the round. In the build, the builder and the prover. In the blind test, whether the blind user reached the goal,
+    its blockers and friction, and the accessibility, security, and triage reports.
+  - **▶ Next:** a button under the Now card that puts the next command in your prompt, for you to send, change, or
+    add to. It never sends it: every Quorum command is still yours to start. Anything you'd typed stays, after the
+    command.
+  - **Sections that fold**, one row each, with a summary: **Requirements** (each one met, failing, or with no check
+    in `eval.md`, then the non-goals), **Checks** (every `eval.md` row and the fast checks, with a PASS, FAIL, or SKIP
+    badge, from `proof-final.md`, else `proof-build.md`, with the commit it ran at), **Review rounds** (each round's
+    findings and how many the voter kept), **Spend** (how many Quorum agents ran since the last `/quorum:*` command,
+    the tokens they used, in, of which cached, and out, added up from each request, and how many ran on each model,
+    which shows the [model choices](#models) at work), and **Other agents**. Click a row to open or close it. **A
+    section opens by itself while it holds a problem**: a failed requirement or check, a requirement no check covers,
+    a proof older than HEAD or missing, Stop-hook blocks, pending findings, or a halted review, so a fold never hides
+    one. Folded, the row still names the worst of it. When no proof file was saved but the round log says every check
+    passed, requirements and checks are marked, muted, as "reported passing" rather than proven.
+  - Rows and cards highlight under the pointer in a fullscreen terminal and on desktop.
 - **Toasts** when a task converges, halts, escalates, or is ready for you.
 
 The pane sits beside the chat in a wide fullscreen terminal and above the prompt otherwise. Opened by itself, it

@@ -3,6 +3,24 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
+## Unreleased
+
+### Changed
+
+- **The dashboard pane is redesigned** as two cards and a list of sections that fold. A task card holds the title
+  (with the ticket id to the right), goal, status, a stepper through the stages, and the PR as a link with a copy
+  button; a Now card, its border amber when the task waits on you and red when it's stuck, holds what the stage is
+  doing and each finding the voter kept, with a severity badge, its `file:line` and a copy button, and its confidence.
+  Requirements, Checks (with PASS, FAIL, and SKIP badges), Review rounds, Spend, and Other agents fold to one row each
+  and open on a click; a section opens by itself while it holds a problem, so a fold never hides one. Rows and cards
+  highlight under the pointer where the surface has one. The separate Stages list is gone: the stepper and one line of
+  stage details replace it.
+
+### Added
+
+- **▶ Next** in the dashboard: a button that puts the next Quorum command in the prompt, for you to send, change, or
+  add to, keeping anything you'd typed after it. It never sends the command.
+
 ## 0.5.0 (2026-11-09)
 
 ### Added
