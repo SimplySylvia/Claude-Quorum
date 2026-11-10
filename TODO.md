@@ -36,7 +36,7 @@ and the stage commands share them. Still to do:
 
 ## 3. A fast path for LOW tasks: what's left
 
-`/quorum:run --fast` is built (unreleased). Still to do:
+`/quorum:run --fast` shipped in 0.8.0. Still to do:
 
 - **Run its eval,** `run-fast-low`, which makes real model calls.
 - **Whether `run` should offer it by itself** when the spec settles on LOW, instead of waiting for the flag.
