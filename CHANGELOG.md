@@ -3,7 +3,7 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
-## Unreleased
+## 0.9.0 (2026-11-10)
 
 ### Added
 
@@ -21,17 +21,20 @@ copy with `/plugin marketplace update`.
     blind another's sessions.
   - The PR hook records the PR on the worktree's task.
   - `quorum-state` records the task's `worktree`, and checks the proof against its HEAD.
-  - `quorum-branch remove` (which moves the task's folder back first) and `quorum-branch merged` handle cleanup: once a task's work merges, the next task Quorum
-    starts offers to remove its worktree.
+  - `quorum-branch remove` (which moves the task's folder back first) and `quorum-branch merged` handle cleanup:
+    once a task's work merges, the next task Quorum starts offers to remove its worktree.
   - The dashboard shows the task of the worktree you're in, and lists the repo's other unfinished tasks.
-- **Fixed: `git worktree add` in Claude Code's macOS sandbox.** git starts some subcommands as child processes found
-  on PATH, and there they hit Apple's broken launcher even when `quorum-git` ran a real git. `quorum-git` now puts
-  the plugin's `libexec/git`, which runs the same real git, first on PATH.
 - **When the host has no `EnterWorktree`** (plugin evals don't offer it), the build removes the new worktree, says
   why, and builds in place.
 - **A setup command.** `quorum-detect-stack` proposes one from the lockfile (for example `pnpm install
   --frozen-lockfile`, `npm ci`, `uv sync`), and `/quorum:init-pipeline` records it as **Setup** in `CLAUDE.md`'s
   Verification Commands. It also says that worktrees need the bootstrap files committed.
+
+### Fixed
+
+- **`git worktree add` in Claude Code's macOS sandbox.** git starts some subcommands as child processes found on
+  PATH, and there they hit Apple's broken launcher even when `quorum-git` ran a real git. `quorum-git` now puts the
+  plugin's `libexec/git`, which runs the same real git, first on PATH.
 
 ## 0.8.0 (2026-11-10)
 
