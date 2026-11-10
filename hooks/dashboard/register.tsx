@@ -251,6 +251,10 @@ function stageDetails(t: Snapshot, known: PullRequest | null): string {
   ].filter(Boolean).join(' · ')
 }
 
+// A known PR's state in a word or two, for after its linked number: '' when GitHub couldn't be asked.
+const prState = (p: PullRequest) =>
+  p.state === 'MERGED' ? 'merged' : p.state === 'CLOSED' ? 'closed without merging' : p.state === 'OPEN' ? (p.isDraft ? 'draft, open' : 'open') : ''
+
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 function findingsText(f: Findings): string {
@@ -644,8 +648,9 @@ export const register: Register = (on, options) => {
           {stageDetails(t, known) ? <Text dimColor wrap="truncate-end">{stageDetails(t, known)}</Text> : null}
           {known && known.number > 0 && known.url ? (
             <Box flexDirection="row" gap={1}>
-              <Text color={known.state === 'MERGED' ? 'success' : known.state === 'CLOSED' ? 'error' : 'warning'}>{prDetail(known, t.prDrafted)}</Text>
-              <Link href={known.url} label="open" />
+              {/* The PR's number is the link; its state follows, as GitHub last reported it (none when unknown). */}
+              <Link href={known.url} label={`PR #${known.number}`} />
+              {prState(known) ? <Text color={known.state === 'MERGED' ? 'success' : known.state === 'CLOSED' ? 'error' : 'warning'}>{prState(known)}</Text> : null}
               {copy('copy-pr', known.url)}
             </Box>
           ) : null}
