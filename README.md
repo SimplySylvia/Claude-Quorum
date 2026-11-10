@@ -197,6 +197,8 @@ bootstrap.
   the PR's diff, the rest in its summary. It shows you every comment and posts nothing without your yes.
 - **`--fix`** has the builder fix the kept findings in one commit. The Stop hook checks its work as it does in a
   task, so it needs `verify-completion.sh`; then it offers a review of the fix.
+- **A wrong finding becomes a rule.** `/quorum:codify-lesson` reads a review's runs as it reads a task's rounds, so
+  a false alarm the voter kept, or one it keeps dropping, can become a line in `REVIEW.md` for the next review.
 
 Each review keeps its runs in `.tasks/review-<id>/` (`review-pr-123`, `review-feat-csv-export`), apart from any
 task, so running it again on the same PR reuses its model choice. On a Quorum task's own branch it sends you to

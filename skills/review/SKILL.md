@@ -119,7 +119,9 @@ placeholders for `/quorum:init-pipeline` to fill in). Call this `<RULES>` below.
 - The `quorum-findings summary` line, then the kept findings: `[IMPORTANT]` first, then `[PRE-EXISTING]`, then
   `[NIT]`, each group from most to least confident.
 - Any `## Needs a human` items.
-- What the voter dropped, one line each with its reason, so the user can say a drop was wrong.
+- What the voter dropped, one line each with its reason, so the user can say a drop was wrong. If the user says a
+  kept finding or a drop was wrong, suggest `/quorum:codify-lesson`, which can turn it into a rule for the next
+  review.
 - Where the files are (`.tasks/<id>/run-<N>/`), and the next steps that apply: `--comment` for a PR, `--fix` when
   `[IMPORTANT]` findings survive, and `/quorum:init-pipeline` when the repo has no `REVIEW.md` (the review used
   the generic rules).

@@ -11,14 +11,29 @@ A lesson is only learned once it changes what the next review checks. Work from 
 
 ## 1. Find the lesson
 
-Use `$ARGUMENTS` if the user described it. Otherwise look at the most recent task (the active one, or the newest
-folder in `.tasks/`):
+Use `$ARGUMENTS` if the user described it. Otherwise look at the most recent task or review: the active task, or
+the folder in `.tasks/` whose `state.md` changed last. A folder whose `state.md` says `kind: review` is a standalone
+review (`/quorum:review`); see [From a review](#from-a-review).
 
 - `state.md`'s round log, and `.tasks/<slug>/review/round-*/survivors.md` (kept findings): a **Pattern Category** that came back
   in more than one round, or that the builder had to fix in several places.
 - `## Dropped` sections in `votes.md` (the voter's full reply): the **same false alarm** dropped more than once, by the same reason.
 - `.tasks/<slug>/blind/`: a blocker a reviewer should have caught.
 - Corrections the user made in this conversation.
+
+### From a review
+
+A standalone review keeps each run's files in `.tasks/review-<id>/run-<N>/`, named as a task's round files are, and
+`state.md`'s log has a block per run. Look for:
+
+- `survivors.md` across runs: a **Pattern Category** that came back in more than one run, or in this review and a
+  task.
+- `## Dropped` sections in `votes.md`: the **same false alarm** dropped more than once.
+- A kept finding the user says is wrong (in this conversation, or a reply on the PR they paste): a false alarm the
+  voter let through. The rule says what not to flag, and why.
+
+A review has no `rd.md`, so check the lesson against the code the range touched (`quorum-state --task <id> get
+range`), not a spec.
 
 If nothing qualifies, say so and stop. Don't invent a lesson.
 
@@ -46,7 +61,8 @@ Check it isn't already there: `quorum-learned-rule list`.
 Show the user the rule and where it would go, and ask. **Never write without a yes**, even if they passed `--yes`
 to another command.
 
-- Project rule: `quorum-learned-rule add "<rule>" "<slug>, <YYYY-MM-DD>"`. Exit 3 means it's already there.
+- Project rule: `quorum-learned-rule add "<rule>" "<slug or review id>, <YYYY-MM-DD>"`. Exit 3 means it's already
+  there.
 - Universal rule: append it to `~/.claude/CLAUDE.md` only after a separate yes for that file.
 
 Show the line as written. If the user declines, write nothing.

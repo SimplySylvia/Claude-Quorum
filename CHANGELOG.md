@@ -3,6 +3,14 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
+## Unreleased
+
+### Added
+
+- **`/quorum:codify-lesson` learns from `/quorum:review`.** It reads a review's `run-<N>/` files and log as it reads
+  a task's rounds, so a Pattern Category that keeps coming back, a false alarm the voter keeps dropping, or a kept
+  finding you say is wrong can become a rule. The review's report suggests it when you say a finding was wrong.
+
 ## 0.7.0 (2026-11-10)
 
 ### Added

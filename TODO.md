@@ -21,8 +21,6 @@ The command itself shipped in 0.5.0. Still to do:
   ever lists live sessions, check against that.
 - **The dashboard screenshots:** see item 0; add one of a review.
 - **A `--comment` eval** against a fake `gh` (`review-standalone-finds-bug` passed on 2026-11-10).
-- **`/quorum:codify-lesson` from a review.** It reads a task's round files; let it read a review's `run-<N>/`
-  files too, so a false alarm in a PR review can become a rule.
 
 ## 2. `/quorum:run`: what's left
 
