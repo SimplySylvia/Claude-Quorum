@@ -4,7 +4,7 @@ load ../helpers
 # Each stage /quorum:run chains keeps its instructions in steps.md. Placeholders are only filled in inside a
 # SKILL.md, so a value a step uses must be given by the stage's SKILL.md and by run's.
 STAGES="spec-and-eval plan build simplify-diff review-loop blind-test pr-draft"
-VALUES="plugin root|arguments|max_rounds|nit_cap|security_on_medium|reviewer_model|helper_model"
+VALUES="plugin root|session|arguments|max_rounds|nit_cap|security_on_medium|reviewer_model|helper_model"
 
 @test "every stage has a steps.md, and its SKILL.md points to it" {
   for s in $STAGES; do
@@ -15,7 +15,7 @@ VALUES="plugin root|arguments|max_rounds|nit_cap|security_on_medium|reviewer_mod
 
 @test "no steps.md relies on a placeholder only a SKILL.md fills in" {
   for s in $STAGES; do
-    if grep -nE '\$ARGUMENTS|\$\{CLAUDE_PLUGIN_ROOT\}|\$\{user_config\.' "$REPO_ROOT/skills/$s/steps.md"; then
+    if grep -nE '\$ARGUMENTS|\$\{CLAUDE_PLUGIN_ROOT\}|\$\{CLAUDE_SESSION_ID\}|\$\{user_config\.' "$REPO_ROOT/skills/$s/steps.md"; then
       echo "$s/steps.md uses a placeholder"; return 1
     fi
   done

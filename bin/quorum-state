@@ -16,7 +16,8 @@
 # `reviewer_model` and `helper_model` are the models chosen for the task's agents (skills/pipeline-laws/models.md):
 # `inherit` or a value the Agent tool's `model` parameter accepts.
 # A standalone review (/quorum:review) keeps its state in .tasks/review-<id>/ with `kind: review`, the `range` it
-# reviewed, and status REVIEWING, FIXING (its builder is fixing the kept findings), or REVIEWED. No `kind` is a task.
+# reviewed, the `session` running it (a Claude Code session id), and status REVIEWING, FIXING (its builder is fixing
+# the kept findings), REVIEWED, or INTERRUPTED (a run that never finished; see quorum-reviews). No `kind` is a task.
 #
 # Without --task, the slug comes from quorum-active-task. The frontmatter is rewritten in canonical key order;
 # the body after the closing --- is kept as is. Values may not contain tabs or newlines. Bash 3.2 compatible.
@@ -27,10 +28,10 @@ die() { echo "quorum-state: $*" >&2; exit 1; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 # Through quorum-git, so a sandbox that hides the real git behind Apple's launcher doesn't break this script.
 git() { "$HERE/quorum-git" "$@"; }
-ORDER="slug kind range risk status round base_sha round_shas stop_blocks signoff plan_rounds plan_approved pending_findings blind_runs escalated_from reviewer_model helper_model pr"
+ORDER="slug kind range session risk status round base_sha round_shas stop_blocks signoff plan_rounds plan_approved pending_findings blind_runs escalated_from reviewer_model helper_model pr"
 LISTS=" round_shas pending_findings "
 COUNTERS=" round stop_blocks plan_rounds blind_runs "
-STATUSES=" DRAFT-AWAITING-VISUAL-SIGNOFF PLANNING BUILDING IN_REVIEW CONVERGED BLIND-TEST READY AWAITING-HUMAN HALTED ESCALATED REVIEWING FIXING REVIEWED "
+STATUSES=" DRAFT-AWAITING-VISUAL-SIGNOFF PLANNING BUILDING IN_REVIEW CONVERGED BLIND-TEST READY AWAITING-HUMAN HALTED ESCALATED REVIEWING FIXING REVIEWED INTERRUPTED "
 RISKS=" LOW MEDIUM HIGH "
 
 is_in() { case "$2" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
@@ -149,6 +150,7 @@ validate_scalar() { # key value
     risk) is_in "$2" "$RISKS" || die "unknown risk tier: $2 (LOW, MEDIUM, HIGH)" ;;
     kind) case "$2" in task|review) ;; *) die "kind must be task or review" ;; esac ;;
     range) printf '%s' "$2" | grep -Eq '^[^[:space:]]+$' || die "range must be one git range, with no spaces" ;;
+    session) printf '%s' "$2" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_-]*$' || die "session must be a session id: letters, digits, - and _" ;;
     pr) printf '%s' "$2" | grep -Eq '^https?://[^[:space:]]+/pull/[0-9]+$' || die "pr must be a pull request URL (https://github.com/<owner>/<repo>/pull/<n>)" ;;
     reviewer_model|helper_model)
       printf '%s' "$2" | grep -Eq '^[A-Za-z0-9][]A-Za-z0-9._:@/[-]*$' || die "$1 must be inherit or a model name or ID, with no spaces" ;;

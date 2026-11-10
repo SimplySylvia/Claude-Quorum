@@ -56,11 +56,16 @@ tests, internal refactors covered by tests). Ask the user to confirm or change i
 
 1. Make sure `.tasks/` is ignored (`git check-ignore -q .tasks/`). If it isn't, add `.tasks/` to
    `.git/info/exclude`, which stays local, and say so.
-2. `.tasks/<id>/` keeps every run of this review. If `.tasks/<id>/state.md` doesn't exist, create it with
-   `quorum-state --task <id> init <TIER> REVIEWING` and `quorum-state --task <id> set kind review`. Either way,
-   then `set risk <TIER>`, `set range <range>`, and `set status REVIEWING`.
-3. Let N be the number of `run-*` folders plus 1; this run's files go in `.tasks/<id>/run-<N>/`.
-4. Write the intent from step 2 to `.tasks/<id>/intent.md`, under a first line saying where it came from.
+2. Run `quorum-reviews heal ${CLAUDE_SESSION_ID} <id>`. It marks this review's last run `INTERRUPTED` if it never
+   finished, and any other review this session left unfinished, and removes a `--fix` marker one of them left. If it
+   prints ids other than `<id>`, mention them in one line.
+3. `.tasks/<id>/` keeps every run of this review. If `.tasks/<id>/state.md` doesn't exist, create it with
+   `quorum-state --task <id> init <TIER> REVIEWING`. Then, in **one** command (so the dashboard never sees a running
+   review without its session): `quorum-state --task <id> set kind review && quorum-state --task <id> set session
+   ${CLAUDE_SESSION_ID} && quorum-state --task <id> set risk <TIER> && quorum-state --task <id> set range <range> &&
+   quorum-state --task <id> set status REVIEWING`.
+4. Let N be the number of `run-*` folders plus 1; this run's files go in `.tasks/<id>/run-<N>/`.
+5. Write the intent from step 2 to `.tasks/<id>/intent.md`, under a first line saying where it came from.
 
 ## 5. Models
 
@@ -137,9 +142,9 @@ Post only `[IMPORTANT]` findings, and `[PRE-EXISTING]` or `[NIT]` ones only if t
 
 Only when `[IMPORTANT]` findings survive.
 
-1. `quorum-state --task <id> set status FIXING`, then `printf '%s\n' <id> > .tasks/.review-fix-active`. While this
-   file exists, the builder's SubagentStop hook runs `verify-completion.sh` against this review, so the builder
-   can't hand back with failing checks.
+1. `quorum-state --task <id> set status FIXING`, then `printf '%s\n%s\n' <id> ${CLAUDE_SESSION_ID} >
+   .tasks/.review-fix-active`. While this file exists, the builder's SubagentStop hook in this session runs
+   `verify-completion.sh` against this review, so the builder can't hand back with failing checks.
 2. Start `quorum:builder` with:
 
    > Standalone review, `<id>`. Fix the `[IMPORTANT]` findings in `.tasks/<id>/run-<N>/survivors.md` (run

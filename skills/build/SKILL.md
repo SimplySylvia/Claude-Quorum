@@ -13,3 +13,4 @@ that one file.
 The steps use these values. A setting that still reads as `${user_config…}` wasn't set: use its default.
 
 - `<arguments>`: `$ARGUMENTS`
+- `<session>`: `${CLAUDE_SESSION_ID}`

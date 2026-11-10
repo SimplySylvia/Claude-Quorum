@@ -18,6 +18,10 @@ Settings: `max_rounds` = <max_rounds>, `nit_cap` = <nit_cap>.
 
 Keep each round's files in `.tasks/<slug>/review/round-<N>/`.
 
+**Unfinished reviews.** First run `quorum-reviews heal <session>`. It marks any `/quorum:review` this session left
+unfinished as `INTERRUPTED`, and removes a `--fix` marker it left, which would otherwise point this task's builder
+at the review. If it prints ids, mention them in one line.
+
 **Models.** Before the first reviewer, resolve the task's reviewer model as in
 `<plugin root>/skills/pipeline-laws/models.md` (configured defaults: `reviewer_model` = <reviewer_model>, `helper_model` = <helper_model>) (`--models` in
 `<arguments>` asks again). Start every reviewer and the voter with `reviewer_model`; the builder and the prover run on

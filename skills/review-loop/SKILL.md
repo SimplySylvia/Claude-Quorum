@@ -13,6 +13,7 @@ that one file.
 The steps use these values. A setting that still reads as `${user_config…}` wasn't set: use its default.
 
 - `<plugin root>`: `${CLAUDE_PLUGIN_ROOT}`
+- `<session>`: `${CLAUDE_SESSION_ID}`
 - `<arguments>`: `$ARGUMENTS`
 - `<max_rounds>`: ${user_config.max_rounds} (default `3`)
 - `<nit_cap>`: ${user_config.nit_cap} (default `2`)

@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Tidy up after standalone reviews (/quorum:review) that never finished.
+#
+#   quorum-reviews heal SESSION [ID]
+#
+# A session runs one command at a time, so when a command starts, any review SESSION left in REVIEWING or FIXING was
+# interrupted (the session was closed, crashed, or the user pressed Esc). So was review ID, if given: it's about to
+# start a new run. heal sets each one INTERRUPTED, logs which run stopped, and prints its id.
+#
+# It also removes .tasks/.review-fix-active (the marker /quorum:review --fix leaves for the Stop hook) when SESSION
+# wrote it, or when the review it names isn't FIXING any more. A marker another session wrote while its review is
+# still FIXING stays: that session may be live, and the Stop hook only honors a marker in the session that wrote it.
+#
+# SESSION is a Claude Code session id; one that doesn't look like one (an unfilled placeholder) matches no review.
+# Bash 3.2 compatible.
+set -euo pipefail
+
+die() { echo "quorum-reviews: $*" >&2; exit 1; }
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+cmd=${1:-}
+[ "$cmd" = heal ] || die "usage: quorum-reviews heal SESSION [ID]"
+session=${2:-}
+id=${3:-}
+printf '%s' "$session" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_-]*$' || session=""
+
+ROOT=$("$HERE/quorum-active-task" --root)
+TASKS="$ROOT/.tasks"
+[ -d "$TASKS" ] || exit 0
+state() { "$HERE/quorum-state" --task "$@"; }
+
+for file in "$TASKS"/review-*/state.md; do
+  [ -f "$file" ] || continue
+  dir=$(dirname "$file"); name=$(basename "$dir")
+  [ "$(state "$name" get kind 2>/dev/null)" = review ] || continue
+  status=$(state "$name" get status 2>/dev/null) || continue
+  case "$status" in REVIEWING|FIXING) ;; *) continue ;; esac
+  owner=$(state "$name" get session 2>/dev/null || true)
+  if [ "$name" = "$id" ] || { [ -n "$session" ] && [ "$owner" = "$session" ]; }; then
+    run=0
+    for r in "$dir"/run-*; do
+      n=${r##*/run-}
+      case "$n" in ''|*[!0-9]*) continue ;; esac
+      [ "$n" -gt "$run" ] && run=$n
+    done
+    state "$name" set status INTERRUPTED
+    printf '## Run %s interrupted\nIt stopped while %s; a later command marked it INTERRUPTED.\n' "$run" "$status" | state "$name" log
+    printf '%s\n' "$name"
+  fi
+done
+
+MARKER="$TASKS/.review-fix-active"
+if [ -f "$MARKER" ]; then
+  fixing=$(sed -n 1p "$MARKER" | tr -d '[:space:]')
+  writer=$(sed -n 2p "$MARKER" | tr -d '[:space:]')
+  fixing_status=""
+  if printf '%s' "$fixing" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$' && [ -f "$TASKS/$fixing/state.md" ]; then
+    fixing_status=$(state "$fixing" get status 2>/dev/null || true)
+  fi
+  if [ "$fixing_status" != FIXING ] || { [ -n "$session" ] && [ "$writer" = "$session" ]; }; then
+    rm -f "$MARKER"
+  fi
+fi

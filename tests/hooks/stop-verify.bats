@@ -153,7 +153,7 @@ subagent_stop() { echo '{"hook_event_name":"SubagentStop","agent_type":"quorum:b
   [ "$("$BIN/quorum-state" --task review-pr-7 get stop_blocks)" = "0" ]
 }
 
-@test "review --fix: the main session's Stop ignores the marker, and a review that isn't FIXING isn't checked" {
+@test "review --fix: the main session's Stop ignores the marker, and a marker for a review that isn't FIXING is ignored" {
   mkdir -p .tasks/review-pr-7
   "$BIN/quorum-state" --task review-pr-7 init MEDIUM REVIEWED
   "$BIN/quorum-state" --task demo set status PLANNING
@@ -166,4 +166,33 @@ subagent_stop() { echo '{"hook_event_name":"SubagentStop","agent_type":"quorum:b
   "$BIN/quorum-state" --task demo set status BUILDING
   run subagent_stop; [ "$status" -eq 2 ]
   [[ "$output" == *"'demo'"* ]]
+}
+
+subagent_stop_in() { echo "{\"hook_event_name\":\"SubagentStop\",\"agent_type\":\"quorum:builder\",\"session_id\":\"$1\"}" | "$HOOKS/stop-verify.sh"; }
+
+@test "review --fix: a marker left by an interrupted fix never takes over a task's builder" {
+  mkdir -p .tasks/review-pr-7
+  "$BIN/quorum-state" --task review-pr-7 init MEDIUM INTERRUPTED
+  "$BIN/quorum-state" --task demo set status BUILDING
+  printf 'review-pr-7\nsess-a\n' > .tasks/.review-fix-active
+  touch .fail
+  # The review isn't FIXING: the task's builder is checked against the task.
+  run subagent_stop_in sess-a; [ "$status" -eq 2 ]
+  [[ "$output" == *"'demo'"* ]]
+  [ "$(st stop_blocks)" = "1" ]
+  [ "$("$BIN/quorum-state" --task review-pr-7 get stop_blocks)" = "0" ]
+}
+
+@test "review --fix: the marker counts only in the session that wrote it" {
+  mkdir -p .tasks/review-pr-7
+  "$BIN/quorum-state" --task review-pr-7 init MEDIUM FIXING
+  "$BIN/quorum-state" --task demo set status BUILDING
+  printf 'review-pr-7\nsess-a\n' > .tasks/.review-fix-active
+  touch .fail
+  run subagent_stop_in sess-b; [ "$status" -eq 2 ]
+  [[ "$output" == *"'demo'"* ]]
+  [ "$("$BIN/quorum-state" --task review-pr-7 get stop_blocks)" = "0" ]
+  run subagent_stop_in sess-a; [ "$status" -eq 2 ]
+  [[ "$output" == *"review-pr-7"* ]]
+  [ "$("$BIN/quorum-state" --task review-pr-7 get stop_blocks)" = "1" ]
 }

@@ -5,8 +5,10 @@
 #    task, or the task's status isn't BUILDING, IN_REVIEW, or ESCALATED. Also exit 0 for the main session (Stop)
 #    while the task has pending_findings: those failures are already queued for the builder, and its
 #    SubagentStop check still has to pass.
-#    While /quorum:review --fix runs its builder, .tasks/.review-fix-active names the review: the builder's
-#    SubagentStop is checked against that review's state (status FIXING) instead of the active task's.
+#    While /quorum:review --fix runs its builder, .tasks/.review-fix-active names the review and the session that
+#    wrote it: the builder's SubagentStop is checked against that review's state instead of the active task's. A
+#    marker from another session, or naming a review that isn't FIXING, is left over from an interrupted --fix: it's
+#    ignored, and the active task is checked as usual.
 # 2. Run verify-completion.sh with a timeout (verify_timeout_s, default 300).
 # 3. On failure, count it in stop_blocks and exit 2 with the failing output, so Claude keeps working.
 # 4. Loop guard: on the 3rd failure in a row, let the stop through, save the status in escalated_from, set
@@ -34,8 +36,13 @@ VERIFY="$ROOT/.claude/hooks/verify-completion.sh"
 task=""
 FIX_MARKER="$ROOT/.tasks/.review-fix-active"
 if [ "$event" = SubagentStop ] && [ -f "$FIX_MARKER" ]; then
-  task=$(head -n 1 "$FIX_MARKER" | tr -d '[:space:]')
-  [ -n "$task" ] && [ -f "$ROOT/.tasks/$task/state.md" ] || task=""
+  task=$(sed -n 1p "$FIX_MARKER" | tr -d '[:space:]')
+  writer=$(sed -n 2p "$FIX_MARKER" | tr -d '[:space:]')
+  session=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null || true)
+  if [ -z "$task" ] || [ ! -f "$ROOT/.tasks/$task/state.md" ]; then task=""
+  elif [ -n "$writer" ] && [ -n "$session" ] && [ "$writer" != "$session" ]; then task=""
+  elif [ "$("$BIN/quorum-state" --task "$task" get status 2>/dev/null)" != FIXING ]; then task=""
+  fi
 fi
 if [ -z "$task" ]; then task=$("$BIN/quorum-active-task" 2>/dev/null) || exit 0; fi
 state() { "$BIN/quorum-state" --task "$task" "$@"; }

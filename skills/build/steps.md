@@ -8,6 +8,10 @@ as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers alr
 
 Use the slug in `<arguments>`, or `quorum-active-task`. Work from the repo root.
 
+**Unfinished reviews.** First run `quorum-reviews heal <session>`. It marks any `/quorum:review` this session left
+unfinished as `INTERRUPTED`, and removes a `--fix` marker it left, which would otherwise point this task's builder
+at the review. If it prints ids, mention them in one line.
+
 ## 1. Check the status
 
 `quorum-state get status` must be `BUILDING`, and `quorum-state get plan_approved` must be set (`/quorum:plan`

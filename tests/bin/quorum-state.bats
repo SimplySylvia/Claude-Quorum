@@ -233,3 +233,12 @@ proof() {
   # kind and range sit right after slug, so a review's state.md reads as one at a glance
   [ "$(sed -n 3p .tasks/review-pr-12/state.md)" = "kind: review" ]
 }
+
+@test "a review records the session running it, and can be INTERRUPTED" {
+  mkdir -p .tasks/review-pr-12
+  "$BIN/quorum-state" --task review-pr-12 init MEDIUM REVIEWING
+  "$BIN/quorum-state" --task review-pr-12 set session 0f3c9a2e-1b2d-4c5e-8f9a-123456789abc
+  run "$BIN/quorum-state" --task review-pr-12 get session; [ "$output" = "0f3c9a2e-1b2d-4c5e-8f9a-123456789abc" ]
+  run "$BIN/quorum-state" --task review-pr-12 set session '${CLAUDE_SESSION_ID}'; [ "$status" -eq 1 ]
+  run "$BIN/quorum-state" --task review-pr-12 set status INTERRUPTED; [ "$status" -eq 0 ]
+}

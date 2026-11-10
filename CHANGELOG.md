@@ -3,6 +3,23 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
+## Unreleased
+
+### Added
+
+- **Interrupted reviews are marked `INTERRUPTED`.** A review now records the session running it (`session` in its
+  `state.md`). When `/quorum:review`, `/quorum:build`, or `/quorum:review-loop` starts, the new `quorum-reviews
+  heal` marks any review that session left unfinished, and a review being run again, as `INTERRUPTED`, and logs
+  which run stopped.
+
+### Fixed
+
+- **A `--fix` that was interrupted no longer takes over later builders.** It left `.tasks/.review-fix-active`
+  behind, and the Stop hook checked the next `quorum:builder`, a task's included, against that review: its failures
+  counted on the review, and the task never escalated. The marker now names the session that wrote it, and the hook
+  ignores it in any other session or once its review isn't `FIXING`. `quorum-reviews heal` also removes one that's
+  left over.
+
 ## 0.6.0 (2026-11-09)
 
 ### Changed

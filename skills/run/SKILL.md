@@ -19,6 +19,7 @@ as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers alr
 The stage steps use these. A setting that still reads as `${user_config…}` wasn't set: use its default.
 
 - `<plugin root>`: `${CLAUDE_PLUGIN_ROOT}`
+- `<session>`: `${CLAUDE_SESSION_ID}`
 - `<max_rounds>`: ${user_config.max_rounds} (default `3`)
 - `<nit_cap>`: ${user_config.nit_cap} (default `2`)
 - `<security_on_medium>`: ${user_config.security_on_medium} (default `false`)
