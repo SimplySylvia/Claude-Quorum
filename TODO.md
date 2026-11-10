@@ -5,18 +5,17 @@ sketches. Each item says why it matters, which mostly comes from comparing Quoru
 the same job (Superpowers, Compound Engineering, and Anthropic's `code-review`, `feature-dev`, and
 `pr-review-toolkit`), as of November 2026.
 
-## 0. Update every image once `review` and `run` are done
+## 0. Retake the dashboard screenshots
 
-Do this in one pass after `/quorum:run` lands, so the images are redrawn once:
+The diagrams are redrawn (the agent map's `/quorum:review` band and the new `/quorum:run` diagram); the other
+diagrams' content didn't change. What's left needs a person at a fullscreen terminal:
 
-- `assets/src/diagrams.py`: a band in the agent map for `/quorum:review` (reviewers by tier → voter → optional
-  builder) and for `/quorum:run` (the stages it chains, and the gates where it stops); check the stages animation
-  and the risk-tier cards still match (the tier cards now say the reviewers' model is chosen per task). Run it to
-  redraw every SVG, light and dark.
-- `assets/dashboard-review.png` and `assets/dashboard-done.png`: retake them with `assets/src/dashboard-demo.sh`,
-  since the pane now has a Spend section (and, if item 1 lands, reviews). Give the demo agents token counts so the
-  Spend section isn't empty.
-- The README's image alt text, which describes each picture in words: update it to match.
+- `assets/dashboard-review.png` and `assets/dashboard-done.png`. The pane now has a **Spend** section, which only
+  appears for agents that really ran in the session: `assets/src/dashboard-demo.sh` writes `.tasks/` files and
+  starts no agents, so its screenshots show no Spend. For the review screenshot, run `/quorum:run` on a copy of
+  `tests/e2e/sales-app` (bootstrapped as `evals/_fixture/make.sh` does) and take it during the review loop; the
+  demo script is still right for the done screenshot.
+- Update their alt text in the README to mention the Spend section.
 
 ## 1. `/quorum:review`: what's left
 
@@ -25,7 +24,7 @@ The command itself shipped (see `CHANGELOG.md`, Unreleased). Still to do:
 - **The dashboard doesn't show reviews.** A review is never the active task, so the pane and status line ignore
   it. Show the newest review in `REVIEWING` or `FIXING` (its reviewers, then the voter, as for a review round),
   without hiding an active task.
-- **The images:** see item 0.
+- **The dashboard screenshots:** see item 0.
 - **Run its eval** (`evals/run.sh --case review-standalone-finds-bug`) and a `--comment` eval against a fake `gh`.
 - **`/quorum:codify-lesson` from a review.** It reads a task's round files; let it read a review's `run-<N>/`
   files too, so a false alarm in a PR review can become a rule.

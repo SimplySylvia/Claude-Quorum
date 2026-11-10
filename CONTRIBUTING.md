@@ -115,7 +115,9 @@ for that session so the two copies don't both draw. The demo's PR points at a re
 dashboard shows it as `PR #42` without an open or merged state.
 
 The README's `assets/dashboard-review.png` and `assets/dashboard-done.png` are the `review` and `done` stages in a
-fullscreen terminal wide enough for the pane to dock beside the chat. Retake them when the dashboard's look changes,
+fullscreen terminal wide enough for the pane to dock beside the chat. The demo starts no agents, so the pane's **Spend** section,
+which counts the agents that ran in the session, stays empty in it; to show Spend, screenshot a real run instead
+(for example `/quorum:run` on a bootstrapped copy of `tests/e2e/sales-app`). Retake them when the dashboard's look changes,
 from a folder whose path you're happy to publish.
 
 ## Releasing
