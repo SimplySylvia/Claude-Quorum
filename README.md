@@ -116,7 +116,7 @@ No agent sees the conversation that produced the code.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/agent-map-dark.svg">
-    <img src="assets/agent-map-light.svg" alt="Agent map. Bootstrap writes CLAUDE.md's Verification Commands, REVIEW.md, and the check script. Spec and eval: researcher (MEDIUM/HIGH), then the spec, then two spec reviewers in parallel. Plan: the planner writes plan.md, the same reviewers as the review loop check it in plan mode, the voter drops false alarms, the planner revises up to twice, and you approve it. Build: builder, following the plan, then prover. Review loop: up to six reviewers in parallel by tier and by what changed, then the verifier-voter; surviving IMPORTANT findings go to the builder and back into review, and after round 3 the task halts for a redesign. Security and blind test (MEDIUM/HIGH): security reviewer, blind user, live accessibility check, friction triager, prover; blockers go back to the review loop. Human gate: pr-writer, then you review and merge." width="880">
+    <img src="assets/agent-map-light.svg" alt="Agent map. Bootstrap writes CLAUDE.md's Verification Commands, REVIEW.md, and the check script. Spec and eval: researcher (MEDIUM/HIGH), then the spec, then two spec reviewers in parallel. Plan: the planner writes plan.md, the same reviewers as the review loop check it in plan mode, the voter drops false alarms, the planner revises up to twice, and you approve it. Build: builder, following the plan, then prover. Review loop: up to six reviewers in parallel by tier and by what changed, then the verifier-voter; surviving IMPORTANT findings go to the builder and back into review, and after round 3 the task halts for a redesign. Security and blind test (MEDIUM/HIGH): security reviewer, blind user, live accessibility check, friction triager, prover; blockers go back to the review loop. Human gate: pr-writer, then you review and merge. Apart from the stages, review any diff with /quorum:review: the review loop's reviewers by tier, plus security for HIGH, then the verifier-voter, one round, with no task needed; --fix hands the kept findings to the builder, and --comment posts them as a GitHub review after you approve. A last line notes that /quorum:run follows stages 1 to 8 in order by itself, stopping only where you decide." width="880">
   </picture>
 </p>
 
@@ -157,6 +157,13 @@ new lines.
 `/quorum:run` follows each stage's own steps, in order, so a task gets exactly what the separate commands give it:
 the same agents, the same checks, the same caps. It goes on by itself between stages and stops where only you can
 decide:
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/run-dark.svg">
+    <img src="assets/run-light.svg" alt="/quorum:run: spec, plan, build, simplify, review loop, blind test, and PR draft, in order, with arrows between them. It stops to ask at the spec (slug, tier, research, models, docs; --yes accepts all but a HIGH tier) and at the plan (mockup sign-off for UI work, then plan approval; --yes approves a clean plan except for HIGH), and after the PR draft for your review of MEDIUM and HIGH tasks; it never pushes or opens the PR. It stops if the review loop halts after the round cap or the blind test's fixes don't converge. Blind-test blockers go back to the review loop. LOW tasks skip the blind test and end READY. --until stops after a stage, and running it again continues from the task's status." width="880">
+  </picture>
+</p>
 
 | It stops for | When |
 |---|---|

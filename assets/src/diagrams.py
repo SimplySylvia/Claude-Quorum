@@ -6,6 +6,7 @@
 - assets/review-loop-*.svg: one round of the review loop and where it can end.
 - assets/swiss-cheese-*.svg: an animation of the layers, each catching the defect the others let through.
 - assets/stages-*.svg: an animation of one task moving through the stages, with the stages that send work back.
+- assets/run-*.svg: what /quorum:run chains, and every place it stops to ask you.
 
 Run it again after adding, renaming, or rewiring an agent, or changing what a tier gets:
     python3 assets/src/diagrams.py
@@ -41,6 +42,11 @@ def text_w(s, size):
     """Rough width of proportional text; generous so labels never overflow their chips."""
     narrow = sum(1 for c in s if c in "il.,:;'|·/ ")
     return (len(s) - narrow) * size * 0.57 + narrow * size * 0.3
+
+
+def mono_w(s, size):
+    """Width of monospaced text: every character takes about 0.6 of the font size."""
+    return len(s) * size * 0.62
 
 
 def chip_w(label, tag):
@@ -202,6 +208,19 @@ def draw_map(theme):
     s.row(CONTENT, t + 28, [("pr-writer", "spec + proof → PR description", False),
                             ("you review and merge", "MEDIUM/HIGH wait for you", True)])
 
+    # Any diff: /quorum:review, apart from the task stages (no spine arrow joins it).
+    t = band("anydiff", "", "Review any diff", "/quorum:review", 150, ["no task needed,", "one round"])
+    ry = t + 28
+    right = s.row(CONTENT, ry, [("the review loop's reviewers", "by tier; + security for HIGH", False),
+                                ("verifier-voter", "keeps or drops each finding", False),
+                                ("builder: fix", "--fix; checks must pass", False)])
+    vx = CONTENT + chip_w("the review loop's reviewers", "by tier; + security for HIGH") + ARROW
+    vw = chip_w("verifier-voter", "keeps or drops each finding")
+    gy = ry + CHIP_H + TAG_H + 22
+    s.arrow(f"M{vx + vw / 2:.1f},{ry + CHIP_H + TAG_H + 2} V{gy - 3}")
+    s.chip(vx + (vw - chip_w("GitHub review", "--comment, after you approve")) / 2, gy, "GitHub review",
+           "--comment, after you approve", doc=True)
+
     # Forward flow between bands, down the left of the content column.
     spine = CONTENT - 20
     for upper, lower, label in (("init", "spec", None), ("spec", "plan", "IMPORTANT spec findings fixed"),
@@ -235,8 +254,13 @@ def draw_map(theme):
     s.rect(LEFT + 490, ly - 3, 26, 18, "doc", r=5, dash="4 3")
     s.text(LEFT + 524, ly + 10, "file or step", size=TAG + 0.5, color="muted")
     s.text(LEFT + 632, ly + 10, "grey text under a chip: when it runs", size=TAG + 0.5, color="muted")
-    return s.svg(int(ly + 26), "Quorum agent map: the agents each command starts, when they run, and the loops "
-                                "that send work back")
+    ly += 24
+    s.text(LEFT + 4, ly + 10, "/quorum:run", size=TAG + 0.5, mono=True, weight=600)
+    s.text(LEFT + 4 + mono_w("/quorum:run", TAG + 0.5) + 8, ly + 10,
+           "follows bands 1 to 8 in order by itself, stopping only where you decide (see the run diagram)",
+           size=TAG + 0.5, color="muted")
+    return s.svg(int(ly + 26), "Quorum agent map: the agents each command starts, when they run, the loops "
+                                "that send work back, and /quorum:review for any diff")
 
 
 def wrap(text, size, width):
@@ -604,10 +628,86 @@ def draw_stages(theme):
                  "the review loop, before the task reaches the human gate.")
 
 
+# /quorum:run: the stages it chains, and where it stops. Each stage: (name, [(kind, text)]), kind "ask" (it asks
+# you and waits) or "halt" (it stops; you decide what next).
+RUN_STAGES = [
+    ("Spec", [("ask", "slug, tier, research; models; docs. --yes accepts all but a HIGH tier")]),
+    ("Plan", [("ask", "mockup sign-off (UI)"), ("ask", "plan approval. --yes approves a clean plan, except HIGH")]),
+    ("Build", []),
+    ("Simplify", []),
+    ("Review loop", [("halt", "HALTED after the round cap")]),
+    ("Blind test", [("halt", "HALTED if fixes don't converge")]),
+    ("PR draft", [("ask", "MEDIUM/HIGH: your review. Never pushes or opens the PR")]),
+]
+
+
+def draw_run(theme):
+    s = Svg(THEMES[theme])
+    t = THEMES[theme]
+    n, gap = len(RUN_STAGES), 22
+    bw = (W - 2 * LEFT - (n - 1) * gap) / n
+    bh, by = 44, 74
+
+    def badge(cx, cy, kind):
+        if kind == "ask":
+            s.add(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="9" fill="{t["medium"]}"/>'
+                  f'<rect x="{cx - 4:.1f}" y="{cy - 4.5:.1f}" width="2.6" height="9" fill="{t["chip"]}"/>'
+                  f'<rect x="{cx + 1.4:.1f}" y="{cy - 4.5:.1f}" width="2.6" height="9" fill="{t["chip"]}"/>')
+        else:
+            s.add(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="9" fill="{t["back"]}"/>'
+                  f'<rect x="{cx - 3.5:.1f}" y="{cy - 3.5:.1f}" width="7" height="7" fill="{t["chip"]}"/>')
+
+    s.text(LEFT + 4, 26, "/quorum:run", size=15, weight=700, mono=True)
+    s.text(LEFT + 4 + mono_w("/quorum:run", 15) + 14, 26,
+           "follows each stage's own steps in order, and goes on by itself between them", size=13, color="muted")
+
+    bottom = by + bh
+    for i, (name, gates) in enumerate(RUN_STAGES):
+        x = LEFT + i * (bw + gap)
+        s.rect(x, by, bw, bh, "chip")
+        s.text(x + bw / 2, by + 27, name, size=LABEL, weight=600, anchor="middle")
+        if i:
+            s.arrow(f"M{x - gap + 3:.1f},{by + bh / 2} H{x - 3:.1f}")
+        gy, above = by + bh + 26, by + bh
+        for kind, text in gates:
+            s.add(f'<line x1="{x + bw / 2:.1f}" y1="{above:.1f}" x2="{x + bw / 2:.1f}" y2="{gy - 9:.1f}" '
+                  f'stroke="{t["line"]}" stroke-dasharray="3 3"/>')
+            badge(x + bw / 2, gy, kind)
+            lines = wrap(text, TAG, bw + 4)
+            for j, line in enumerate(lines):
+                s.text(x + bw / 2, gy + 24 + j * 14, line, size=TAG, color="back" if kind == "halt" else "fg",
+                       anchor="middle")
+            above = gy + 24 + (len(lines) - 1) * 14 + 6
+            gy += 24 + len(lines) * 14 + 18
+            bottom = max(bottom, gy)
+
+    # Blind-test blockers go back to the review loop, over the top of the boxes.
+    rx = LEFT + 4 * (bw + gap) + bw / 2
+    bx = LEFT + 5 * (bw + gap) + bw / 2
+    s.arrow(f"M{bx:.1f},{by - 2} V{by - 16} H{rx:.1f} V{by - 3}", color="back")
+    s.text((rx + bx) / 2, by - 21, "blockers", size=TAG, color="back", anchor="middle")
+
+    ly = bottom + 8
+    badge(LEFT + 12, ly, "ask")
+    s.text(LEFT + 28, ly + 4, "stops and asks you", size=TAG + 0.5, color="muted")
+    badge(LEFT + 182, ly, "halt")
+    s.text(LEFT + 198, ly + 4, "stops: you decide what next", size=TAG + 0.5, color="muted")
+    s.text(W - LEFT, ly + 4, "LOW tasks skip the blind test and end READY.", size=TAG + 0.5, color="muted",
+           anchor="end")
+    ly += 24
+    s.text(LEFT + 4, ly + 4, "--until <stage> stops after a stage; /quorum:run again continues from the task's status, "
+           "so it mixes with the single-stage commands.", size=TAG + 0.5, color="muted")
+    return s.svg(int(ly + 16), "/quorum:run: spec, plan, build, simplify, review loop, blind test, PR draft, in order. "
+                 "It stops to ask at the spec (slug, tier, research, models, docs; --yes accepts all but a HIGH tier) "
+                 "and the plan (mockup sign-off for UI, plan approval; --yes approves a clean plan except for HIGH), "
+                 "and for your review of MEDIUM and HIGH tasks after the PR draft. It stops if the review loop or the "
+                 "blind test halts. Blind-test blockers go back to the review loop. It never pushes or opens the PR.")
+
+
 if __name__ == "__main__":
     for name in THEMES:
         for base, draw in (("agent-map", draw_map), ("risk-tiers", draw_tiers), ("review-loop", draw_loop),
-                           ("swiss-cheese", draw_cheese), ("stages", draw_stages)):
+                           ("swiss-cheese", draw_cheese), ("stages", draw_stages), ("run", draw_run)):
             path = os.path.join(OUT, f"{base}-{name}.svg")
             with open(path, "w") as f:
                 f.write(draw(name))
