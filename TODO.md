@@ -5,17 +5,12 @@ sketches. Each item says why it matters, which mostly comes from comparing Quoru
 the same job (Superpowers, Compound Engineering, and Anthropic's `code-review`, `feature-dev`, and
 `pr-review-toolkit`), as of November 2026.
 
-## 0. Retake the dashboard screenshots
+## 0. A dashboard screenshot that shows Spend
 
-The diagrams are redrawn (the agent map's `/quorum:review` band and the new `/quorum:run` diagram); the other
-diagrams' content didn't change. What's left needs a person at a fullscreen terminal:
-
-- `assets/dashboard-review.png` and `assets/dashboard-done.png`. The pane now has a **Spend** section, which only
-  appears for agents that really ran in the session: `assets/src/dashboard-demo.sh` writes `.tasks/` files and
-  starts no agents, so its screenshots show no Spend. For the review screenshot, run `/quorum:run` on a copy of
-  `tests/e2e/sales-app` (bootstrapped as `evals/_fixture/make.sh` does) and take it during the review loop; the
-  demo script is still right for the done screenshot.
-- Update their alt text in the README to mention the Spend section.
+The 0.5.0 screenshots come from `assets/src/dashboard-demo.sh`, which starts no agents, so they don't show the
+pane's **Spend** section (it counts agents that really ran in the session). Next time the screenshots are retaken,
+take the review one during a real `/quorum:run` on a bootstrapped copy of `tests/e2e/sales-app`, and add Spend to
+its alt text. Open it with `--plugin-dir` and the installed Quorum disabled, so the round cap is the default 3.
 
 ## 1. `/quorum:review`: what's left
 
