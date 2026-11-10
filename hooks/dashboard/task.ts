@@ -91,9 +91,11 @@ export function stageOf(status: string, previous: number | undefined): number {
   return STAGE_OF[status] ?? previous ?? STAGE_OF.IN_REVIEW ?? 3
 }
 
-export function stages(status: string, risk: string, current: number): Stage[] {
+// A fast-path task (`fast: true`) has no plan round, so its Plan stage is skipped too.
+export function stages(status: string, risk: string, current: number, isFast = false): Stage[] {
   return STAGES.map((name, i) => {
     if (name === 'Blind test' && risk === 'LOW') return { name, state: 'skipped' }
+    if (name === 'Plan' && isFast) return { name, state: 'skipped' }
     if (i < current) return { name, state: 'done' }
     if (i > current) return { name, state: 'todo' }
     if (isStuck(status)) return { name, state: 'stuck' }

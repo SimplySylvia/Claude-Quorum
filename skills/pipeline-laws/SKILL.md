@@ -42,6 +42,10 @@ through these stages in order when the user starts it.
 | MEDIUM | A user-facing workflow, an API endpoint, state logic | Research; plan and code review by 4–6 reviewers; blind test; focused human review |
 | HIGH | Auth, money, destructive migrations, security boundaries, core state machines, build pipelines | Research; plan and code review by 4–7 reviewers, including security; blocking security pass; blind test; human architectural sign-off |
 
+A LOW task can take the **fast path** (`/quorum:run --fast`, recorded as `fast: true` in `state.md`): a short spec
+with no spec reviewers, no plan round (it goes from spec straight to `BUILDING`), and a code review by the Logic &
+Edge-Case Hunter alone. The Stop hook, `eval.md`, and the proof before `READY` still apply.
+
 ## Models
 
 Each task records which model its reviewers and its helpers run on; the skills ask once, at the task's start.

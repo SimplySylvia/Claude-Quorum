@@ -15,7 +15,8 @@ at the review. If it prints ids, mention them in one line.
 ## 1. Check the status
 
 `quorum-state get status` must be `BUILDING`, and `quorum-state get plan_approved` must be set (`/quorum:plan`
-records it when the user approves `plan.md`). Otherwise say what the status is and which command comes next (see
+records it when the user approves `plan.md`), unless `quorum-state get fast` is `true`: a fast-path task has no plan.
+Otherwise say what the status is and which command comes next (see
 the `pipeline-laws` skill's stage map), then stop.
 
 ## 2. Branch
@@ -32,6 +33,12 @@ Start the `quorum:builder` agent with this prompt (fill in the slug):
 > `.tasks/<slug>/eval.md`, and `.tasks/<slug>/plan.md`. Implement the plan's steps on the current branch, run the
 > checks, and commit. Note any deviation from the plan under its `## Deviations`. This is the first build; there are
 > no review findings yet.
+
+On the fast path, use this prompt instead:
+
+> Build task `<slug>` from its spec; it's on the fast path, so there's no `plan.md`. Read `CLAUDE.md`, `REVIEW.md`,
+> `.tasks/<slug>/rd.md`, and `.tasks/<slug>/eval.md`. Make the smallest change that meets the requirements on the
+> current branch, run the checks, and commit. This is the first build; there are no review findings yet.
 
 The builder's SubagentStop hook keeps it working until `.claude/hooks/verify-completion.sh` passes.
 

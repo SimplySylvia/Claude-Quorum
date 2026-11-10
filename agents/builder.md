@@ -25,6 +25,10 @@ A prompt that says **Standalone review** comes from `/quorum:review --fix`: ther
 sweeping each Pattern Category through the files the reviewed range touched (the prompt gives the range), and skip
 everything about the plan. The checks are `verify-completion.sh`; the SubagentStop hook still makes them pass.
 
+## Fast-path builds
+A prompt that says **fast path** has no `plan.md`: build from `rd.md` and `eval.md`, keep the change small, and skip
+everything about the plan, including `## Deviations`.
+
 ## When given review findings
 Each `[IMPORTANT]` finding names a **Pattern Category**. Fix the cited line, then search every file this task
 touched (`git diff --name-only <base_sha>`) for other instances of the same pattern and fix those too. Don't make

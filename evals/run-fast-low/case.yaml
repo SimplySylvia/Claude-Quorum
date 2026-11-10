@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: run-fast-low
+description: /quorum:run --fast takes a LOW task from request to READY on the fast path (no spec reviewers, no plan round, one reviewer), with a proof at HEAD and a drafted PR.
+tags: [run]
+context:
+  scaffold_script: scaffold.sh

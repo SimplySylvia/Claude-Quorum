@@ -55,7 +55,7 @@ Let N = `quorum-state get round` + 1. Stop the loop if N > max_rounds (see step 
 
    | Reviewer | Persona or mode | When | Saved as |
    |---|---|---|---|
-   | `quorum:code-reviewer` | **Logic & Edge-Case Hunter** | always | `logic.md` |
+   | `quorum:code-reviewer` | **Logic & Edge-Case Hunter** | always, and the only one on the fast path | `logic.md` |
    | `quorum:code-reviewer` | **Architecture, Security & Drift Hunter** | MEDIUM, HIGH | `architecture.md` |
    | `quorum:pattern-auditor` | (none) | MEDIUM, HIGH | `patterns.md` |
    | `quorum:docs-auditor` | (none) | MEDIUM, HIGH, or any tier when the range changes docs | `docs.md` |
@@ -70,6 +70,10 @@ Let N = `quorum-state get round` + 1. Stop the loop if N > max_rounds (see step 
    > `.tasks/<slug>/eval.md`, and `.tasks/<slug>/plan.md`, and check the change against the plan. This is round
    > <N> <for N > 1: "; earlier rounds already reviewed the rest of the branch, so review only these lines and
    > their immediate callers">.
+
+   A task on the fast path (`quorum-state get fast` is `true`) has no plan: start only the Logic & Edge-Case Hunter,
+   and in its prompt replace the `plan.md` part with "There's no `plan.md` (fast path): check the change against
+   `rd.md`".
 
 4. Save each reviewer's reply **verbatim** to `round-<N>/<file>` from the table, and all of them together to
    `round-<N>/candidates.md`.
@@ -133,7 +137,7 @@ Tell the user to pick one and run `/quorum:spec-and-eval --redesign <slug>`.
    verbatim to `.tasks/<slug>/proof-final.md`, and show it. `quorum-state` refuses `READY` and `AWAITING-HUMAN`
    without this file, at HEAD, with no failed check, so save it before setting the status. If anything fails, say so
    and don't mark the task READY.
-2. **Risk tier**, and the rounds it took.
+2. **Risk tier**, the rounds it took, and whether it took the fast path (no plan round, one reviewer).
 3. **Rollback plan:** the one step from `rd.md`.
 4. **Changes:** `git diff --stat <base_sha>..HEAD` and `git log --oneline <base_sha>..HEAD`.
 5. **Verdict:** LOW: "Ready to merge." MEDIUM/HIGH (from `/quorum:blind-test`): "Waiting for your review", with

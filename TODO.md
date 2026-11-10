@@ -33,13 +33,13 @@ and the stage commands share them. Still to do:
   user can work elsewhere and come back when asked. The dashboard can't tell a run from single commands today.
 - **Context length.** A whole MEDIUM task is long for one conversation. Measure one with the Spend section and the
   transcript size, and see whether the chat rule (one line per stage) is enough.
-- **`--fast` for LOW** (item 3) fits here as a `run` flag.
 
-## 3. A fast path for LOW tasks
+## 3. A fast path for LOW tasks: what's left
 
-One command for a small change: a short spec, a build, one Logic Hunter review, and the proof, with no separate plan
-round. Could be `/quorum:run --fast`, or what `run` does by itself for LOW. Keep the Stop hook and the proof rule:
-the fast path drops ceremony, not checks.
+`/quorum:run --fast` is built (unreleased). Still to do:
+
+- **Run its eval,** `run-fast-low`, which makes real model calls.
+- **Whether `run` should offer it by itself** when the spec settles on LOW, instead of waiting for the flag.
 
 ## 4. Lessons that suggest themselves
 

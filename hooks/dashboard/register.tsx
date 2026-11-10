@@ -16,7 +16,7 @@ import {
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-8' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-9' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-3' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
 const reviews = atom({ plugin: 'quorum', key: 'reviews' } as const, [], { shape: 'reviews-1' })
@@ -181,6 +181,7 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     prDrafted: await $.fs.exists(`${dir}/pr.md`),
     prUrl: scalar(fm, 'pr'),
     risk,
+    isFast: scalar(fm, 'fast') === 'true',
     status,
     stage,
     round,
@@ -278,12 +279,13 @@ async function lookupPr($: EngineInterface, t: Snapshot, force: boolean) {
   await update($, pr, () => found)
 }
 
-// What the stepper can't say: the mockup sign-off, the plan's rounds and approval, the blind-test runs, and a drafted
+// What the stepper can't say: the fast path, the mockup sign-off, the plan's rounds and approval, the blind-test runs, and a drafted
 // PR before one is open. One line under the stepper.
 function stageDetails(t: Snapshot, known: PullRequest | null): string {
   const plan = [t.planRounds ? `${t.planRounds} plan review round${t.planRounds === 1 ? '' : 's'}` : '',
     t.planApproved ? `approved ${t.planApproved}` : ''].filter(Boolean).join(', ')
   return [
+    t.isFast ? 'fast path: no plan round, one reviewer' : '',
     t.signoff ? `mockup signed off ${t.signoff}` : '',
     plan,
     t.risk !== 'LOW' && t.blindRuns ? `blind test: ${t.blindRuns} run${t.blindRuns === 1 ? '' : 's'}` : '',
@@ -343,7 +345,7 @@ function verdict(now: Extract<Now, { kind: 'plan' | 'review' }>): [string, strin
 
 // The stage rail, with the PR stage done once GitHub says the PR merged.
 const railFor = (t: Snapshot, known: PullRequest | null): Stage[] =>
-  stages(t.status, t.risk, t.stage).map(s => (s.name === 'PR' && known?.state === 'MERGED' ? { ...s, state: 'done' } : s))
+  stages(t.status, t.risk, t.stage, t.isFast).map(s => (s.name === 'PR' && known?.state === 'MERGED' ? { ...s, state: 'done' } : s))
 
 const nextFor = (t: Snapshot, known: PullRequest | null) => (isPrStage(t.status) ? prNext(known, t.prDrafted, t.next) : t.next)
 

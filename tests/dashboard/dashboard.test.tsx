@@ -199,6 +199,9 @@ describe('task helpers', () => {
     expect(rail.map(s => s.state)).toEqual(['done', 'done', 'done', 'done', 'skipped', 'todo'])
     expect(stages('HALTED', 'HIGH', 3)[3]?.state).toBe('stuck')
     expect(stages('READY', 'HIGH', 5)[5]?.state).toBe('waiting')
+    // The fast path skips the plan round, and LOW skips the blind test.
+    expect(stages('IN_REVIEW', 'LOW', 3, true).map(s => s.state)).toEqual(['done', 'skipped', 'done', 'active', 'skipped', 'todo'])
+    expect(stages('IN_REVIEW', 'LOW', 3)[1]?.state).toBe('done')
   })
 
   test('next steps, findings and branch slugs', () => {
@@ -504,6 +507,18 @@ test('the band and pane show the active task, and Quorum keeps no status line', 
   await pane.press({ key: 'toggle-rounds' })
   expect(await pane.find({ type: 'Text', text: /voter kept 2 of 4/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /2 candidates, voting/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('a fast-path task says so under the stage rail, with no plan rounds', async ($, on) => {
+  const fast = state('BUILDING').replace('risk: MEDIUM', 'risk: LOW\nfast: true')
+    .replace('plan_rounds: 2', 'plan_rounds: 0').replace('plan_approved: 2026-11-08', 'plan_approved: null')
+  world(on, { ...repo('BUILDING'), '.tasks/export-csv/state.md': fast })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^fast path: no plan round, one reviewer$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /plan review round/ })).toBeUndefined()
   await pane.unmount()
 })
 

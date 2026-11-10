@@ -82,6 +82,7 @@ Or let one command take a task through every stage, stopping only where you must
 
 ```
 /quorum:run Add a CSV export to the sales report   # spec → plan → build → review → blind test → PR draft
+/quorum:run --fast Fix the typo in the help text   # LOW only: spec → build → one reviewer → PR draft
 /quorum:run                                        # continue the active task from wherever it stopped
 ```
 
@@ -179,6 +180,11 @@ It never pushes, opens, or merges the PR: it ends with the draft and the command
 (`spec`, `plan`, `build`, `review`, `blind`, or `pr`) stops it earlier, and running it again without a request
 picks up from the task's status, so you can mix it with the single-stage commands. Between stages it prints one
 line per stage; agents' full replies stay in `.tasks/<slug>/`.
+
+**`--fast`** is for LOW tasks: a short spec with no spec reviewers or mockup, no plan round, the build, a review by
+the Logic & Edge-Case Hunter alone (still with the voter and the round cap), the proof, and the PR draft. It drops
+ceremony, not checks: the Stop hook and the proof before `READY` hold as always. A task the spec puts at MEDIUM or
+HIGH takes the full pipeline instead. The dashboard shows the Plan stage as skipped.
 
 ## Reviewing any diff
 

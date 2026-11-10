@@ -57,6 +57,7 @@ each run's workspace and bootstraps for Quorum.
 | `blind-user-no-source` | `blind-user` reaches its goal through the CLI without ever hitting the source guard |
 | `review-standalone-finds-bug` | `/quorum:review` on a branch with no task keeps the planted bug through the voter and records the run in `.tasks/review-<id>/` |
 | `run-low-to-ready` | `/quorum:run --yes` takes a LOW task through every stage to `READY`, with a proof at HEAD and a drafted PR, and pushes nothing |
+| `run-fast-low` | `/quorum:run --fast --yes` takes a LOW task to `READY` with no spec reviewers, no plan round, and the Logic Hunter as the only reviewer, with a proof at HEAD and a drafted PR |
 | `run-high-asks-tier` | Even with `--yes`, `/quorum:run` asks the user to confirm a HIGH tier and builds nothing before an answer |
 | `nearmiss-no-auto-review-loop` | An ordinary "look at my commit" request never starts a Quorum command |
 

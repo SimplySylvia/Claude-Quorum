@@ -12,6 +12,12 @@ repo root (`quorum-active-task --root`). Don't write application code in this sk
 `<arguments>` may also contain `--yes` (only when the user typed it): then accept your proposed slug, tier, and
 spec without asking, and say what you chose.
 
+`<arguments>` may also contain `--fast` (from `/quorum:run --fast`): the **fast path** for a LOW task. It writes a
+short spec, skips the spec reviewers and the mockup, and goes straight to the build, with no plan round. The checks
+stay: `eval.md`, the Stop hook, the review, and the proof. Each step below says what changes on the fast path. It
+applies only to LOW: if the tier you settle in step 3 is MEDIUM or HIGH, say that the fast path is for LOW tasks
+only and that this one takes the full pipeline, and drop `--fast`.
+
 Templates live in `<plugin root>/skills/spec-and-eval/templates/`. Use `quorum-state` and
 `quorum-active-task` (on your PATH) for all state; never hand-edit `state.md` frontmatter.
 
@@ -46,10 +52,11 @@ migrating data is **HIGH**. When in doubt between two tiers, pick the higher one
 ## 4. Research the approach
 
 Do this for MEDIUM and HIGH tasks, and for LOW when `<arguments>` contains `--research`. Skip it when it contains
-`--no-research`.
+`--no-research`, and on the fast path unless it contains `--research`.
 
 1. `quorum-state --task <slug> init <RISK> <STATUS>`, where STATUS is `DRAFT-AWAITING-VISUAL-SIGNOFF` for a UI
-   change and `PLANNING` otherwise. Then `quorum-active-task --set <slug>`.
+   change and `PLANNING` otherwise. Then `quorum-active-task --set <slug>`. On the fast path, STATUS is `BUILDING`,
+   and then `quorum-state --task <slug> set fast true`.
 2. Start `quorum:researcher` with the request in your own words, without internal names you don't need, and
    nothing from production data:
 
@@ -73,6 +80,8 @@ Do this for MEDIUM and HIGH tasks, and for LOW when `<arguments>` contains `--re
    - Each doc chosen becomes a numbered requirement starting with **Docs:**, naming the file and what it covers,
      for example "**Docs:** add the `--since` flag to the Options table in `docs/cli.md`".
    - If the user says no docs, add a non-goal: "No new docs for this feature (declined at spec time)".
+   On the fast path, keep `rd.md` and `eval.md` short: the goal, the few requirements the change needs, the
+   rollback, and only the edge cases that apply. Every requirement still gets an `eval.md` row.
 3. **`rd.md`** from the template: goal, numbered testable requirements, non-goals, a **one-step** rollback plan,
    and (MEDIUM/HIGH) the blind-test user goal with its starting URL or command from `CLAUDE.md`. Follow the
    approach chosen in step 4, and add the research's "For the spec" items that apply.
@@ -105,7 +114,13 @@ Do this for MEDIUM and HIGH tasks, and for LOW when `<arguments>` contains `--re
 5. Show the user both files, what the reviewers found and what you changed, and ask for corrections before going
    on. `quorum-state log` a short block: the two summary lines and what changed.
 
+On the fast path, do step 1 only: no spec reviewers. Show the user both files and ask for corrections (with
+`--yes`, go on and say so), then `quorum-state log` a block: `## Spec (fast path)` and the number of requirements.
+
 ## 7. UI work: mockup gate
+
+The fast path skips this step (a LOW change is copy or style at most; `eval.md`'s accessibility rows still run).
+The next step is `/quorum:build`.
 
 If the change alters UI, write a self-contained `mockup.html` from the template: no external fonts, scripts, or
 images. Show the default, loading, empty, and error states the requirements mention. Then **stop**: tell the user

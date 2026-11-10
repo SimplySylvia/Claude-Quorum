@@ -56,6 +56,8 @@ export type Snapshot = {
   // state.md's `pr`: the PR's URL once recorded, else ''.
   prUrl: string
   risk: string
+  // state.md's `fast`: a LOW task on the fast path (/quorum:run --fast), with no plan round.
+  isFast: boolean
   status: string
   stage: number
   round: number

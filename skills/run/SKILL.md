@@ -1,8 +1,8 @@
 ---
 name: run
-description: Take a Quorum task through the whole pipeline in one command, from spec to drafted PR, stopping only where you must decide (the tier, the models, docs, mockup sign-off, plan approval, a halt, and the human review). Starts a new task from a request, or continues the active one from wherever it stopped. Follows the same steps as each stage command, keeps every gate and check, and never pushes, opens, or merges a PR.
+description: Take a Quorum task through the whole pipeline in one command, from spec to drafted PR, stopping only where you must decide (the tier, the models, docs, mockup sign-off, plan approval, a halt, and the human review). Starts a new task from a request, or continues the active one from wherever it stopped. With --fast, a LOW task takes the fast path: a short spec, a build, one reviewer, and the proof, with no plan round. Follows the same steps as each stage command, keeps every gate and check, and never pushes, opens, or merges a PR.
 disable-model-invocation: true
-argument-hint: "[<what to build>] [--until spec|plan|build|review|blind|pr] [--yes] [--research | --no-research] [--models]"
+argument-hint: "[<what to build>] [--fast] [--until spec|plan|build|review|blind|pr] [--yes] [--research | --no-research] [--models]"
 ---
 
 # Run the pipeline
@@ -28,7 +28,14 @@ The stage steps use these. A setting that still reads as `${user_config…}` was
 - `<arguments>`: what this skill passes to each stage (the **Arguments** column below), not its own.
 
 This run's own arguments: `$ARGUMENTS`. They hold an optional request (what to build), and these flags:
-`--until <stage>`, `--yes` (only when the user typed it), `--research` or `--no-research`, and `--models`.
+`--until <stage>`, `--yes` (only when the user typed it), `--research` or `--no-research`, `--models`, and
+`--fast`.
+
+**`--fast`** puts a new LOW task on the fast path: a short spec with no spec reviewers, no mockup, no plan round, a
+build, a review by the Logic & Edge-Case Hunter alone (still with the voter and the round cap), the proof, and the PR
+draft. It drops ceremony, not checks: the Stop hook, `eval.md`, and the proof before `READY` hold as always. The spec
+steps record it in `state.md` (`fast: true`), and the later stages read it from there, so it only matters when the
+run starts a new task; for a MEDIUM or HIGH task it's dropped.
 
 ## 1. Before the first stage
 
@@ -37,7 +44,7 @@ This run's own arguments: `$ARGUMENTS`. They hold an optional request (what to b
   `AWAITING-HUMAN`, or `HALTED`): ask whether to continue that task or start the new one. Starting the new one
   leaves the old task's files as they are; it only stops being active (`quorum-active-task --clear`).
 - **No request and no active task:** ask what to build, then go on with the answer as the request.
-- Tell the user, in one line, what will happen: the stages ahead, where it will stop to ask, and that `--until`
+- Tell the user, in one line, what will happen: the stages ahead (on the fast path: spec, build, review, PR), where it will stop to ask, and that `--until`
   stops it earlier.
 
 ## 2. The loop
@@ -55,7 +62,7 @@ says stop, after the stage `--until` names, or after 12 stages in one run (then 
 
 | Status | Stage to follow | Arguments | `--until` name |
 |---|---|---|---|
-| no task | `spec-and-eval` | the request, plus `--research`, `--no-research`, `--models`, and `--yes` as given | `spec` |
+| no task | `spec-and-eval` | the request, plus `--research`, `--no-research`, `--models`, `--yes`, and `--fast` as given | `spec` |
 | `DRAFT-AWAITING-VISUAL-SIGNOFF`, `PLANNING` | `plan` | the slug, plus `--yes` as given unless the risk is HIGH | `plan` |
 | `BUILDING`, `base_sha` not set | `build` | the slug | `build` |
 | `BUILDING`, `base_sha` set | `simplify-diff`, then `review-loop` | none | `build` (before the review loop) |

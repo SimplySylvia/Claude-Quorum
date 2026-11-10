@@ -242,3 +242,11 @@ proof() {
   run "$BIN/quorum-state" --task review-pr-12 set session '${CLAUDE_SESSION_ID}'; [ "$status" -eq 1 ]
   run "$BIN/quorum-state" --task review-pr-12 set status INTERRUPTED; [ "$status" -eq 0 ]
 }
+
+@test "a fast-path task records fast: true, next to its risk" {
+  "$BIN/quorum-state" --task demo init LOW BUILDING
+  "$BIN/quorum-state" --task demo set fast true
+  run "$BIN/quorum-state" --task demo get fast; [ "$output" = "true" ]
+  run "$BIN/quorum-state" --task demo set fast yes; [ "$status" -eq 1 ]
+  [ "$(sed -n 3,4p .tasks/demo/state.md | tr '\n' ' ')" = "risk: LOW fast: true " ]
+}
