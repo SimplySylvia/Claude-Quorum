@@ -216,47 +216,19 @@ While a task is active, Quorum shows where it is without you asking:
 <sub>Both are the demo task from `assets/src/dashboard-demo.sh` (see [CONTRIBUTING.md](CONTRIBUTING.md)): mid-review, and
 finished with its PR open.</sub>
 
-- **Above the prompt,** one row, most important first: the status as a badge (amber when the task waits on you,
-  red when it's halted or escalated), the task and its risk tier, a dot per stage with the current one named
-  (`✓✓✓●○○ Review 2/3`), how many of the round's reviewers have replied and how many checks pass
-  (`reviewers 3/4 · checks 6/7`), anything wrong in red (`✗ 1 check failing`), a **▶ Next** button that puts the next
-  command in your prompt, and a **Dashboard** button. In a narrow terminal it keeps the badge, the dots, the first
-  problem, and the buttons.
-- **A dashboard pane**, which opens by itself when a session starts on a task and when a `/quorum:*` command runs;
-  `/quorum-dashboard` shows or hides it. It's two cards and a list of sections that fold:
-  - **The task card:** its title (the ticket id to the right) and goal from `rd.md`, so it's clear what the work is
-    for; the slug, status, and risk tier; a stepper through the stages (`✓Spec ─ ✓Plan ─ ✓Build ─ ●Review 2/3 ─
-    ○Blind test ─ ○PR`); what the stepper can't say (the plan's review rounds and approval, the blind-test runs, a
-    drafted `pr.md`); and the task's PR, once there is one, as a link with a copy button. Once the task is `READY` or
-    `AWAITING-HUMAN`, the dashboard asks GitHub about the PR `state.md` records (set when `gh pr create` runs in the
-    session), or else the branch's newest PR, at most every 2 minutes and right after a `gh pr` command or a push.
-    Without `gh`, or signed out, it shows the recorded PR, or whether `pr.md` is drafted.
-  - **The Now card:** what the current stage is doing, its border amber when the task waits on you and red when it's
-    halted or escalated. In spec, plan, and code review, each reviewer the round runs for the task's tier, as
-    waiting, running (with its time), or done with its findings; then the voter's result, each finding it kept (a
-    severity badge, its `file:line` with a copy button, its Pattern Category and confidence), and what that means for
-    the round. In the build, the builder and the prover. In the blind test, whether the blind user reached the goal,
-    its blockers and friction, and the accessibility, security, and triage reports.
-  - **▶ Next:** a button under the Now card that puts the next command in your prompt, for you to send, change, or
-    add to. It never sends it: every Quorum command is still yours to start. Anything you'd typed stays, after the
-    command.
-  - **Sections that fold**, one row each, with a summary: **Requirements** (each one met, failing, or with no check
-    in `eval.md`, then the non-goals), **Checks** (every `eval.md` row and the fast checks, with a PASS, FAIL, or SKIP
-    badge, from `proof-final.md`, else `proof-build.md`, with the commit it ran at), **Review rounds** (each round's
-    findings and how many the voter kept), **Spend** (how many Quorum agents ran since the last `/quorum:*` command,
-    the tokens they used, in, of which cached, and out, added up from each request, and how many ran on each model,
-    which shows the [model choices](#models) at work), and **Other agents**. Click a row to open or close it. **A
-    section opens by itself while it holds a problem**: a failed requirement or check, a requirement no check covers,
-    a proof older than HEAD or missing, Stop-hook blocks, pending findings, or a halted review, so a fold never hides
-    one. Folded, the row still names the worst of it. When no proof file was saved but the round log says every check
-    passed, requirements and checks are marked, muted, as "reported passing" rather than proven.
-  - Rows and cards highlight under the pointer in a fullscreen terminal and on desktop.
+- **The band above the prompt:** the task's status, a dot per stage, the round's progress, anything wrong in red,
+  and **▶ Next** and **Dashboard** buttons.
+- **The pane,** which opens by itself during a task (`/quorum-dashboard` shows or hides it):
+  - **Task card:** title, goal, status, a stage stepper, and the PR once there is one.
+  - **Now card:** what the current stage is doing, such as each reviewer's progress and the findings the voter
+    kept. Its border turns amber when it's your move and red when the task is stuck.
+  - **Folding sections:** Requirements, Checks, Review rounds, Spend (tokens and models used), and Other agents. A
+    section with a problem opens by itself.
+- **▶ Next** puts the next command in your prompt to send or edit. It never sends it for you.
 - **Toasts** when a task converges, halts, escalates, or is ready for you.
 
-The pane sits beside the chat in a wide fullscreen terminal and above the prompt otherwise. Opened by itself, it
-waits for a terminal at least 144 columns wide; opened with the button or `/quorum-dashboard`, it shows at any
-width. The dashboard only reads `.tasks/`, so `claude -p`, cloud sessions, and the VS Code chat panel work as before,
-without it.
+The pane docks beside the chat in a wide fullscreen terminal, and sits above the prompt otherwise. The dashboard only
+reads `.tasks/`, so `claude -p`, cloud sessions, and the VS Code chat panel work as before, without it.
 
 ## Risk tiers
 
