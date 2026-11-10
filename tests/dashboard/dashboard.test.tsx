@@ -6,7 +6,7 @@ import {
   parseProof, parseSpec, prDetail, prFromUrl, prNext,
   requirementState, roleOf,
   roundReviewers, slugFromHead, spendOf, stageOf, stages, tokenCount,
-  keptFindings, nextCommand, openByDefault, problemsOf, splitTicket, stagePhrase,
+  keptFindings, nextCommand, openByDefault, problemsOf, splitTicket,
 } from '../../hooks/dashboard/task'
 
 const state = (status: string, extra = '') => `---
@@ -271,11 +271,11 @@ describe('task helpers', () => {
   })
 })
 
-test('the status line, band and pane show the active task', async ($, on) => {
+test('the band and pane show the active task, and Quorum keeps no status line', async ($, on) => {
   const seen = world(on, repo('IN_REVIEW'))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  expect(seen.status.at(-1)).toBe('export-csv · code review 2/3 · 1 pending')
+  expect(seen.status).toEqual([undefined])
   expect(seen.opened).toBe(1)
 
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -337,7 +337,7 @@ test('a status change toasts once, and only for statuses worth it', async ($, on
 test('task files are read from the project root, not the working directory', async ($, on) => {
   const seen = world(on, repo('IN_REVIEW'), '/work/repo')
   await $.session.start({ cwd: '/work/repo/app', surface: 'terminal', isInteractive: true })
-  expect(seen.status.at(-1)).toBe('export-csv · code review 2/3 · 1 pending')
+  expect(seen.status).toEqual([undefined])
 })
 
 test('with no task the band is the engine\'s and the status line is clear', async ($, on) => {
@@ -397,12 +397,7 @@ test('sections open by themselves only while they hold a problem', () => {
   expect(openByDefault(t({ status: 'HALTED' })).rounds).toBe(true)
 })
 
-test('the status line says where the task is in words, and what is wrong', () => {
-  const t = (status: string, extra: object = {}) => ({ status, round: 2, maxRounds: 3, planRounds: 1, blindRuns: 1, ...extra })
-  expect(stagePhrase(t('IN_REVIEW'))).toBe('code review 2/3')
-  expect(stagePhrase(t('AWAITING-HUMAN'))).toBe('waiting for your review')
-  expect(stagePhrase(t('HALTED'))).toBe('halted: pick a redesign')
-  expect(stagePhrase(t('PLANNING', { planRounds: 0 }))).toBe('planning')
+test('the band names what is wrong, briefly', () => {
   const checks = [{ id: '1', label: 'a', result: 'FAIL' }, { id: '2', label: 'b', result: 'FAIL' }, { id: '3', label: 'c', result: 'PASS' }]
   const proof = { file: 'proof-build.md', rev: 'abc', result: '', rows: [] }
   expect(problemsOf({ proof, checks, isProofStale: true, pending: 1 } as never)).toEqual(['✗ 2 checks failing', 'proof older than HEAD', '1 pending'])
@@ -672,7 +667,7 @@ test('a finished task shows its PR from GitHub, asking again only after the TTL 
   await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "x" --body-file .tasks/export-csv/pr-body.md' })
   await settle()
   expect(calls.length).toBe(2)
-  expect(seen.status.at(-1)).toBe('export-csv · waiting for your review · 1 pending · PR #33807 open')
+  expect(seen.status).toEqual([undefined])
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /^PR #33807 open$/ })).toBeDefined()
   expect((await pane.find({ type: 'Link' }))?.props.href).toBe('https://github.com/o/r/pull/33807')

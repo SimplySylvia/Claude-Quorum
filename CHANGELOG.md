@@ -19,8 +19,8 @@ copy with `/plugin marketplace update`.
 - **The band above the prompt** is one row in order of importance: a status badge colored by whose move it is,
   the task and risk, a dot per stage with the current one named, the round's progress, anything wrong in red, and
   the Next and Dashboard buttons. A narrow terminal keeps the badge, dots, first problem, and buttons.
-- **The status line** says where the task is in words and what's wrong (`csv-export · code review 2/3 · 1 pending`),
-  leaving the status code and risk tier to the band.
+- **No status line under the prompt any more.** It repeated what the band above the prompt shows; Quorum clears one
+  an earlier version left.
 - There's a blank line between the pane's folding sections.
 
 ### Added

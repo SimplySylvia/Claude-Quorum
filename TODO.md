@@ -16,7 +16,7 @@ its alt text. Open it with `--plugin-dir` and the installed Quorum disabled, so 
 
 The command itself shipped (see `CHANGELOG.md`, Unreleased). Still to do:
 
-- **The dashboard doesn't show reviews.** A review is never the active task, so the pane and status line ignore
+- **The dashboard doesn't show reviews.** A review is never the active task, so the pane and band ignore
   it. Show the newest review in `REVIEWING` or `FIXING` (its reviewers, then the voter, as for a review round),
   without hiding an active task.
 - **The dashboard screenshots:** see item 0.

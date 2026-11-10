@@ -9,7 +9,7 @@ import type { Check, Findings, KeptFinding, Now, PullRequest, QuorumAgent, Revie
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, stageOf, stages, tokenCount,
-  keptFindings, nextCommand, openByDefault, problemsOf, splitTicket, stagePhrase,
+  keptFindings, nextCommand, openByDefault, problemsOf, splitTicket,
 } from './task'
 
 const PANE = 'quorum-dashboard'
@@ -205,15 +205,6 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
 // The task's PR as GitHub last reported it, else as state.md records it.
 const prOf = (t: Snapshot, known: PullRequest | null) => (known?.slug === t.slug ? known : prFromUrl(t.slug, t.prUrl))
 
-// Claude Code draws the status line and toasts under the plugin's name ("quorum"), so neither repeats it.
-// The status line is what's left when the band is collapsed and the pane closed: the task, where it is in words,
-// what's wrong, and its PR. It leaves the status code and risk tier to the band.
-function statusLine(t: Snapshot | null, known: PullRequest | null): string | undefined {
-  if (!t) return undefined
-  const parts = [t.slug, stagePhrase(t), ...problemsOf(t)]
-  if (isPrStage(t.status)) parts.push(prDetail(prOf(t, known), t.prDrafted))
-  return parts.filter(Boolean).join(' · ')
-}
 
 // Put a Quorum command in the prompt for the person to send, edit, or add to; never send it. A draft they already
 // typed stays, after the command, as its arguments.
@@ -244,8 +235,7 @@ async function lookupPr($: EngineInterface, t: Snapshot, force: boolean) {
   const found: PullRequest = ran && ran.exitCode === 0
     ? parsePr(t.slug, ran.stdout, now)
     : { ...(prFromUrl(t.slug, t.prUrl) ?? { slug: t.slug, number: 0, state: 'UNKNOWN', isDraft: false, url: '' }), checkedAt: now }
-  const after = await update($, pr, () => found)
-  $.ui.status(statusLine(await read($, task), after))
+  await update($, pr, () => found)
 }
 
 // What the stepper can't say: the mockup sign-off, the plan's rounds and approval, the blind-test runs, and a drafted
@@ -312,11 +302,11 @@ async function refresh($: EngineInterface, maxRounds: number, forcePr = false): 
   const before = await read($, task)
   const after = await snapshot($, maxRounds, before)
   await update($, task, () => after)
-  $.ui.status(statusLine(after, await read($, pr)))
   // In the background, so a slow GitHub never holds up the turn; a failed lookup just leaves the last answer.
   if (after) void lookupPr($, after, forcePr).catch(() => undefined)
   const message = after && TOASTS[after.status]
   if (message && before?.slug === after.slug && before.status !== after.status) {
+    // Claude Code draws toasts under the plugin's name ("quorum"), so the text doesn't repeat it.
     $.ui.toast(`${after.slug}: ${message}`)
   }
   return after
@@ -351,6 +341,8 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: COMMAND, description: "Show or hide the Quorum task dashboard" })
     await settleAgents($)
+    // The band above the prompt says it all, so Quorum keeps no status line; clear one an earlier version set.
+    $.ui.status(undefined)
     if (await refresh($, maxRounds)) void open($)
     return next(e)
   })

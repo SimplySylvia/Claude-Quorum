@@ -222,9 +222,6 @@ finished with its PR open.</sub>
   (`reviewers 3/4 · checks 6/7`), anything wrong in red (`✗ 1 check failing`), a **▶ Next** button that puts the next
   command in your prompt, and a **Dashboard** button. In a narrow terminal it keeps the badge, the dots, the first
   problem, and the buttons.
-- **Status line,** for when the band is collapsed and the pane closed: where the task is in words, what's wrong, and
-  its PR, as `quorum: csv-export · code review 2/3 · 1 pending` or `quorum: csv-export · waiting for your review ·
-  PR #42 open`.
 - **A dashboard pane**, which opens by itself when a session starts on a task and when a `/quorum:*` command runs;
   `/quorum-dashboard` shows or hides it. It's two cards and a list of sections that fold:
   - **The task card:** its title (the ticket id to the right) and goal from `rd.md`, so it's clear what the work is

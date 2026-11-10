@@ -100,7 +100,7 @@ motion, to viewers who ask for reduced motion.
 ## The dashboard demo
 
 `assets/src/dashboard-demo.sh` builds a repo whose `.tasks/` holds one MEDIUM task partway through Quorum, so you
-can see the dashboard and status line without running a real task, and screenshot them for the README. It writes
+can see the dashboard and the band above the prompt without running a real task, and screenshot them for the README. It writes
 every file as the skills would have saved it and calls no model:
 
 ```bash
