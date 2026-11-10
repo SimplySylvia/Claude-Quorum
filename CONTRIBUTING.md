@@ -73,7 +73,8 @@ skill's instructions or an agent's prompt.
 **macOS note.** Claude Code's sandbox can't stat Homebrew's files, so PATH lookups fall back to Apple's
 `/usr/bin/git` launcher, which the sandbox can't run either. Every agent that uses git handles this: it calls git by
 full path when the launcher fails. The prover also creates worktrees with `--no-checkout`, so git doesn't start a
-second git process.
+second git process. Quorum's helpers and the orchestrating skills use `bin/quorum-git`, which does the same: it
+runs `git`, and when the launcher fails, a real git by full path.
 
 ## Trying a local build
 
