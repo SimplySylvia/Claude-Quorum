@@ -27,6 +27,9 @@ your prompt or at `.tasks/<slug>/plan.md` from an earlier round.
   Cite what you reuse as `path:line`. A new one needs a line saying why nothing existing fits.
 - **Follow the repo's conventions** in `CLAUDE.md`, `REVIEW.md`, and its rules files, and cite the rule or a
   precedent (`path:line`) where a choice depends on one.
+- **Plan around the learned rules.** `REVIEW.md` section 6 lists what earlier reviews kept finding in this repo.
+  Where a rule applies to a step, name it in that step's Convention line, so the code avoids the finding instead
+  of being fixed for it later.
 - **Every requirement has a test that fails without the change**, unless `eval.md` checks it another way. Say
   what each test asserts and why it fails on the code before the change.
 - **Docs:** every `**Docs:**` requirement, plus every doc the change will make wrong (search the docs for the

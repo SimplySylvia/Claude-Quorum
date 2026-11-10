@@ -15,6 +15,9 @@ Use `$ARGUMENTS` if the user described it. Otherwise look at the most recent tas
 the folder in `.tasks/` whose `state.md` changed last. A folder whose `state.md` says `kind: review` is a standalone
 review (`/quorum:review`); see [From a review](#from-a-review).
 
+Start with `quorum-lessons <slug or review id>`: it lists each Pattern Category the voter kept in more than one
+round or run (`repeat`), or that another task or review kept too (`elsewhere`). Then look at:
+
 - `state.md`'s round log, and `.tasks/<slug>/review/round-*/survivors.md` (kept findings): a **Pattern Category** that came back
   in more than one round, or that the builder had to fix in several places.
 - `## Dropped` sections in `votes.md` (the voter's full reply): the **same false alarm** dropped more than once, by the same reason.

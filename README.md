@@ -40,7 +40,9 @@ doesn't help. Quorum has one mechanism for each:
 - **Reviews never end.** Builder and reviewer argue for dozens of rounds over the same nits. Quorum caps the loop
   at 3 rounds, reviews only new lines after round 1, limits nits to 2, and runs a voter that drops weak findings.
 - **Lessons don't stick.** A bug fixed today comes back next week. `/quorum:codify-lesson` turns it into a
-  one-line rule in the repo's `REVIEW.md`, which every future review reads.
+  one-line rule in the repo's `REVIEW.md`, which every future review and plan reads. Quorum suggests one when a
+  Pattern Category comes back, the voter drops the same false alarm twice, or the blind test finds what every
+  reviewer missed; it writes a rule only after you say yes.
 
 The idea underneath is the [Swiss cheese model](https://pmc.ncbi.nlm.nih.gov/articles/PMC1117770/): no single check
 is perfect, so stack several different ones whose holes sit in different places. Each dot below is a kind of defect;
@@ -351,7 +353,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `agents/` | `researcher`, `spec-reviewer`, `planner`, `builder`, `prover`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `verifier-voter`, `security-reviewer`, `blind-user`, `friction-triager`, `pr-writer` |
 | `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `stop-verify.sh`, `record-pr.sh`, and `dashboard/`, the dashboard's hooks module |
 | `types/` | The type contract for the values the dashboard keeps in the session |
-| `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state`, `quorum-reviews`, `quorum-git` (on the Bash PATH while the plugin is enabled) |
+| `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state`, `quorum-reviews`, `quorum-lessons`, `quorum-git` (on the Bash PATH while the plugin is enabled) |
 | `tests/` | bats tests for every hook and helper, `claude plugin test` tests for the dashboard, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
 | `evals/` | `claude plugin eval` suite: risk tiering, one case per agent, voter false-alarm drops, blind-mode source reads, a near-miss |
 | `assets/` | The README's animations and diagrams, in light and dark versions; `assets/src/diagrams.py` draws the diagrams, and `assets/src/dashboard-demo.sh` builds a demo task for the dashboard |

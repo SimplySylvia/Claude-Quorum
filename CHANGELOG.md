@@ -13,6 +13,11 @@ copy with `/plugin marketplace update`.
   records `fast: true` in `state.md`, so the stage commands and the dashboard (which shows the Plan stage as
   skipped) know. A task the spec puts at MEDIUM or HIGH takes the full pipeline. A new eval, `run-fast-low`, checks
   it.
+- **Lessons suggest themselves.** When the review loop, the blind test, or `/quorum:review` ends, it suggests
+  `/quorum:codify-lesson` for a Pattern Category the voter kept in more than one round or in another task too, the
+  same false alarm dropped twice, or a blocker the blind test found that every reviewer missed. It only suggests:
+  the rule is written after you say yes, as before. The new `quorum-lessons` helper finds the repeated categories.
+  The planner now names the learned rules that apply to each step, so a lesson shapes the next plan too.
 - **`/quorum:codify-lesson` learns from `/quorum:review`.** It reads a review's `run-<N>/` files and log as it reads
   a task's rounds, so a Pattern Category that keeps coming back, a false alarm the voter keeps dropping, or a kept
   finding you say is wrong can become a rule. The review's report suggests it when you say a finding was wrong.

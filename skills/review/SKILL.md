@@ -122,6 +122,10 @@ placeholders for `/quorum:init-pipeline` to fill in). Call this `<RULES>` below.
 - What the voter dropped, one line each with its reason, so the user can say a drop was wrong. If the user says a
   kept finding or a drop was wrong, suggest `/quorum:codify-lesson`, which can turn it into a rule for the next
   review.
+- Lessons, if there are any (only suggest them; never write a rule here): each line `quorum-lessons <id>` prints
+  (a Pattern Category kept in more than one run, or by another task or review too), and a false alarm the voter
+  dropped in an earlier run too. Leave out any `quorum-learned-rule list` already covers. One line each, with
+  `/quorum:codify-lesson <what went wrong, in a few words>`.
 - Where the files are (`.tasks/<id>/run-<N>/`), and the next steps that apply: `--comment` for a PR, `--fix` when
   `[IMPORTANT]` findings survive, and `/quorum:init-pipeline` when the repo has no `REVIEW.md` (the review used
   the generic rules).

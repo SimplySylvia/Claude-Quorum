@@ -41,39 +41,27 @@ and the stage commands share them. Still to do:
 - **Run its eval,** `run-fast-low`, which makes real model calls.
 - **Whether `run` should offer it by itself** when the spec settles on LOW, instead of waiting for the flag.
 
-## 4. Lessons that suggest themselves
-
-`/quorum:codify-lesson` waits for the user. Compound Engineering's best idea is that every task leaves a lesson
-for the next. Suggest it (never write it) when:
-
-- the same Pattern Category survives more than one round of a task, or shows up in two tasks;
-- the voter drops the same kind of false alarm twice;
-- the blind test finds something every reviewer missed.
-
-Also have the planner read `REVIEW.md`'s section 6 explicitly, so a lesson shapes the next plan, not only the next
-review.
-
-## 5. A worktree per task, and more than one active task
+## 4. A worktree per task, and more than one active task
 
 Today there's one active task and it lives in the main working tree. A worktree per task (`git worktree add` at
 `/quorum:build`) would let two tasks run side by side and keep a running review from blocking other work.
 `quorum-active-task` becomes per worktree; the dashboard shows the worktree's task.
 
-## 6. CI mode
+## 5. CI mode
 
 A GitHub Action that runs `/quorum:review` headless (`claude -p`) on each PR and posts the kept findings, with the
 repo's `REVIEW.md`. Pairs with item 1: the same reviewers and voter, on every PR, with no one remembering to run
 them. Needs the `github-actions` hardening rules (pinned actions, least-privilege token, no script injection from
 PR titles).
 
-## 7. A public benchmark
+## 6. A public benchmark
 
 Run Quorum's review and Anthropic's `code-review` on the fixture apps with planted bugs (the evals already plant
 some), and publish how many real bugs each finds, how many false alarms it raises, and what it costs in tokens (the
 dashboard's Spend section now counts them). It's Quorum's own "proof before done" applied to its claims, and the
 strongest argument a README can make.
 
-## 8. Smaller follow-ups from this release
+## 7. Smaller follow-ups from this release
 
 - **The models on the dashboard.** Show the task's `reviewer_model` and `helper_model` in the pane, next to the
   Spend section's per-model counts, so a mismatch (a choice that didn't take) is visible.
@@ -85,7 +73,7 @@ strongest argument a README can make.
   the voter rescores a low-confidence finding after checking it. These make real model calls, so they weren't run
   as part of the change.
 
-## 9. Later
+## 8. Later
 
 - **Other harnesses.** Superpowers and Compound Engineering also run in Codex and Cursor. Quorum's hooks and the
   dashboard are Claude Code features, so this means a reduced Quorum elsewhere: worth it only once the core is

@@ -122,12 +122,12 @@ then `quorum-active-task --clear`, and `quorum-state log` a post-mortem:
   requirements at once).
 - **Two redesign options**, each with what changes, its risks, and what it costs.
 
-Tell the user to pick one and run `/quorum:spec-and-eval --redesign <slug>`.
+Tell the user to pick one and run `/quorum:spec-and-eval --redesign <slug>`. Then suggest lessons (step 7).
 
 ## 6. CONVERGED
 
 - **MEDIUM or HIGH:** say the review loop converged after N rounds, list the non-blocking findings and any
-  "Needs a human" items, and that the next step is `/quorum:blind-test`.
+  "Needs a human" items, suggest lessons (step 7), and say that the next step is `/quorum:blind-test`.
 - **LOW:** print the **Stage 8 summary** below, then `quorum-state set status READY` and
   `quorum-active-task --clear`.
 
@@ -145,4 +145,18 @@ Tell the user to pick one and run `/quorum:spec-and-eval --redesign <slug>`.
 6. Non-blocking findings (`[NIT]`, `[PRE-EXISTING]`) and any "Needs a human" items (accessibility, docs outside
    the repo), to consider separately.
 
-After a LOW summary, suggest `/quorum:pr-draft`.
+After a LOW summary, suggest lessons (step 7), then `/quorum:pr-draft`.
+
+## 7. Suggest lessons
+
+When the loop ends, look for what the next task should learn. Only suggest: `/quorum:codify-lesson` asks the user
+before it writes a rule, and you never write one here.
+
+- `quorum-lessons <slug>` prints each Pattern Category the voter kept in more than one round (`repeat`), or that
+  another task or review kept too (`elsewhere`).
+- Read the `## Dropped` sections of this task's `votes.md` files: the same false alarm dropped twice (the same
+  claim about the same code, for the same reason) is a lesson too.
+- Leave out any that `quorum-learned-rule list` already covers.
+
+Give each one a line: what came back, and `/quorum:codify-lesson <what went wrong, in a few words>`. If there are
+none, say nothing about lessons.

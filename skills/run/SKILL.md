@@ -99,5 +99,4 @@ precondition), and the next step. At the end of a task (`pr.md` drafted):
 
 - the PR commands the `pr-draft` steps gave, for the user to run;
 - for MEDIUM and HIGH, that the human review in the summary comes first;
-- if a Pattern Category came back in more than one review round, or the voter dropped the same false alarm twice
-  (see `state.md`'s round log), suggest `/quorum:codify-lesson` for it.
+- the lessons the stages suggested (the review loop's and the blind test's), once each.

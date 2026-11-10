@@ -98,5 +98,14 @@ test result, the blockers, and the triage counts.
    them where the user tracks work, and file nothing without a yes), the accessibility pass's "Needs a human"
    list, and non-blocking review findings.
 
-Then `quorum-state set status AWAITING-HUMAN` and `quorum-active-task --clear`. Suggest `/quorum:pr-draft`, and
-`/quorum:codify-lesson` if any bug or false alarm in this task is worth remembering.
+Then `quorum-state set status AWAITING-HUMAN` and `quorum-active-task --clear`. Suggest lessons, then
+`/quorum:pr-draft`.
+
+**Lessons.** Only suggest them: `/quorum:codify-lesson` asks the user before it writes a rule.
+
+- If an earlier blind run found blockers (its `blind-<n>.md`, `security-<n>.md`, `a11y-<n>.md`, and `triage-<n>.md`),
+  every reviewer missed them. For each one a reviewer could have caught from the diff, suggest a lesson.
+- Run `quorum-lessons <slug>` again: the fixes may have kept a Pattern Category the review loop kept before.
+- Leave out any that `quorum-learned-rule list` already covers, or that the review loop already suggested.
+
+Give each one a line: what was missed, and `/quorum:codify-lesson <what went wrong, in a few words>`.

@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Find lessons worth suggesting to /quorum:codify-lesson, from the findings the voter kept.
+#
+#   quorum-lessons SLUG
+#
+# SLUG is a task, or a standalone review (review-<id>). Prints one line per lesson, tab-separated:
+#
+#   repeat<TAB>CATEGORY<TAB>ROUNDS       a Pattern Category kept in more than one of SLUG's review rounds (or a
+#                                        review's runs), for example "round-1 round-2"
+#   elsewhere<TAB>CATEGORY<TAB>OTHERS    a Pattern Category SLUG kept that another task or review kept too
+#
+# It reads every .tasks/<slug>/review/round-*/survivors.md and .tasks/review-<id>/run-*/survivors.md. Categories
+# match ignoring case and spacing. It only suggests: it writes nothing, and the user decides whether a lesson is
+# worth a rule. Prints nothing when there's none. Bash 3.2 compatible.
+set -euo pipefail
+
+die() { echo "quorum-lessons: $*" >&2; exit 1; }
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+slug=${1:-}
+[ -n "$slug" ] || die "usage: quorum-lessons SLUG"
+printf '%s' "$slug" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$' || die "invalid slug: $slug"
+
+ROOT=$("$HERE/quorum-active-task" --root)
+TASKS="$ROOT/.tasks"
+[ -d "$TASKS/$slug" ] || die "no task or review named $slug in .tasks/"
+
+# One record per kept category: FOLDER<TAB>ROUND<TAB>CATEGORY
+kept() {
+  for f in "$TASKS"/*/review/round-*/survivors.md "$TASKS"/*/run-*/survivors.md; do
+    [ -f "$f" ] || continue
+    rel=${f#"$TASKS"/}
+    round=$(basename "$(dirname "$f")")
+    "$HERE/quorum-findings" categories "$f" | while IFS= read -r c; do
+      [ -n "$c" ] && printf '%s\t%s\t%s\n' "${rel%%/*}" "$round" "$c"
+    done
+  done
+}
+
+kept | awk -F '\t' -v slug="$slug" '
+  function key(c) { c = tolower(c); gsub(/[ \t]+/, " ", c); sub(/^ /, "", c); sub(/ $/, "", c); return c }
+  {
+    k = key($3)
+    if ($1 == slug) {
+      if (!(k in name)) { name[k] = $3; order[++n] = k }
+      if (!((k, $2) in seenRound)) { seenRound[k, $2] = 1; rounds[k] = rounds[k] (rounds[k] == "" ? "" : " ") $2; nr[k]++ }
+    } else if (!((k, $1) in seenOther)) {
+      seenOther[k, $1] = 1; others[k] = others[k] (others[k] == "" ? "" : " ") $1
+    }
+  }
+  END {
+    for (i = 1; i <= n; i++) {
+      k = order[i]
+      if (nr[k] > 1) print "repeat\t" name[k] "\t" rounds[k]
+      if (k in others) print "elsewhere\t" name[k] "\t" others[k]
+    }
+  }
+'
