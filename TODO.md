@@ -63,8 +63,6 @@ strongest argument a README can make.
 
 ## 7. Smaller follow-ups from this release
 
-- **The models on the dashboard.** Show the task's `reviewer_model` and `helper_model` in the pane, next to the
-  Spend section's per-model counts, so a mismatch (a choice that didn't take) is visible.
 - **Spend per round, kept.** The Spend section only covers agents since the last command, in this session. Keeping
   per-round totals in `state.md` would need the dashboard to write `.tasks/`, which it deliberately never does;
   find another way (a skill step that asks the dashboard for its totals?) or leave it.

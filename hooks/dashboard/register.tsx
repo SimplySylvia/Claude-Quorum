@@ -9,14 +9,14 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { Check, Findings, KeptFinding, Now, PullRequest, QuorumAgent, Review, Reviewer, Round, Section, Snapshot, Stage } from '../../types'
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
-  parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, stageOf, stages, tokenCount,
+  parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, stageOf, stages, tokenCount,
   keptFindings, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange,
 } from './task'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-9' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-10' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-3' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
 const reviews = atom({ plugin: 'quorum', key: 'reviews' } as const, [], { shape: 'reviews-1' })
@@ -182,6 +182,8 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     prUrl: scalar(fm, 'pr'),
     risk,
     isFast: scalar(fm, 'fast') === 'true',
+    reviewerModel: scalar(fm, 'reviewer_model'),
+    helperModel: scalar(fm, 'helper_model'),
     status,
     stage,
     round,
@@ -624,7 +626,9 @@ export const register: Register = (on, options) => {
 
     // A section folds to one row; it opens by itself while it holds a problem, and a click overrides that. With no
     // task, only Reviews can show, and it opens by itself.
-    const defaults: Record<Section, boolean> = t ? openByDefault(t)
+    // Spend opens while an agent ran on another model than the task chose.
+    const mismatches = t ? modelMismatches(crew, t.reviewerModel, t.helperModel) : []
+    const defaults: Record<Section, boolean> = t ? { ...openByDefault(t), spend: mismatches.length > 0 }
       : { requirements: false, checks: false, rounds: false, reviews: true, spend: false, agents: false }
     const scope = t?.slug ?? ''
     const isOpen = (id: Section) => folds[`${scope}:${id}`] ?? defaults[id]
@@ -933,10 +937,15 @@ export const register: Register = (on, options) => {
           {reviewsFold}
 
           {spend.agents > 0 && fold('spend', 'Spend',
-            [`${plural(spend.agents, 'agent')} · ${tokenCount(spend.tokensIn)} in · ${tokenCount(spend.tokensOut)} out`, 'text'], '',
+            [`${plural(spend.agents, 'agent')} · ${tokenCount(spend.tokensIn)} in · ${tokenCount(spend.tokensOut)} out`, 'text'],
+            mismatches.length > 0 ? 'model mismatch' : '',
             () => [
               <Text key="since" dimColor>Since the last command; {tokenCount(spend.tokensCached)} of the input was cached</Text>,
               <Text key="models" dimColor wrap="truncate-end">{spend.models.map(([m, k]) => `${m} ×${k}`).join(' · ')}</Text>,
+              <Text key="chosen" dimColor wrap="truncate-end">
+                Chosen: reviewers {choiceLabel(t.reviewerModel)} · helpers {choiceLabel(t.helperModel)}
+              </Text>,
+              ...mismatches.map((m, i) => <Text key={`mismatch-${i}`} color="warning" wrap="truncate-end">⚠ {m}</Text>),
             ])}
 
           {others.length > 0 && fold('agents', 'Other agents',

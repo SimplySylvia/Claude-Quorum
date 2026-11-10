@@ -6,7 +6,7 @@ import {
   parseProof, parseSpec, prDetail, prFromUrl, prNext,
   requirementState, roleOf,
   roundReviewers, slugFromHead, spendOf, stageOf, stages, tokenCount,
-  keptFindings, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, latestRun, liveReview, shortRange,
+  keptFindings, modelMismatches, choiceLabel, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, latestRun, liveReview, shortRange,
 } from '../../hooks/dashboard/task'
 
 const state = (status: string, extra = '') => `---
@@ -701,6 +701,16 @@ test('spend totals the agents\' tokens and counts them by model, most used first
   expect(spendOf([]).agents).toBe(0)
 })
 
+test('a model choice matches the model the engine reports by alias, and inherit is never a mismatch', () => {
+  const agent = (type: string, model: string) =>
+    ({ id: type, type, role: type, description: type, model, startedAt: 0, endedAt: 1, tokensIn: 0, tokensCached: 0, tokensOut: 0 })
+  const crew = [agent('code-reviewer', 'claude-haiku-5-5'), agent('pr-writer', 'claude-sonnet-5-5'), agent('pr-writer', 'claude-sonnet-5-5'), agent('prover', 'claude-opus-5-5')]
+  expect(modelMismatches(crew, 'haiku', 'haiku')).toEqual(['helpers chose haiku, but 2 ran on claude-sonnet-5-5'])
+  expect(modelMismatches(crew, 'claude-haiku-5-5', 'inherit')).toEqual([])
+  expect(modelMismatches(crew, '', '')).toEqual([])
+  expect(choiceLabel('inherit')).toBe('session model')
+})
+
 test('the pane shows what the command\'s agents used, from each request, and the model each ran on', async ($, on) => {
   const files: Record<string, string> = repo('IN_REVIEW')
   world(on, files)
@@ -738,6 +748,27 @@ test('the pane shows what the command\'s agents used, from each request, and the
   await pane.press({ key: 'toggle-spend' })
   expect(await pane.find({ type: 'Text', text: /^Since the last command; 1\.2M of the input was cached$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^claude-opus-5-5 ×1 · claude-haiku-5-5 ×1$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Chosen: reviewers not chosen · helpers not chosen$/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('an agent on another model than the task chose is flagged, and opens Spend by itself', async ($, on) => {
+  const files: Record<string, string> = repo('IN_REVIEW')
+  files['.tasks/export-csv/state.md'] = state('IN_REVIEW', 'reviewer_model: haiku\nhelper_model: inherit\n')
+  world(on, files)
+  on('agent.spawn', (_, e) => ({ model: e.subagentType === 'quorum:verifier-voter' ? 'claude-haiku-5-5' : 'claude-opus-5-5', agentId: e.tool_use_id }))
+  const spawn = (id: string, subagentType: string, prompt: string) =>
+    $.agent.spawn({ tool_use_id: id, prompt, description: id, subagentType, parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await spawn('a1', 'quorum:code-reviewer', 'Persona: Logic & Edge-Case Hunter. Task: export-csv.')
+  await spawn('v1', 'quorum:verifier-voter', 'Task: export-csv.')
+  await spawn('b1', 'quorum:builder', 'Task export-csv. Fix the findings.')
+
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^\s*model mismatch$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Chosen: reviewers haiku · helpers session model$/ })).toBeDefined()
+  // The voter ran on haiku as chosen, and the builder always runs on the session's model.
+  expect(await pane.find({ type: 'Text', text: /^⚠ reviewers chose haiku, but 1 ran on claude-opus-5-5$/ })).toBeDefined()
   await pane.unmount()
 })
 

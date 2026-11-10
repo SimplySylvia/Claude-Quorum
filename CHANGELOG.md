@@ -18,6 +18,9 @@ copy with `/plugin marketplace update`.
   same false alarm dropped twice, or a blocker the blind test found that every reviewer missed. It only suggests:
   the rule is written after you say yes, as before. The new `quorum-lessons` helper finds the repeated categories.
   The planner now names the learned rules that apply to each step, so a lesson shapes the next plan too.
+- **The dashboard shows the task's model choices.** The Spend section lists the reviewer and helper models the
+  task chose next to the models its agents ran on, and warns when an agent ran on another one (a choice that didn't
+  take); the section opens by itself while it does.
 - **`/quorum:codify-lesson` learns from `/quorum:review`.** It reads a review's `run-<N>/` files and log as it reads
   a task's rounds, so a Pattern Category that keeps coming back, a false alarm the voter keeps dropping, or a kept
   finding you say is wrong can become a rule. The review's report suggests it when you say a finding was wrong.

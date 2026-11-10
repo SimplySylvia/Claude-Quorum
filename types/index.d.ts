@@ -74,6 +74,9 @@ export type Snapshot = {
   spec: Spec | null
   checks: Check[]
   proof: Proof | null
+  // state.md's model choices (skills/pipeline-laws/models.md): a model, `inherit`, or '' before the spec asks.
+  reviewerModel: string
+  helperModel: string
   // HEAD's commit, '' when it can't be read, and whether the proof ran at an older one.
   head: string
   isProofStale: boolean

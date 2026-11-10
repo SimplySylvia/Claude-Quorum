@@ -232,7 +232,7 @@ finished with its PR open.</sub>
   - **Task card:** title, goal, status, a stage stepper, and the PR once there is one.
   - **Now card:** what the current stage is doing, such as each reviewer's progress and the findings the voter
     kept. Its border turns amber when it's your move and red when the task is stuck.
-  - **Folding sections:** Requirements, Checks, Review rounds, Spend (tokens and models used), and Other agents. A
+  - **Folding sections:** Requirements, Checks, Review rounds, Spend (tokens and models used, the models the task chose, and a warning when an agent ran on another), and Other agents. A
     section with a problem opens by itself.
 - **▶ Next** puts the next command in your prompt to send or edit. It never sends it for you.
 - **Toasts** when a task converges, halts, escalates, or is ready for you.

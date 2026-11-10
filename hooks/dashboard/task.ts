@@ -372,6 +372,36 @@ export function spendOf(agents: QuorumAgent[]): Spend {
   return { agents: agents.length, tokensIn, tokensCached, tokensOut, models: [...models].sort((x, y) => y[1] - x[1]) }
 }
 
+// Which of the task's model choices an agent runs on (skills/pipeline-laws/models.md); '' for the session's model.
+export function modelGroup(type: string): 'reviewers' | 'helpers' | '' {
+  if (['spec-reviewer', 'code-reviewer', 'pattern-auditor', 'docs-auditor', 'a11y-auditor', 'security-reviewer', 'verifier-voter'].includes(type)) return 'reviewers'
+  if (['friction-triager', 'pr-writer'].includes(type)) return 'helpers'
+  return ''
+}
+
+// How a choice reads: the model, "session model" for inherit, "not chosen" before the spec asks.
+export const choiceLabel = (choice: string) => (choice === 'inherit' ? 'session model' : choice || 'not chosen')
+
+// Agents that ran on another model than the task chose for their group, one line per group and model: a choice that
+// didn't take. A choice is often an alias (`haiku`) of the model the engine reports (`claude-haiku-5-5`), so either
+// containing the other is a match. `inherit` and no choice can't be checked against a model name.
+export function modelMismatches(agents: QuorumAgent[], reviewerModel: string, helperModel: string): string[] {
+  const chosen = { reviewers: reviewerModel, helpers: helperModel }
+  const off = new Map<string, number>()
+  for (const a of agents) {
+    const group = modelGroup(a.type)
+    const want = group ? chosen[group].toLowerCase() : ''
+    const got = a.model.toLowerCase()
+    if (!want || want === 'inherit' || !got || got.includes(want) || want.includes(got)) continue
+    const key = `${group}\t${a.model}`
+    off.set(key, (off.get(key) ?? 0) + 1)
+  }
+  return [...off].map(([key, n]) => {
+    const [group = '', model = ''] = key.split('\t')
+    return `${group} chose ${chosen[group as 'reviewers' | 'helpers']}, but ${n} ran on ${model}`
+  })
+}
+
 // A token count in a few characters: 950, 12k, 1.4M.
 export function tokenCount(n: number): string {
   if (n < 1000) return String(n)
