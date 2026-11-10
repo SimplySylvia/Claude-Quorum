@@ -201,11 +201,12 @@ export const ROLE_LABEL: Record<string, string> = {
   feasibility: 'Feasibility critic', improver: 'Spec improver', blind: 'Blind user', triage: 'Friction triage',
 }
 
-// The reviewers a round runs, per skills/plan and skills/review-loop: the ones the tier always gets, plus any
-// conditional one (tests, a11y, security) that left a reply. `files` maps a reviewer's file to its text.
-export function roundReviewers(kind: 'plan' | 'review', risk: string, files: Record<string, string>): Reviewer[] {
+// The reviewers a round runs, per skills/plan, skills/review-loop, and skills/review (`standalone`): the ones the
+// tier always gets, plus any conditional one (tests, a11y, security) that left a reply. `files` maps a reviewer's
+// file to its text.
+export function roundReviewers(kind: 'plan' | 'review' | 'standalone', risk: string, files: Record<string, string>): Reviewer[] {
   const isWide = risk === 'MEDIUM' || risk === 'HIGH'
-  const always = ['logic', ...(isWide ? ['architecture', 'patterns', 'docs'] : []), ...(kind === 'plan' && risk === 'HIGH' ? ['security'] : [])]
+  const always = ['logic', ...(isWide ? ['architecture', 'patterns', 'docs'] : []), ...(kind !== 'review' && risk === 'HIGH' ? ['security'] : [])]
   const roles = [...always, ...['docs', 'tests', 'a11y', 'security'].filter(r => !always.includes(r) && files[`${r}.md`] !== undefined)]
   return roles.map(role => reviewer(role, files[`${role}.md`]))
 }
@@ -405,6 +406,34 @@ export function splitTicket(title: string): { title: string; ticket: string } {
   return m ? { title: m[1] ?? title, ticket: m[2] ?? '' } : { title, ticket: '' }
 }
 
+// A standalone review's folder name (skills/review: `review-<branch>`, `review-pr-<n>`, `review-<sha>`).
+export const isReviewId = (name: string) => /^review-[A-Za-z0-9._-]+$/.test(name)
+
+// The statuses where a standalone review is running: its reviewers and voter, or its builder fixing.
+export const isReviewRunning = (status: string) => status === 'REVIEWING' || status === 'FIXING'
+
+// The current run of a review: the highest `run-<N>` folder, 0 before the first is made.
+export function latestRun(names: string[]): number {
+  return Math.max(0, ...names.map(n => Number(/^run-(\d+)$/.exec(n)?.[1] ?? 0)))
+}
+
+// The review this session is running, if any: the live card. Another session's running review may be live in
+// another terminal or long dead, so it stays in the history with a note.
+export const liveReview = <T extends { status: string; isOurs: boolean }>(reviews: T[]): T | null =>
+  reviews.find(r => isReviewRunning(r.status) && r.isOurs) ?? null
+
+// How long ago, in a few characters: just now, 5m, 2h, 3d.
+export function ago(now: number, then: number): string {
+  const minutes = Math.floor(Math.max(0, now - then) / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  if (minutes < 48 * 60) return `${Math.floor(minutes / 60)}h ago`
+  return `${Math.floor(minutes / (24 * 60))}d ago`
+}
+
+// A range of full SHAs, as the review records it, in short SHAs: `1a2b3c4..5d6e7f8`.
+export const shortRange = (range: string) => range.replace(/\b([0-9a-f]{7})[0-9a-f]{33}\b/g, '$1')
+
 // Which sections open by themselves: those holding a problem, so a fold never hides one.
 export function openByDefault(t: Snapshot): Record<Section, boolean> {
   const requirements = (t.spec?.requirements ?? []).map(r => requirementState(r.n, t.checks).state)
@@ -416,6 +445,7 @@ export function openByDefault(t: Snapshot): Record<Section, boolean> {
       || (t.stopBlocks > 0 && isHookActive(t.status))
       || t.pending > 0,
     rounds: t.status === 'HALTED',
+    reviews: false,
     spend: false,
     agents: false,
   }

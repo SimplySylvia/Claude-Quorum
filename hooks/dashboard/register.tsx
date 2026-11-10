@@ -1,15 +1,16 @@
-// Quorum's dashboard: a status line, a stage rail above the prompt, and a pane with what the current stage is doing
-// (each reviewer of the round, the blind test's reports), how the task's checks stand, its stages, review rounds and
-// running agents. It only reads .tasks/; the skills and bin/ scripts stay the source of truth.
+// Quorum's dashboard: a band above the prompt, and a pane with what the current stage is doing (each reviewer of the
+// round, the blind test's reports), how the task's checks stand, its stages, review rounds and running agents, and
+// standalone reviews (/quorum:review): the one running now, and the ones before it. It only reads .tasks/; the skills and bin/ scripts stay the
+// source of truth.
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Check, Findings, KeptFinding, Now, PullRequest, QuorumAgent, Reviewer, Round, Section, Snapshot, Stage } from '../../types'
+import type { Check, Findings, KeptFinding, Now, PullRequest, QuorumAgent, Review, Reviewer, Round, Section, Snapshot, Stage } from '../../types'
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, stageOf, stages, tokenCount,
-  keptFindings, nextCommand, openByDefault, problemsOf, splitTicket,
+  keptFindings, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange,
 } from './task'
 
 const PANE = 'quorum-dashboard'
@@ -18,6 +19,7 @@ const COMMAND = 'quorum-dashboard'
 const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-8' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-3' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
+const reviews = atom({ plugin: 'quorum', key: 'reviews' } as const, [], { shape: 'reviews-1' })
 // Sections the person opened or closed in the pane, by `<slug>:<section>`.
 const sections = atom({ plugin: 'quorum', key: 'sections' } as const, {}, { shape: 'sections-1' })
 // How long a PR lookup stands before the next refresh asks GitHub again.
@@ -202,6 +204,44 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
   }
 }
 
+// How many reviews the dashboard keeps: the live one and the history under it.
+const REVIEWS_SHOWN = 6
+
+// The newest standalone reviews (skills/review keeps each in .tasks/review-<id>/), by when state.md last changed.
+// `session` is this session's id: a running review that records it is the live one.
+async function reviewsSnapshot($: EngineInterface, root: string, session: string): Promise<Review[]> {
+  const tasks = `${root}/.tasks`
+  const dirs = (await $.fs.list(tasks).catch(() => [])).filter(e => e.kind === 'dir' && isReviewId(e.name))
+  const dated = await Promise.all(dirs.map(async e => ({
+    id: e.name,
+    mtimeMs: (await $.fs.stat(`${tasks}/${e.name}/state.md`).catch(() => null))?.mtimeMs ?? -1,
+  })))
+  const out: Review[] = []
+  for (const { id, mtimeMs } of dated.filter(d => d.mtimeMs >= 0).sort((a, b) => b.mtimeMs - a.mtimeMs)) {
+    if (out.length >= REVIEWS_SHOWN) break
+    const fm = parseFrontmatter((await readOr($, `${tasks}/${id}/state.md`)) ?? '')
+    if (scalar(fm, 'kind') !== 'review') continue
+    const risk = scalar(fm, 'risk')
+    const run = latestRun((await $.fs.list(`${tasks}/${id}`).catch(() => [])).filter(e => e.kind === 'dir').map(e => e.name))
+    const files = run > 0 ? await readFiles($, `${tasks}/${id}/run-${run}`, REVIEW_FILES) : {}
+    const survivors = files['survivors.md']
+    out.push({
+      id,
+      status: scalar(fm, 'status'),
+      risk,
+      isOurs: session !== '' && scalar(fm, 'session') === session,
+      changedAt: mtimeMs,
+      range: shortRange(scalar(fm, 'range')),
+      run,
+      reviewers: roundReviewers('standalone', risk, files),
+      voter: reviewer('voter', files['votes.md']),
+      survivors: survivors === undefined ? null : countFindings(survivors),
+      kept: survivors === undefined ? [] : keptFindings(survivors),
+    })
+  }
+  return out
+}
+
 // The task's PR as GitHub last reported it, else as state.md records it.
 const prOf = (t: Snapshot, known: PullRequest | null) => (known?.slug === t.slug ? known : prFromUrl(t.slug, t.prUrl))
 
@@ -269,6 +309,14 @@ function reviewerProgress(now: Now): string {
   return `reviewers ${done}/${now.reviewers.length}`
 }
 
+// Where a standalone review is: its reviewers, then the voter, then (FIXING) the builder.
+function reviewProgress(r: Review): string {
+  if (r.status === 'FIXING') return 'builder fixing'
+  const done = r.reviewers.filter(x => x.findings !== null).length
+  if (r.run > 0 && done === r.reviewers.length && r.voter.findings === null) return 'voter voting'
+  return `reviewers ${done}/${r.reviewers.length}`
+}
+
 function checkProgress(checks: Check[], hasProof: boolean): string {
   return hasProof ? `checks ${checks.filter(c => c.result === 'PASS').length}/${checks.length}` : ''
 }
@@ -301,11 +349,14 @@ const nextFor = (t: Snapshot, known: PullRequest | null) => (isPrStage(t.status)
 
 const seconds = (a: QuorumAgent, now: number) => `${Math.max(0, Math.round(((a.endedAt ?? now) - a.startedAt) / 1000))}s`
 
-// Re-read the task, redraw, set the status line, and toast a status change worth interrupting for.
+// Re-read the task and the reviews, redraw, and toast a status change worth interrupting for.
 async function refresh($: EngineInterface, maxRounds: number, forcePr = false): Promise<Snapshot | null> {
   const before = await read($, task)
   const after = await snapshot($, maxRounds, before)
   await update($, task, () => after)
+  const session = await $.session.id().catch(() => '')
+  const found = await reviewsSnapshot($, await $.session.root(), session)
+  await update($, reviews, () => found)
   // In the background, so a slow GitHub never holds up the turn; a failed lookup just leaves the last answer.
   if (after) void lookupPr($, after, forcePr).catch(() => undefined)
   const message = after && TOASTS[after.status]
@@ -347,7 +398,7 @@ export const register: Register = (on, options) => {
     await settleAgents($)
     // The band above the prompt says it all, so Quorum keeps no status line; clear one an earlier version set.
     $.ui.status(undefined)
-    if (await refresh($, maxRounds)) void open($)
+    if ((await refresh($, maxRounds)) || liveReview(await read($, reviews))) void open($)
     return next(e)
   })
 
@@ -358,8 +409,9 @@ export const register: Register = (on, options) => {
       return { text: 'Quorum dashboard closed.' }
     }
     const t = await refresh($, maxRounds)
+    const r = liveReview(await read($, reviews))
     await open($)
-    return { text: t ? `Quorum dashboard opened for ${t.slug}.` : 'Quorum dashboard opened. No active task yet.' }
+    return { text: t ? `Quorum dashboard opened for ${t.slug}.` : r ? `Quorum dashboard opened for ${r.id}.` : 'Quorum dashboard opened. No active task yet.' }
   }).catch(() => ({ text: 'Quorum dashboard: could not open; run claude --debug for the reason.' }))
 
   // A /quorum:* command starting: refresh, start a fresh agent list, and open the pane unasked.
@@ -447,11 +499,24 @@ export const register: Register = (on, options) => {
   // and the current one by name, the round's progress, then Next (it fills the prompt) and Dashboard.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const t = await read($, task)
-    if (!t || e.props.hasSurvey) return next(e)
+    const r = liveReview(await read($, reviews))
+    if ((!t && !r) || e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
+    const columns = e.props.bodyColumns ?? 120
+    // No task, only a review: its status, what it reviews, and how far it got.
+    if (!t && r) {
+      return (
+        <Box flexDirection="row" gap={2}>
+          <Text backgroundColor="claude" color="inverseText" bold> {r.status} </Text>
+          {columns >= 90 ? <Text dimColor>{r.id} · {r.risk}</Text> : null}
+          <Text bold>{reviewProgress(r)}</Text>
+          <Button key="open" label="Dashboard" onPress={() => open($, true)} />
+        </Box>
+      )
+    }
+    if (!t) return next(e)
     const known = prOf(t, await read($, pr))
     const rail = railFor(t, known)
-    const columns = e.props.bodyColumns ?? 120
     const current = rail.find(s => s.state === 'active' || s.state === 'stuck' || s.state === 'waiting')
     const currentLabel = !current ? ''
       : current.name === 'Review' && t.round > 0 ? `Review ${t.round}/${t.maxRounds}`
@@ -474,6 +539,8 @@ export const register: Register = (on, options) => {
         </Text>
         {columns >= 110 && progress ? <Text dimColor>{progress}</Text> : null}
         {problems.length > 0 ? <Text color="error">{columns >= 110 ? problems.join(' · ') : problems[0]}</Text> : null}
+        {/* A review running beside the task, briefly: the pane has the rest. */}
+        {r && columns >= 110 ? <Text dimColor>{r.id}: {reviewProgress(r)}</Text> : null}
         <Box flexDirection="row" gap={1}>
           {command ? <Button key="next" variant="primary" label={columns >= 110 ? `▶ ${command}` : '▶ Next'} onPress={() => void fillPrompt($, command)} /> : null}
           <Button key="open" label="Dashboard" onPress={() => open($, true)} />
@@ -485,23 +552,13 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Link, Text } = $.ui.resolve(e)
     const t = await read($, task)
-    if (!t) {
-      return (
-        <Box key="empty" borderStyle="round" borderColor="subtle" flexDirection="column" paddingX={1}>
-          <Text bold>No active Quorum task</Text>
-          <Text dimColor>/quorum:spec-and-eval or /quorum:run starts one; /quorum:review reviews any diff.</Text>
-        </Box>
-      )
-    }
+    const all = await read($, reviews)
+    const rv = liveReview(all)
+    const past = all.filter(r => r !== rv)
     const crew = await read($, agents)
     const folds = await read($, sections)
     await read($, clock) // redraw on each tick
     const clockNow = await $.clock.now()
-    const known = prOf(t, await read($, pr))
-    const rail = railFor(t, known)
-    const n = t.now
-    const spec = t.spec
-    const { title, ticket } = splitTicket(spec?.title || t.slug)
 
     // A small filled label: the severity of a finding, or a check's result.
     const badge = (key: string, label: string, color: string) => (
@@ -553,21 +610,134 @@ export const register: Register = (on, options) => {
       if (important !== null) return line(role, 'done', ROLE_LABEL[role] ?? role, detail(important), important > 0)
       return agent ? line(role, 'running', ROLE_LABEL[role] ?? role, `running ${seconds(agent, clockNow)}`) : null
     }
-    const keptLine = (f: KeptFinding, i: number) => (
-      <Box key={`kept-${i}`} flexDirection="row" gap={1}>
-        {badge(`kept-badge-${i}`, f.tag === 'PRE-EXISTING' ? 'PRE' : f.tag, f.tag === 'IMPORTANT' ? 'error' : f.tag === 'NIT' ? 'subtle' : 'warning')}
+    // `prefix` keeps the review card's keys apart from the Now card's.
+    const keptLine = (f: KeptFinding, i: number, prefix = 'kept') => (
+      <Box key={`${prefix}-${i}`} flexDirection="row" gap={1}>
+        {badge(`${prefix}-badge-${i}`, f.tag === 'PRE-EXISTING' ? 'PRE' : f.tag, f.tag === 'IMPORTANT' ? 'error' : f.tag === 'NIT' ? 'subtle' : 'warning')}
         <Text dimColor wrap="truncate-end">{f.loc}</Text>
         <Box flexGrow={1} flexShrink={1}><Text wrap="truncate-end">{f.title}{f.confidence !== null ? ` (${f.confidence})` : ''}</Text></Box>
-        {copy(`copy-kept-${i}`, f.loc)}
+        {copy(`copy-${prefix}-${i}`, f.loc)}
       </Box>
     )
 
-    const shown = new Set<string>(
-      n.kind === 'plan' || n.kind === 'review' ? [...n.reviewers.map(r => r.role), 'voter']
+    // A section folds to one row; it opens by itself while it holds a problem, and a click overrides that. With no
+    // task, only Reviews can show, and it opens by itself.
+    const defaults: Record<Section, boolean> = t ? openByDefault(t)
+      : { requirements: false, checks: false, rounds: false, reviews: true, spend: false, agents: false }
+    const scope = t?.slug ?? ''
+    const isOpen = (id: Section) => folds[`${scope}:${id}`] ?? defaults[id]
+    const fold = (id: Section, label: string, summary: [string, string], note: string, body: () => unknown) => {
+      const open = isOpen(id)
+      return (
+        <Box key={`section-${id}`} flexDirection="column">
+          <Button
+            key={`toggle-${id}`}
+            plain
+            hover={{ color: 'claude' }}
+            onPress={() => void update($, sections, all => ({ ...all, [`${scope}:${id}`]: !open }))}
+          >
+            <Text dimColor>{open ? '▾ ' : '▸ '}</Text>
+            <Text bold>{label.padEnd(15)}</Text>
+            <Text color={summary[1]}>{summary[0]}</Text>
+            {note ? <Text color={defaults[id] ? 'warning' : undefined} dimColor={!defaults[id]}>  {note}</Text> : null}
+          </Button>
+          {open ? <Box flexDirection="column" marginLeft={2}>{body() as never}</Box> : null}
+        </Box>
+      )
+    }
+
+    // The reviews before the live one, newest first. A row opens to its range and what its latest run kept.
+    // INTERRUPTED: quorum-reviews found it unfinished. Running, but not in this session: another session runs it, or
+    // ran it and stopped, which only that session's next Quorum command can tell.
+    const isElsewhere = (r: Review) => isReviewRunning(r.status) && !r.isOurs
+    const reviewRow = (r: Review) => {
+      const isRowOpen = folds[`review:${r.id}`] ?? false
+      const [glyph, color, result]: [string, string, string] = r.status === 'INTERRUPTED' ? ['!', 'warning', 'interrupted']
+        : isElsewhere(r) ? ['●', 'warning', 'running elsewhere or interrupted']
+          : r.status !== 'REVIEWED' ? ['○', 'inactive', r.status || 'no status']
+            : !r.survivors ? ['✓', 'subtle', 'no findings saved']
+              : r.survivors.important > 0 ? ['✗', 'error', findingsText(r.survivors)] : ['✓', 'success', findingsText(r.survivors)]
+      return (
+        <Box key={`past-${r.id}`} flexDirection="column">
+          <Button key={`past-toggle-${r.id}`} plain hover={{ color: 'claude' }} onPress={() => void update($, sections, all => ({ ...all, [`review:${r.id}`]: !isRowOpen }))}>
+            <Text color={color}>{glyph} </Text>
+            <Text>{r.id}  </Text>
+            <Text color={color === 'warning' ? 'warning' : undefined} dimColor={color !== 'warning'}>{result}</Text>
+            <Text dimColor> · {r.risk || 'no tier'} · {plural(r.run, 'run')} · {ago(clockNow, r.changedAt)}</Text>
+          </Button>
+          {isRowOpen ? (
+            <Box flexDirection="column" marginLeft={2}>
+              {r.range ? <Text dimColor wrap="truncate-end">{r.range}</Text> : null}
+              {r.status === 'INTERRUPTED' ? <Text color="warning" wrap="truncate-end">Run {r.run} never finished; /quorum:review on the same target starts a new run</Text> : null}
+              {isElsewhere(r) ? <Text color="warning" wrap="truncate-end">Another session runs it, or stopped mid-run; its next Quorum command marks it interrupted</Text> : null}
+              {r.kept.map((f, i) => keptLine(f, i, `past-${r.id}`))}
+            </Box>
+          ) : null}
+        </Box>
+      )
+    }
+    const stalled = past.filter(r => r.status === 'INTERRUPTED' || isElsewhere(r)).length
+    const reviewsFold = past.length > 0 && fold('reviews', 'Reviews',
+      [`${plural(past.length, 'review')} · newest ${ago(clockNow, past[0]?.changedAt ?? clockNow)}`, 'text'],
+      stalled ? `${stalled} unfinished` : '',
+      () => past.map(reviewRow))
+
+    // A standalone review still running, as a card of its own: its reviewers, then the voter and what it kept, then
+    // (FIXING) the builder. Beside a task it goes under the Now card, so it never hides the task.
+    const reviewCard = rv && (() => {
+      const builder = crew.findLast(a => a.role === 'builder')
+      const important = rv.survivors?.important ?? 0
+      return (
+        <Box key="review" borderStyle="round" borderColor="claude" flexDirection="column" paddingX={1}>
+          <Text wrap="truncate-end">
+            <Text bold>Review · </Text>
+            <Text bold color="claude">{rv.id}</Text>
+          </Text>
+          <Text dimColor wrap="truncate-end">
+            {[rv.status, rv.risk, rv.range, rv.run > 0 ? `run ${rv.run}` : ''].filter(Boolean).join(' · ')}
+          </Text>
+          {rv.run === 0 ? <Text dimColor>Picking the reviewers</Text> : (
+            <Box flexDirection="column">
+              <Text dimColor>reviewers {rv.reviewers.filter(r => r.findings !== null).length}/{rv.reviewers.length} replied</Text>
+              {rv.reviewers.map(reviewerLine)}
+              {reviewerLine(rv.voter)}
+              {rv.kept.filter(f => f.tag !== 'NIT' || rv.kept.length <= 4).map((f, i) => keptLine(f, i, 'review-kept'))}
+              {rv.status === 'FIXING'
+                ? line('builder', builder?.endedAt === null ? 'running' : builder ? 'done' : 'waiting', 'Builder',
+                  builder ? `fixing ${plural(important, 'IMPORTANT finding')} · ${seconds(builder, clockNow)}` : `fixes ${plural(important, 'IMPORTANT finding')}`)
+                : null}
+            </Box>
+          )}
+        </Box>
+      )
+    })()
+
+    if (!t) {
+      return (
+        <Box flexDirection="column" gap={1}>
+          {reviewCard || (
+            <Box key="empty" borderStyle="round" borderColor="subtle" flexDirection="column" paddingX={1}>
+              <Text bold>No active Quorum task</Text>
+              <Text dimColor>/quorum:spec-and-eval or /quorum:run starts one; /quorum:review reviews any diff.</Text>
+            </Box>
+          )}
+          {reviewsFold}
+        </Box>
+      )
+    }
+    const known = prOf(t, await read($, pr))
+    const rail = railFor(t, known)
+    const n = t.now
+    const spec = t.spec
+    const { title, ticket } = splitTicket(spec?.title || t.slug)
+
+    const shown = new Set<string>([
+      ...(n.kind === 'plan' || n.kind === 'review' ? [...n.reviewers.map(r => r.role), 'voter']
         : n.kind === 'spec' ? n.reviewers.map(r => r.role)
           : n.kind === 'build' ? ['builder', 'prover']
-            : n.kind === 'blind' ? ['blind', 'a11y', 'security', 'triage'] : [],
-    )
+            : n.kind === 'blind' ? ['blind', 'a11y', 'security', 'triage'] : []),
+      ...(rv ? [...rv.reviewers.map(r => r.role), 'voter', ...(rv.status === 'FIXING' ? ['builder'] : [])] : []),
+    ])
     const others = crew.filter(a => !shown.has(a.role)).slice(-6)
     const spend = spendOf(crew)
     const taskChecks = t.checks.filter(c => c.id !== 'fast').length
@@ -583,28 +753,6 @@ export const register: Register = (on, options) => {
     const next = nextFor(t, known)
     const command = nextCommand(next)
 
-    // A section folds to one row; it opens by itself while it holds a problem, and a click overrides that.
-    const defaults = openByDefault(t)
-    const isOpen = (id: Section) => folds[`${t.slug}:${id}`] ?? defaults[id]
-    const fold = (id: Section, label: string, summary: [string, string], note: string, body: () => unknown) => {
-      const open = isOpen(id)
-      return (
-        <Box key={`section-${id}`} flexDirection="column">
-          <Button
-            key={`toggle-${id}`}
-            plain
-            hover={{ color: 'claude' }}
-            onPress={() => void update($, sections, all => ({ ...all, [`${t.slug}:${id}`]: !open }))}
-          >
-            <Text dimColor>{open ? '▾ ' : '▸ '}</Text>
-            <Text bold>{label.padEnd(15)}</Text>
-            <Text color={summary[1]}>{summary[0]}</Text>
-            {note ? <Text color={defaults[id] ? 'warning' : undefined} dimColor={!defaults[id]}>  {note}</Text> : null}
-          </Button>
-          {open ? <Box flexDirection="column" marginLeft={2}>{body() as never}</Box> : null}
-        </Box>
-      )
-    }
 
     const failedRequirement = requirements.find(r => r.state === 'fail')
     const uncheckedRequirement = requirements.find(r => r.state === 'none')
@@ -668,7 +816,7 @@ export const register: Register = (on, options) => {
               <Text dimColor>{reviewerProgress(n)} replied</Text>
               {n.reviewers.map(reviewerLine)}
               {reviewerLine(n.voter)}
-              {n.kept.filter(f => f.tag !== 'NIT' || n.kept.length <= 4).map(keptLine)}
+              {n.kept.filter(f => f.tag !== 'NIT' || n.kept.length <= 4).map((f, i) => keptLine(f, i))}
               {(() => {
                 const v = verdict(n)
                 return v ? <Text color={v[1]} wrap="truncate-end">{v[0]}</Text> : null
@@ -707,6 +855,8 @@ export const register: Register = (on, options) => {
             {command ? <Text dimColor wrap="truncate-end">{next === command ? 'fills the prompt' : next}</Text> : null}
           </Box>
         </Box>
+
+        {reviewCard}
 
         <Box flexDirection="column" gap={1}>
           {requirements.length > 0 && fold('requirements', 'Requirements',
@@ -777,6 +927,8 @@ export const register: Register = (on, options) => {
                   )}
               </Text>
             )))}
+
+          {reviewsFold}
 
           {spend.agents > 0 && fold('spend', 'Spend',
             [`${plural(spend.agents, 'agent')} · ${tokenCount(spend.tokensIn)} in · ${tokenCount(spend.tokensOut)} out`, 'text'], '',

@@ -7,10 +7,18 @@ copy with `/plugin marketplace update`.
 
 ### Added
 
+- **The dashboard shows `/quorum:review`.** The review this session is running gets a card in the pane: what it
+  reviews, its tier and range, each reviewer's progress, the voter and the findings it kept, and the builder while
+  `--fix` runs. Beside an active task the card goes under the Now card and the band adds one dim line for it, so the
+  task stays in front; with no task, the band shows the review instead.
+- **A Reviews section in the pane** keeps the last few reviews after they finish, newest first: each one's status,
+  tier, runs, what its latest run kept, and when. A row opens to its range and kept findings, each with a copy
+  button. It starts folded beside a task, and open when there's none.
 - **Interrupted reviews are marked `INTERRUPTED`.** A review now records the session running it (`session` in its
   `state.md`). When `/quorum:review`, `/quorum:build`, or `/quorum:review-loop` starts, the new `quorum-reviews
   heal` marks any review that session left unfinished, and a review being run again, as `INTERRUPTED`, and logs
-  which run stopped.
+  which run stopped. The dashboard shows a review still running in another session as "running elsewhere or
+  interrupted", since only that session can tell.
 
 ### Fixed
 

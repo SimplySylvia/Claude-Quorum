@@ -14,23 +14,23 @@ its alt text. Open it with `--plugin-dir` and the installed Quorum disabled, so 
 
 ## 1. `/quorum:review`: what's left
 
-The command itself shipped (see `CHANGELOG.md`, Unreleased). Still to do:
+The command itself shipped in 0.5.0. Still to do:
 
-- **The dashboard doesn't show reviews.** A review is never the active task, so the pane and band ignore
-  it. Show the newest review in `REVIEWING` or `FIXING` (its reviewers, then the voter, as for a review round),
-  without hiding an active task.
-- **The dashboard screenshots:** see item 0.
-- **Run its eval** (`evals/run.sh --case review-standalone-finds-bug`) and a `--comment` eval against a fake `gh`.
+- **Reviews still running in another session.** The dashboard can't tell a live session from a dead one, so such a
+  review shows as "running elsewhere or interrupted" until that session runs another Quorum command. If Claude Code
+  ever lists live sessions, check against that.
+- **The dashboard screenshots:** see item 0; add one of a review.
+- **A `--comment` eval** against a fake `gh` (`review-standalone-finds-bug` passed on 2026-11-10).
 - **`/quorum:codify-lesson` from a review.** It reads a task's round files; let it read a review's `run-<N>/`
   files too, so a false alarm in a PR review can become a rule.
 
 ## 2. `/quorum:run`: what's left
 
-The command shipped (see `CHANGELOG.md`, Unreleased), with each stage's instructions moved to `steps.md` so `run`
+The command shipped in 0.5.0, with each stage's instructions moved to `steps.md` so `run`
 and the stage commands share them. Still to do:
 
-- **Run its evals:** `run-low-to-ready` (a whole LOW task: the most expensive case in the suite) and
-  `run-high-asks-tier`, plus the existing stage cases, since every stage skill moved into `steps.md`.
+- **Run its evals:** `run-high-asks-tier`, plus the existing stage cases, since every stage skill moved into
+  `steps.md` (`run-low-to-ready` passed on 2026-11-10).
 - **The dashboard during a run:** "autopilot · next stop: plan approval" in the band, and a toast at each stop, so a
   user can work elsewhere and come back when asked. The dashboard can't tell a run from single commands today.
 - **Context length.** A whole MEDIUM task is long for one conversation. Measure one with the Spend section and the

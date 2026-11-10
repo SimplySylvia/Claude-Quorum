@@ -12,7 +12,7 @@ export type Round = { n: number; findings: Findings | null; candidates: number |
 export type KeptFinding = { tag: 'IMPORTANT' | 'NIT' | 'PRE-EXISTING'; loc: string; title: string; confidence: number | null }
 
 // The pane's foldable sections. Each opens by itself while it holds a problem; a click overrides that.
-export type Section = 'requirements' | 'checks' | 'rounds' | 'spend' | 'agents'
+export type Section = 'requirements' | 'checks' | 'rounds' | 'reviews' | 'spend' | 'agents'
 
 // One reviewer of the current round: `findings` is null until its reply is saved.
 export type Reviewer = { role: string; findings: Findings | null }
@@ -80,6 +80,24 @@ export type Snapshot = {
   checksNote: string
 }
 
+// A standalone review (/quorum:review), from .tasks/review-<id>/: its latest run's reviewers, voter, and kept
+// findings, as for a task's review round. The one this session is running gets the live card; the rest are history.
+export type Review = {
+  id: string
+  status: string
+  risk: string
+  // Whether this session runs it (state.md's `session` is this session's id), and when its state.md last changed.
+  isOurs: boolean
+  changedAt: number
+  // The range it reviews, in short SHAs.
+  range: string
+  run: number
+  reviewers: Reviewer[]
+  voter: Reviewer
+  survivors: Findings | null
+  kept: KeptFinding[]
+}
+
 // The task branch's pull request on GitHub, as `gh pr list` last reported it. NONE: no PR yet; UNKNOWN: gh is
 // missing, signed out, or failed.
 export type PullRequest = {
@@ -115,6 +133,8 @@ declare module 'claude-code' {
       task: Shaped<Snapshot | null>
       agents: Shaped<QuorumAgent[]>
       pr: Shaped<PullRequest | null>
+      // The newest reviews first, a few at most.
+      reviews: Shaped<Review[]>
       now: number
       // Sections the person opened or closed, by `<slug>:<section>`; absent, the section's default.
       sections: Shaped<Record<string, boolean>>

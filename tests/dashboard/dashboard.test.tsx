@@ -6,7 +6,7 @@ import {
   parseProof, parseSpec, prDetail, prFromUrl, prNext,
   requirementState, roleOf,
   roundReviewers, slugFromHead, spendOf, stageOf, stages, tokenCount,
-  keptFindings, nextCommand, openByDefault, problemsOf, splitTicket,
+  keptFindings, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, latestRun, liveReview, shortRange,
 } from '../../hooks/dashboard/task'
 
 const state = (status: string, extra = '') => `---
@@ -122,11 +122,33 @@ const settle = async () => {
   for (let i = 0; i < 200; i++) await Promise.resolve()
 }
 
-// Stands for the engine beneath the plugin: a project at /repo holding the files in `files`.
-function world(on: On, files: Record<string, string>, root = '/repo') {
+// Stands for the engine beneath the plugin: a project at /repo holding the files in `files`, each last changed at
+// `mtimes[path]` (1 when not given). Folders are the ones those paths imply.
+function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Record<string, number> = {}) {
   const seen = { status: [] as (string | undefined)[], toasts: [] as string[], opened: 0, ticks: 0, live: [] as string[], copied: [] as string[], filled: [] as string[], draft: '' }
   const file = (path: string) => (path.startsWith(`${root}/`) ? files[path.slice(root.length + 1)] : undefined)
+  // The entries directly under `dir`, from the paths beneath it.
+  const entries = (dir: string) => {
+    const prefix = dir === root ? '' : `${dir.slice(root.length + 1)}/`
+    const names = new Map<string, 'file' | 'dir'>()
+    for (const path of Object.keys(files)) {
+      if (!path.startsWith(prefix)) continue
+      const [name, ...rest] = path.slice(prefix.length).split('/')
+      if (name) names.set(name, rest.length > 0 ? 'dir' : 'file')
+    }
+    return [...names].map(([name, kind]) => ({ name, kind, size: 0, mtimeMs: kind === 'file' ? mtimes[`${prefix}${name}`] ?? 1 : 0, isLink: false }))
+  }
+  on('fs.list', (_, e) => {
+    const found = entries(e.path)
+    if (found.length === 0) throw new Error(`ENOENT: ${e.path}`)
+    return { value: found }
+  })
+  on('fs.stat', (_, e) => {
+    if (file(e.path) === undefined) throw new Error(`ENOENT: ${e.path}`)
+    return { value: { kind: 'file' as const, size: 0, mtimeMs: mtimes[e.path.slice(root.length + 1)] ?? 1, isLink: false } }
+  })
   on('session.root', () => ({ value: root }))
+  on('session.id', () => ({ value: 'sess-a' }))
   on('agent.list', () => ({ value: seen.live.map(id => ({ id, description: '', type: 'quorum:code-reviewer', status: 'running' as const })) }))
   // Each period of $.clock.every is one dispatch; refusing the first ends that interval, so this counts intervals.
   on('clock.every', () => { seen.ticks++; return { deny: 'test' } })
@@ -268,7 +290,194 @@ describe('task helpers', () => {
       .toEqual(['logic', 'architecture', 'patterns', 'docs', 'a11y'])
     expect(roundReviewers('plan', 'HIGH', {}).map(r => r.role)).toEqual(['logic', 'architecture', 'patterns', 'docs', 'security'])
     expect(roundReviewers('review', 'LOW', { 'logic.md': SURVIVORS })[0]?.findings).toEqual({ important: 1, nit: 1, preExisting: 0 })
+    // A standalone review's HIGH tier always gets the security reviewer, as a plan's does; a task's review loop doesn't.
+    expect(roundReviewers('standalone', 'HIGH', {}).map(r => r.role)).toEqual(['logic', 'architecture', 'patterns', 'docs', 'security'])
+    expect(roundReviewers('review', 'HIGH', {}).map(r => r.role)).toEqual(['logic', 'architecture', 'patterns', 'docs'])
   })
+
+  test('reads a standalone review\'s folder, run, and range', () => {
+    expect(isReviewId('review-pr-12')).toBe(true)
+    expect(isReviewId('review-feat-csv-export')).toBe(true)
+    expect(isReviewId('export-csv')).toBe(false)
+    expect(isReviewId('review-')).toBe(false)
+    expect(latestRun([])).toBe(0)
+    expect(latestRun(['run-1', 'run-10', 'run-2', 'intent.md', 'run-x'])).toBe(10)
+    expect(shortRange(`${'1a2b3c4'.padEnd(40, '0')}..${'5d6e7f8'.padEnd(40, 'a')}`)).toBe('1a2b3c4..5d6e7f8')
+    expect(shortRange('main..HEAD')).toBe('main..HEAD')
+  })
+
+  test('the live review is this session\'s running one; times read as how long ago', () => {
+    const r = (id: string, status: string, isOurs: boolean) => ({ id, status, isOurs })
+    expect(liveReview([r('a', 'REVIEWED', true), r('b', 'REVIEWING', false), r('c', 'FIXING', true)])?.id).toBe('c')
+    expect(liveReview([r('a', 'INTERRUPTED', true), r('b', 'REVIEWING', false)])).toBeNull()
+    expect(ago(60_000, 30_000)).toBe('just now')
+    expect(ago(5 * 60_000, 0)).toBe('5m ago')
+    expect(ago(3 * 3_600_000, 0)).toBe('3h ago')
+    expect(ago(3 * 86_400_000, 0)).toBe('3d ago')
+  })
+})
+
+const reviewState = (status: string, risk = 'MEDIUM', session = 'sess-a') => `---
+slug: review-pr-12
+kind: review
+range: ${'1a2b3c4'.padEnd(40, '0')}..${'5d6e7f8'.padEnd(40, 'a')}
+session: ${session}
+risk: ${risk}
+status: ${status}
+round: 0
+---
+## Run 1
+`
+
+test('this session\'s review with no task shows in the band and the pane: reviewers, voter, builder, then history', async ($, on) => {
+  const files: Record<string, string> = {
+    '.git/HEAD': 'ref: refs/heads/main\n',
+    '.tasks/review-pr-12/state.md': reviewState('REVIEWING'),
+    '.tasks/review-pr-12/intent.md': 'From PR #12\n',
+  }
+  const seen = world(on, files)
+  on('ui.render', ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>engine</Text>
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(seen.opened).toBe(1)
+
+  // Before its first run folder: the card says so, and nothing has replied.
+  let pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^review-pr-12$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^REVIEWING · MEDIUM · 1a2b3c4\.\.5d6e7f8$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /Picking the reviewers/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /No active Quorum task/ })).toBeUndefined()
+  await pane.unmount()
+
+  files['.tasks/review-pr-12/run-1/logic.md'] = SURVIVORS
+  await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/review-pr-12/run-1/logic.md', content: SURVIVORS })
+  let band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ type: 'Text', text: /^ REVIEWING $/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /^review-pr-12 · MEDIUM$/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /^reviewers 1\/4$/ })).toBeDefined()
+  expect(await band.find({ type: 'Button', key: 'next' })).toBeUndefined()
+  await band.unmount()
+  pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /run 1$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /reviewers 1\/4 replied/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✗ Logic & edge cases\s+1 IMPORTANT · 1 NIT$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^○ Verifier vote\s+waiting$/ })).toBeDefined()
+  await pane.unmount()
+
+  for (const role of ['architecture', 'patterns', 'docs']) files[`.tasks/review-pr-12/run-1/${role}.md`] = 'Summary: 0 issues found.\n'
+  await $.tool.call({ tool: 'Bash', command: 'cat > .tasks/review-pr-12/run-1/candidates.md' })
+  band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ type: 'Text', text: /^voter voting$/ })).toBeDefined()
+  await band.unmount()
+
+  // The voter kept the finding, and the builder is fixing it.
+  files['.tasks/review-pr-12/run-1/votes.md'] = SURVIVORS
+  files['.tasks/review-pr-12/run-1/survivors.md'] = SURVIVORS
+  files['.tasks/review-pr-12/state.md'] = reviewState('FIXING')
+  await $.tool.call({ tool: 'Bash', command: 'quorum-state --task review-pr-12 set status FIXING' })
+  band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ type: 'Text', text: /^ FIXING $/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /^builder fixing$/ })).toBeDefined()
+  await band.unmount()
+  pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /kept 1 IMPORTANT · 1 NIT/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^app\/report\.py:42$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^○ Builder\s+fixes 1 IMPORTANT finding$/ })).toBeDefined()
+  await pane.press({ key: 'copy-review-kept-0' })
+  expect(seen.copied).toEqual(['app/report.py:42'])
+  await pane.unmount()
+
+  // Once REVIEWED it's over: the band is the engine's again, and the pane keeps the review in its history, open by
+  // itself since there's no task. Its row opens to the range and the kept findings.
+  files['.tasks/review-pr-12/state.md'] = reviewState('REVIEWED')
+  await $.tool.call({ tool: 'Bash', command: 'quorum-state --task review-pr-12 set status REVIEWED' })
+  band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect((await band.find({ type: 'Text', text: /engine/ }))?.text).toBe('engine')
+  await band.unmount()
+  pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /No active Quorum task/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^1 review · newest just now$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^review-pr-12 {2}$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^1 IMPORTANT · 1 NIT$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^ · MEDIUM · 1 run · just now$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^app\/report\.py:42$/ })).toBeUndefined()
+  await pane.press({ key: 'past-toggle-review-pr-12' })
+  expect(await pane.find({ type: 'Text', text: /^1a2b3c4\.\.5d6e7f8$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^app\/report\.py:42$/ })).toBeDefined()
+  await pane.press({ key: 'copy-past-review-pr-12-0' })
+  expect(seen.copied).toEqual(['app/report.py:42', 'app/report.py:42'])
+  await pane.unmount()
+})
+
+test('beside an active task, this session\'s review is live and the rest are history, unfinished ones flagged', async ($, on) => {
+  const files: Record<string, string> = {
+    ...repo('IN_REVIEW'),
+    '.tasks/review-pr-12/state.md': reviewState('REVIEWING', 'HIGH'),
+    '.tasks/review-pr-9/state.md': reviewState('REVIEWED'),
+    '.tasks/review-pr-9/run-1/survivors.md': 'Summary: 0 IMPORTANT, 0 NIT, 0 PRE-EXISTING\n',
+    // Running, but in another session: live there, or that session died.
+    '.tasks/review-main/state.md': reviewState('REVIEWING', 'MEDIUM', 'sess-b'),
+    '.tasks/review-old/state.md': reviewState('INTERRUPTED'),
+    '.tasks/review-old/run-1/logic.md': SURVIVORS,
+    // A task whose slug happens to start with review-: no `kind: review`, so not a review.
+    '.tasks/review-copy/state.md': state('IN_REVIEW'),
+  }
+  world(on, files, '/repo', {
+    '.tasks/review-pr-12/state.md': 30, '.tasks/review-pr-9/state.md': 40, '.tasks/review-main/state.md': 10,
+    '.tasks/review-old/state.md': 5, '.tasks/review-copy/state.md': 50,
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ type: 'Text', text: /^ IN_REVIEW $/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /^export-csv · MEDIUM$/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /^review-pr-12: reviewers 0\/5$/ })).toBeDefined()
+  expect((await band.find({ type: 'Button', key: 'next' }))?.text).toBe('▶ /quorum:review-loop')
+  await band.unmount()
+
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /Code review, round 2 of 3/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^review-pr-12$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^REVIEWING · HIGH · / })).toBeDefined()
+  // Beside a task the history starts folded, newest first, and says how many never finished.
+  expect(await pane.find({ type: 'Text', text: /^3 reviews · newest just now$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /2 unfinished/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^review-main {2}$/ })).toBeUndefined()
+  await pane.press({ key: 'toggle-reviews' })
+  expect(await pane.find({ type: 'Text', text: /^review-pr-9 {2}$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^clean$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^running elsewhere or interrupted$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^interrupted$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^review-copy/ })).toBeUndefined()
+  await pane.press({ key: 'past-toggle-review-old' })
+  expect(await pane.find({ type: 'Text', text: /Run 1 never finished/ })).toBeDefined()
+  await pane.press({ key: 'past-toggle-review-main' })
+  expect(await pane.find({ type: 'Text', text: /Another session runs it, or stopped mid-run/ })).toBeDefined()
+  await pane.unmount()
+
+  // A narrow band keeps to the task.
+  const narrow = await $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns: 100 }, surface: 'terminal' })
+  expect(await narrow.find({ type: 'Text', text: /review-pr-12/ })).toBeUndefined()
+  await narrow.unmount()
+})
+
+test('another session\'s running review never takes the band, or opens the pane by itself', async ($, on) => {
+  const seen = world(on, { '.git/HEAD': 'ref: refs/heads/main\n', '.tasks/review-pr-12/state.md': reviewState('REVIEWING', 'MEDIUM', 'sess-b') })
+  on('ui.render', ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>engine</Text>
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(seen.opened).toBe(0)
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect((await band.find({ type: 'Text', text: /engine/ }))?.text).toBe('engine')
+  await band.unmount()
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /No active Quorum task/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^running elsewhere or interrupted$/ })).toBeDefined()
+  await pane.unmount()
 })
 
 test('the band and pane show the active task, and Quorum keeps no status line', async ($, on) => {
@@ -388,7 +597,7 @@ test('a ticket id in the title moves out of it', () => {
 test('sections open by themselves only while they hold a problem', () => {
   const base = { spec: null, checks: [], proof: null, isProofStale: false, expectedProof: '', stopBlocks: 0, status: 'IN_REVIEW', pending: 0 }
   const t = (extra: object) => ({ ...base, ...extra }) as unknown as Parameters<typeof openByDefault>[0]
-  expect(openByDefault(t({}))).toEqual({ requirements: false, checks: false, rounds: false, spend: false, agents: false })
+  expect(openByDefault(t({}))).toEqual({ requirements: false, checks: false, rounds: false, reviews: false, spend: false, agents: false })
   expect(openByDefault(t({ isProofStale: true })).checks).toBe(true)
   expect(openByDefault(t({ expectedProof: 'proof-final.md' })).checks).toBe(true)
   expect(openByDefault(t({ pending: 1 })).checks).toBe(true)

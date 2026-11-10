@@ -226,6 +226,9 @@ finished with its PR open.</sub>
     section with a problem opens by itself.
 - **▶ Next** puts the next command in your prompt to send or edit. It never sends it for you.
 - **Toasts** when a task converges, halts, escalates, or is ready for you.
+- **`/quorum:review`:** the one this session is running gets a card of its own, with its reviewers, the voter's
+  kept findings, and the builder during `--fix`. It sits under a task's cards, or takes the band and pane when
+  there's no task. Finished reviews stay in a **Reviews** section, and an unfinished one is flagged as interrupted.
 
 The pane docks beside the chat in a wide fullscreen terminal, and sits above the prompt otherwise. The dashboard only
 reads `.tasks/`, so `claude -p`, cloud sessions, and the VS Code chat panel work as before, without it.
