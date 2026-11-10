@@ -6,7 +6,7 @@ import {
   parseProof, parseSpec, prDetail, prFromUrl, prNext,
   requirementState, roleOf,
   roundReviewers, slugFromHead, spendOf, stageOf, stages, tokenCount,
-  keptFindings, nextCommand, openByDefault, splitTicket,
+  keptFindings, nextCommand, openByDefault, problemsOf, splitTicket, stagePhrase,
 } from '../../hooks/dashboard/task'
 
 const state = (status: string, extra = '') => `---
@@ -275,12 +275,15 @@ test('the status line, band and pane show the active task', async ($, on) => {
   const seen = world(on, repo('IN_REVIEW'))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  expect(seen.status.at(-1)).toBe('export-csv · IN_REVIEW · MEDIUM · round 2/3 · 1 pending')
+  expect(seen.status.at(-1)).toBe('export-csv · code review 2/3 · 1 pending')
   expect(seen.opened).toBe(1)
 
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect((await band.find({ type: 'Text', text: /Review r2\/3/ }))).toBeDefined()
-  expect((await band.find({ type: 'Text', text: /next: \/quorum:review-loop/ }))).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /^ IN_REVIEW $/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /^export-csv · MEDIUM$/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /^ Review 2\/3$/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /^1 pending$/ })).toBeDefined()
+  expect((await band.find({ type: 'Button', key: 'next' }))?.text).toBe('▶ /quorum:review-loop')
   await band.unmount()
 
   const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -307,7 +310,8 @@ test('a HALTED or ESCALATED task stays on the stage it stopped at, across a rest
   files['.tasks/export-csv/state.md'] = state('HALTED').replace('blind_runs: 0', 'blind_runs: 2')
   await $.tool.call({ tool: 'Bash', command: 'quorum-state set status HALTED' })
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await band.find({ type: 'Text', text: /^ › ✗ Blind test$/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /^ HALTED $/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /^ Blind test$/ })).toBeDefined()
   await band.unmount()
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /blind test: 2 runs/ })).toBeDefined()
@@ -333,7 +337,7 @@ test('a status change toasts once, and only for statuses worth it', async ($, on
 test('task files are read from the project root, not the working directory', async ($, on) => {
   const seen = world(on, repo('IN_REVIEW'), '/work/repo')
   await $.session.start({ cwd: '/work/repo/app', surface: 'terminal', isInteractive: true })
-  expect(seen.status.at(-1)).toBe('export-csv · IN_REVIEW · MEDIUM · round 2/3 · 1 pending')
+  expect(seen.status.at(-1)).toBe('export-csv · code review 2/3 · 1 pending')
 })
 
 test('with no task the band is the engine\'s and the status line is clear', async ($, on) => {
@@ -391,6 +395,36 @@ test('sections open by themselves only while they hold a problem', () => {
   expect(openByDefault(t({ stopBlocks: 2, status: 'BUILDING' })).checks).toBe(true)
   expect(openByDefault(t({ stopBlocks: 2, status: 'AWAITING-HUMAN' })).checks).toBe(false)
   expect(openByDefault(t({ status: 'HALTED' })).rounds).toBe(true)
+})
+
+test('the status line says where the task is in words, and what is wrong', () => {
+  const t = (status: string, extra: object = {}) => ({ status, round: 2, maxRounds: 3, planRounds: 1, blindRuns: 1, ...extra })
+  expect(stagePhrase(t('IN_REVIEW'))).toBe('code review 2/3')
+  expect(stagePhrase(t('AWAITING-HUMAN'))).toBe('waiting for your review')
+  expect(stagePhrase(t('HALTED'))).toBe('halted: pick a redesign')
+  expect(stagePhrase(t('PLANNING', { planRounds: 0 }))).toBe('planning')
+  const checks = [{ id: '1', label: 'a', result: 'FAIL' }, { id: '2', label: 'b', result: 'FAIL' }, { id: '3', label: 'c', result: 'PASS' }]
+  const proof = { file: 'proof-build.md', rev: 'abc', result: '', rows: [] }
+  expect(problemsOf({ proof, checks, isProofStale: true, pending: 1 } as never)).toEqual(['✗ 2 checks failing', 'proof older than HEAD', '1 pending'])
+  expect(problemsOf({ proof: null, checks, isProofStale: false, pending: 0 } as never)).toEqual([])
+})
+
+test('the band\'s Next fills the prompt, and a narrow band keeps the badge, the dots, and the buttons', async ($, on) => {
+  const seen = world(on, repo('IN_REVIEW'))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  await band.press({ key: 'next' })
+  await settle()
+  expect(seen.filled).toEqual(['/quorum:review-loop '])
+  await band.unmount()
+
+  band = await $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns: 80 }, surface: 'terminal' })
+  expect(await band.find({ type: 'Text', text: /^ IN_REVIEW $/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /^export-csv · MEDIUM$/ })).toBeUndefined()
+  expect(await band.find({ type: 'Text', text: /^ Review 2\/3$/ })).toBeDefined()
+  expect((await band.find({ type: 'Button', key: 'next' }))?.text).toBe('▶ Next')
+  expect(await band.find({ type: 'Button', key: 'open' })).toBeDefined()
+  await band.unmount()
 })
 
 test('the Next button puts the command in the prompt, after nothing or before a draft, and never sends it', async ($, on) => {
@@ -638,7 +672,7 @@ test('a finished task shows its PR from GitHub, asking again only after the TTL 
   await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "x" --body-file .tasks/export-csv/pr-body.md' })
   await settle()
   expect(calls.length).toBe(2)
-  expect(seen.status.at(-1)).toBe('export-csv · AWAITING-HUMAN · MEDIUM · round 2/3 · 1 pending · PR #33807 open')
+  expect(seen.status.at(-1)).toBe('export-csv · waiting for your review · 1 pending · PR #33807 open')
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /^PR #33807 open$/ })).toBeDefined()
   expect((await pane.find({ type: 'Link' }))?.props.href).toBe('https://github.com/o/r/pull/33807')
@@ -651,7 +685,9 @@ test('a finished task shows its PR from GitHub, asking again only after the TTL 
   await $.tool.call({ tool: 'Bash', command: 'gh pr view 33807' })
   await settle()
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await band.find({ type: 'Text', text: /^ › ✓ PR$/ })).toBeDefined()
+  // Merged: every stage's dot is ticked.
+  const dots = await band.findAll({ type: 'Text', text: /^[✓●○◆✗–]$/ })
+  expect(dots.map(d => d.text).join('')).toBe('✓✓✓✓✓✓')
   await band.unmount()
 })
 

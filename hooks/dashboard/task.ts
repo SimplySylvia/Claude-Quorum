@@ -420,3 +420,30 @@ export function openByDefault(t: Snapshot): Record<Section, boolean> {
     agents: false,
   }
 }
+
+// Where the task is, in words, for the status line: the band and the pane show the status and the stepper.
+export function stagePhrase(t: Pick<Snapshot, 'status' | 'round' | 'maxRounds' | 'planRounds' | 'blindRuns'>): string {
+  switch (t.status) {
+    case 'DRAFT-AWAITING-VISUAL-SIGNOFF': return 'mockup waiting for your sign-off'
+    case 'PLANNING': return t.planRounds > 0 ? `plan review ${t.planRounds}` : 'planning'
+    case 'BUILDING': return 'building'
+    case 'IN_REVIEW': return t.round > 0 ? `code review ${t.round}/${t.maxRounds}` : 'code review'
+    case 'CONVERGED': return 'review converged'
+    case 'BLIND-TEST': return t.blindRuns > 0 ? `blind test run ${t.blindRuns}` : 'blind test'
+    case 'READY': return 'ready for its PR'
+    case 'AWAITING-HUMAN': return 'waiting for your review'
+    case 'HALTED': return 'halted: pick a redesign'
+    case 'ESCALATED': return 'escalated: the checks failed 3 times'
+    default: return t.status || 'no status'
+  }
+}
+
+// What's wrong, briefly, for the status line and the band: failing checks, a stale proof, pending findings.
+export function problemsOf(t: Pick<Snapshot, 'proof' | 'checks' | 'isProofStale' | 'pending'>): string[] {
+  const failing = t.proof ? t.checks.filter(c => c.result === 'FAIL').length : 0
+  return [
+    failing ? `✗ ${failing} check${failing === 1 ? '' : 's'} failing` : '',
+    t.isProofStale ? 'proof older than HEAD' : '',
+    t.pending > 0 ? `${t.pending} pending` : '',
+  ].filter(Boolean)
+}

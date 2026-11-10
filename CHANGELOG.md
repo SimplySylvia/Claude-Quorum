@@ -16,9 +16,16 @@ copy with `/plugin marketplace update`.
   highlight under the pointer where the surface has one. The separate Stages list is gone: the stepper and one line of
   stage details replace it.
 
+- **The band above the prompt** is one row in order of importance: a status badge colored by whose move it is,
+  the task and risk, a dot per stage with the current one named, the round's progress, anything wrong in red, and
+  the Next and Dashboard buttons. A narrow terminal keeps the badge, dots, first problem, and buttons.
+- **The status line** says where the task is in words and what's wrong (`csv-export · code review 2/3 · 1 pending`),
+  leaving the status code and risk tier to the band.
+- There's a blank line between the pane's folding sections.
+
 ### Added
 
-- **▶ Next** in the dashboard: a button that puts the next Quorum command in the prompt, for you to send, change, or
+- **▶ Next** in the dashboard's band and pane: a button that puts the next Quorum command in the prompt, for you to send, change, or
   add to, keeping anything you'd typed after it. It never sends the command.
 
 ## 0.5.0 (2026-11-09)

@@ -216,11 +216,15 @@ While a task is active, Quorum shows where it is without you asking:
 <sub>Both are the demo task from `assets/src/dashboard-demo.sh` (see [CONTRIBUTING.md](CONTRIBUTING.md)): mid-review, and
 finished with its PR open.</sub>
 
-- **Status line:** `quorum: csv-export · IN_REVIEW · MEDIUM · round 2/3`, plus pending findings and, once opened,
-  the PR.
-- **Above the prompt:** the stage rail, `✓ Spec › ✓ Plan › ✓ Build › ● Review r2/3 › ○ Blind test › ○ PR`, how many
-  of the round's reviewers have replied and how many checks pass (`reviewers 3/4 · checks 6/7`), the next command,
-  and a **Dashboard** button.
+- **Above the prompt,** one row, most important first: the status as a badge (amber when the task waits on you,
+  red when it's halted or escalated), the task and its risk tier, a dot per stage with the current one named
+  (`✓✓✓●○○ Review 2/3`), how many of the round's reviewers have replied and how many checks pass
+  (`reviewers 3/4 · checks 6/7`), anything wrong in red (`✗ 1 check failing`), a **▶ Next** button that puts the next
+  command in your prompt, and a **Dashboard** button. In a narrow terminal it keeps the badge, the dots, the first
+  problem, and the buttons.
+- **Status line,** for when the band is collapsed and the pane closed: where the task is in words, what's wrong, and
+  its PR, as `quorum: csv-export · code review 2/3 · 1 pending` or `quorum: csv-export · waiting for your review ·
+  PR #42 open`.
 - **A dashboard pane**, which opens by itself when a session starts on a task and when a `/quorum:*` command runs;
   `/quorum-dashboard` shows or hides it. It's two cards and a list of sections that fold:
   - **The task card:** its title (the ticket id to the right) and goal from `rd.md`, so it's clear what the work is

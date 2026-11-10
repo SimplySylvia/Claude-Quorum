@@ -9,7 +9,7 @@ import type { Check, Findings, KeptFinding, Now, PullRequest, QuorumAgent, Revie
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, stageOf, stages, tokenCount,
-  keptFindings, nextCommand, openByDefault, splitTicket,
+  keptFindings, nextCommand, openByDefault, problemsOf, splitTicket, stagePhrase,
 } from './task'
 
 const PANE = 'quorum-dashboard'
@@ -48,8 +48,6 @@ const REQUIREMENT_GLYPH = { pass: ['✓', 'success'], fail: ['✗', 'error'], op
 
 const REVIEW_FILES = ['logic.md', 'architecture.md', 'patterns.md', 'docs.md', 'tests.md', 'a11y.md', 'security.md', 'votes.md', 'survivors.md']
 
-const STATUS_COLOR = (status: string) =>
-  isStuck(status) ? 'error' : status === 'READY' || status === 'AWAITING-HUMAN' ? 'warning' : 'claude'
 
 const readOr = ($: EngineInterface, path: string) => $.fs.read(path).catch(() => null)
 
@@ -208,14 +206,26 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
 const prOf = (t: Snapshot, known: PullRequest | null) => (known?.slug === t.slug ? known : prFromUrl(t.slug, t.prUrl))
 
 // Claude Code draws the status line and toasts under the plugin's name ("quorum"), so neither repeats it.
+// The status line is what's left when the band is collapsed and the pane closed: the task, where it is in words,
+// what's wrong, and its PR. It leaves the status code and risk tier to the band.
 function statusLine(t: Snapshot | null, known: PullRequest | null): string | undefined {
   if (!t) return undefined
-  const parts = [t.slug, t.status || 'no status', t.risk]
-  if (t.round > 0) parts.push(`round ${t.round}/${t.maxRounds}`)
-  if (t.pending > 0) parts.push(`${t.pending} pending`)
+  const parts = [t.slug, stagePhrase(t), ...problemsOf(t)]
   if (isPrStage(t.status)) parts.push(prDetail(prOf(t, known), t.prDrafted))
   return parts.filter(Boolean).join(' · ')
 }
+
+// Put a Quorum command in the prompt for the person to send, edit, or add to; never send it. A draft they already
+// typed stays, after the command, as its arguments.
+async function fillPrompt($: EngineInterface, cmd: string) {
+  const draft = ((await $.prompt.read().catch(() => null))?.text ?? '').trim()
+  const text = draft.startsWith(cmd) ? draft : draft ? `${cmd} ${draft}` : `${cmd} `
+  await $.prompt.fill({ text, cursor: text.length }).catch(() => undefined)
+}
+
+// The status badge's color: amber when the task waits on the person, red when it's stuck, else the accent.
+const whoseMove = (status: string) =>
+  isStuck(status) ? 'error' : status === 'READY' || status === 'AWAITING-HUMAN' || status === 'DRAFT-AWAITING-VISUAL-SIGNOFF' ? 'warning' : 'claude'
 
 // Ask GitHub for the task branch's PR, at most every PR_TTL_MS unless `force`d, and only once the task waits on one.
 // It runs after the hook that started it; a missing or signed-out gh is remembered as UNKNOWN until the TTL passes.
@@ -437,34 +447,41 @@ export const register: Register = (on, options) => {
     return done
   })
 
+  // The band: one row, most important first. A status badge colored by whose move it is, the task, a dot per stage
+  // and the current one by name, the round's progress, then Next (it fills the prompt) and Dashboard.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const t = await read($, task)
     if (!t || e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const known = prOf(t, await read($, pr))
     const rail = railFor(t, known)
-    const wide = (e.props.bodyColumns ?? 120) >= 110
+    const columns = e.props.bodyColumns ?? 120
+    const current = rail.find(s => s.state === 'active' || s.state === 'stuck' || s.state === 'waiting')
+    const currentLabel = !current ? ''
+      : current.name === 'Review' && t.round > 0 ? `Review ${t.round}/${t.maxRounds}`
+        : current.name === 'PR' ? prDetail(known, t.prDrafted) || 'PR'
+          : current.name
+    const problems = problemsOf(t)
+    const progress = [reviewerProgress(t.now), checkProgress(t.checks, t.proof !== null)].filter(Boolean).join(' · ')
+    const command = nextCommand(nextFor(t, known))
 
     return (
-      <Box flexDirection="row" gap={1}>
-        <Text bold>Quorum</Text>
-        <Text dimColor>{t.slug}</Text>
+      <Box flexDirection="row" gap={2}>
+        <Text backgroundColor={whoseMove(t.status)} color="inverseText" bold> {t.status || 'no status'} </Text>
+        {columns >= 90 ? <Text dimColor>{t.slug} · {t.risk}</Text> : null}
         <Text>
-          {rail.map((s, i) => {
+          {rail.map(s => {
             const [glyph, color] = GLYPH[s.state]
-            const label = s.name === 'Review' && t.round > 0 ? `${s.name} r${t.round}/${t.maxRounds}` : s.name
-            return (
-              <Text key={s.name} color={color} bold={s.state === 'active' || s.state === 'stuck'}>
-                {i > 0 ? ' › ' : ''}{glyph} {label}
-              </Text>
-            )
+            return <Text key={s.name} color={color}>{glyph}</Text>
           })}
+          {currentLabel ? <Text bold> {currentLabel}</Text> : null}
         </Text>
-        {[reviewerProgress(t.now), checkProgress(t.checks, t.proof !== null)].filter(Boolean).map(p => (
-          <Text key={p} dimColor>{p}</Text>
-        ))}
-        {wide && <Text dimColor>next: {nextFor(t, known)}</Text>}
-        <Button key="open" label="Dashboard" onPress={() => open($, true)} />
+        {columns >= 110 && progress ? <Text dimColor>{progress}</Text> : null}
+        {problems.length > 0 ? <Text color="error">{columns >= 110 ? problems.join(' · ') : problems[0]}</Text> : null}
+        <Box flexDirection="row" gap={1}>
+          {command ? <Button key="next" variant="primary" label={columns >= 110 ? `▶ ${command}` : '▶ Next'} onPress={() => void fillPrompt($, command)} /> : null}
+          <Button key="open" label="Dashboard" onPress={() => open($, true)} />
+        </Box>
       </Box>
     )
   })
@@ -566,17 +583,9 @@ export const register: Register = (on, options) => {
     const met = requirements.filter(r => r.state === 'pass').length
 
     // The Now card's border says whose move it is: amber when the task waits on the person, red when it's stuck.
-    const waitsOnYou = t.status === 'READY' || t.status === 'AWAITING-HUMAN' || t.status === 'DRAFT-AWAITING-VISUAL-SIGNOFF'
-    const nowColor = isStuck(t.status) ? 'error' : waitsOnYou ? 'warning' : 'claude'
+    const nowColor = whoseMove(t.status)
     const next = nextFor(t, known)
     const command = nextCommand(next)
-    // Put the next command in the prompt for the person to send, edit, or add to; never send it. A draft they
-    // already typed stays, after the command, as its arguments.
-    const fillNext = async (cmd: string) => {
-      const draft = ((await $.prompt.read().catch(() => null))?.text ?? '').trim()
-      const text = draft.startsWith(cmd) ? draft : draft ? `${cmd} ${draft}` : `${cmd} `
-      await $.prompt.fill({ text, cursor: text.length }).catch(() => undefined)
-    }
 
     // A section folds to one row; it opens by itself while it holds a problem, and a click overrides that.
     const defaults = openByDefault(t)
@@ -625,7 +634,7 @@ export const register: Register = (on, options) => {
           </Box>
           <Text wrap="truncate-end">
             <Text dimColor>{t.slug} · </Text>
-            <Text color={STATUS_COLOR(t.status)} bold>{t.status || 'no status'}</Text>
+            <Text color={whoseMove(t.status)} bold>{t.status || 'no status'}</Text>
             <Text dimColor> · {t.risk || 'no risk tier'}{spec?.isUi ? ' · UI change' : ''}</Text>
           </Text>
           {spec?.goal ? <Text dimColor wrap="truncate-end">{spec.goal}</Text> : null}
@@ -696,13 +705,13 @@ export const register: Register = (on, options) => {
           )}
           <Box flexDirection="row" gap={1} marginTop={1}>
             {command
-              ? <Button key="next" variant="primary" label={`▶ Next: ${command}`} onPress={() => void fillNext(command)} />
+              ? <Button key="next" variant="primary" label={`▶ Next: ${command}`} onPress={() => void fillPrompt($, command)} />
               : <Text><Text dimColor>Next: </Text><Text>{next}</Text></Text>}
             {command ? <Text dimColor wrap="truncate-end">{next === command ? 'fills the prompt' : next}</Text> : null}
           </Box>
         </Box>
 
-        <Box flexDirection="column">
+        <Box flexDirection="column" gap={1}>
           {requirements.length > 0 && fold('requirements', 'Requirements',
             t.proof ? [`${met}/${requirements.length} met`, met === requirements.length ? 'success' : 'warning']
               : isReported ? [`${requirements.length} reported passing`, 'subtle'] : [`${requirements.length} in rd.md`, 'inactive'],
