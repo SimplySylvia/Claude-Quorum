@@ -49,6 +49,14 @@ copy with `/plugin marketplace update`.
 
 ### Fixed
 
+- Quorum's helpers (`quorum-branch`, `quorum-state`, `quorum-active-task`, the session hook) failed where a sandbox
+  hides the real git behind Apple's `/usr/bin/git` launcher, and `quorum-state` then skipped its check that the
+  proof ran at HEAD. A new `quorum-git` runs git, falling back to a real git by full path; the helpers go through it,
+  and the orchestrating skills use it when `git` fails.
+- `/quorum:pr-draft` refused a proof with only skipped checks, which `quorum-state` accepts for `READY`, so a
+  finished task couldn't get its PR drafted. It now accepts them and has the PR list them as not run.
+- Specs wrote eval checks with `rg`, which many machines lack, so they were skipped. They now use `grep` unless the
+  repo already uses ripgrep.
 - The docs auditor's row in the review loop's reviewer table had lost its indent, which could break the table.
 
 ## 0.4.0 (2026-11-09)

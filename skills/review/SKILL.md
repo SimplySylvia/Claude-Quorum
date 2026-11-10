@@ -18,6 +18,9 @@ commands that change the working tree, index, or history, except the PR checkout
 flags: `--comment`, `--fix`, `--tier <LOW|MEDIUM|HIGH>`, `--models`, and `--yes` (only when the user typed it: accept
 your proposed tier without asking, and say what you chose).
 
+**Git:** if a `git` command fails with an `xcode-select` or `xcrun` error (a sandbox hiding the real git), run it
+as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers already do.
+
 ## 1. Preconditions
 
 - On a Quorum task's own branch (`quorum-active-task` prints a slug and `git branch --show-current` is

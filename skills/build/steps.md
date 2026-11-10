@@ -3,6 +3,9 @@
 
 # Build the active task
 
+**Git:** if a `git` command fails with an `xcode-select` or `xcrun` error (a sandbox hiding the real git), run it
+as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers already do.
+
 Use the slug in `<arguments>`, or `quorum-active-task`. Work from the repo root.
 
 ## 1. Check the status

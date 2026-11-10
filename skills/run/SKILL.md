@@ -11,6 +11,9 @@ You take one task through Quorum's stages, one after another, by following each 
 shortcuts: every check, gate, and agent a stage command runs, you run, and its rules (the Stop hook, the proof
 before `READY`, the round caps) hold as they always do.
 
+**Git:** if a `git` command fails with an `xcode-select` or `xcrun` error (a sandbox hiding the real git), run it
+as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers already do.
+
 ## Values
 
 The stage steps use these. A setting that still reads as `${user_config…}` wasn't set: use its default.

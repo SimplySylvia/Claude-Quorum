@@ -3,6 +3,9 @@
 
 # Simplify the diff
 
+**Git:** if a `git` command fails with an `xcode-select` or `xcrun` error (a sandbox hiding the real git), run it
+as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers already do.
+
 Reviewers should see the smallest, clearest change that meets the spec. Work on the active task
 (`quorum-active-task`) from the repo root.
 

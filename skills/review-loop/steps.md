@@ -3,6 +3,9 @@
 
 # Review loop
 
+**Git:** if a `git` command fails with an `xcode-select` or `xcrun` error (a sandbox hiding the real git), run it
+as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers already do.
+
 You are the orchestrator. You don't review or fix code yourself: reviewers review, the voter votes, the builder
 fixes. Your job is to give each of them exactly the right inputs, keep the record, and stop when the rules say.
 

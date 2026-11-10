@@ -3,6 +3,9 @@
 
 # Spec a task
 
+**Git:** if a `git` command fails with an `xcode-select` or `xcrun` error (a sandbox hiding the real git), run it
+as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers already do.
+
 Turn the request in `<arguments>` into a task folder, `.tasks/<slug>/`, before any code is written. Work from the
 repo root (`quorum-active-task --root`). Don't write application code in this skill.
 
@@ -75,13 +78,15 @@ Do this for MEDIUM and HIGH tasks, and for LOW when `<arguments>` contains `--re
    approach chosen in step 4, and add the research's "For the spec" items that apply.
 4. **`eval.md`** from the template: one row per requirement with an **exact command** and what passing looks like,
    plus edge cases (empty, very large, unicode, concurrent, permission denied: whichever apply). Every command
-   must run locally. Use synthetic data only; never production data, shared databases, or real credentials.
+   must run locally, with tools every machine that runs the repo has: `grep`, not `rg`, unless the repo already
+   uses ripgrep. A check that needs a missing tool is skipped, not passed. Use synthetic data only; never
+   production data, shared databases, or real credentials.
    - A bug fix gets a row that shows the new test fails on the old code. Write it so it can run in a separate
      worktree; `quorum:prover` runs it there.
    - A UI change gets accessibility rows: reaching the change by keyboard alone, and an axe scan of the changed
      screens for WCAG 2.2 A and AA.
    - Each **Docs:** requirement gets a row that checks the doc names the new thing (for example
-     `rg -n -- '--since' docs/cli.md`), and whose "Passes when" says what the section must explain.
+     `grep -n -- '--since' docs/cli.md`), and whose "Passes when" says what the section must explain.
 
 ## 6. Review the spec
 

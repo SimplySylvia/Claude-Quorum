@@ -3,6 +3,9 @@
 
 # Security pass and blind test
 
+**Git:** if a `git` command fails with an `xcode-select` or `xcrun` error (a sandbox hiding the real git), run it
+as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers already do.
+
 Work on the active task (`quorum-active-task`) from the repo root. You orchestrate: you don't test the app or
 review the code yourself, and you never give the blind user anything from the source.
 

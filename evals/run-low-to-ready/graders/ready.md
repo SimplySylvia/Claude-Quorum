@@ -1,6 +1,6 @@
 ---
 type: regex
-target: { source: file, path: .tasks/summary-empty-test/state.md }
+target: { source: file, path: .tasks/load-test/state.md }
 pattern: '^risk: LOW\n(.*\n)*status: READY$'
 flags: m
 weight: 2

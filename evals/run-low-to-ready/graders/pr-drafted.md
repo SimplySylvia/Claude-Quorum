@@ -1,5 +1,5 @@
 ---
 type: regex
-target: { source: file, path: .tasks/summary-empty-test/pr.md }
+target: { source: file, path: .tasks/load-test/pr.md }
 pattern: '\S'
 ---

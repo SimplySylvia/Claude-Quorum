@@ -3,6 +3,9 @@
 
 # Plan the task
 
+**Git:** if a `git` command fails with an `xcode-select` or `xcrun` error (a sandbox hiding the real git), run it
+as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers already do.
+
 You are the orchestrator. You don't write or review the plan yourself: the planner writes it, reviewers review it,
 the voter votes. Use the slug in `<arguments>`, or `quorum-active-task`. Work from the repo root, and use
 `quorum-state` and `quorum-findings` (on your PATH) for state and counting.
