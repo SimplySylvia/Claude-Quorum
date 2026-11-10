@@ -13,6 +13,8 @@ set -euo pipefail
 
 die() { echo "quorum-branch: $*" >&2; exit 1; }
 HERE=$(cd "$(dirname "$0")" && pwd)
+# Through quorum-git, so a sandbox that hides the real git behind Apple's launcher doesn't break this script.
+git() { "$HERE/quorum-git" "$@"; }
 ROOT=$("$HERE/quorum-active-task" --root)
 cd "$ROOT"
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a git repo: $ROOT"

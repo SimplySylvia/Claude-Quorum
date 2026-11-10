@@ -25,6 +25,8 @@ set -euo pipefail
 die() { echo "quorum-state: $*" >&2; exit 1; }
 
 HERE=$(cd "$(dirname "$0")" && pwd)
+# Through quorum-git, so a sandbox that hides the real git behind Apple's launcher doesn't break this script.
+git() { "$HERE/quorum-git" "$@"; }
 ORDER="slug kind range risk status round base_sha round_shas stop_blocks signoff plan_rounds plan_approved pending_findings blind_runs escalated_from reviewer_model helper_model pr"
 LISTS=" round_shas pending_findings "
 COUNTERS=" round stop_blocks plan_rounds blind_runs "

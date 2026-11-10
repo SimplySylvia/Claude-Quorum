@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Run git with these arguments, even where a sandbox hides the real git.
+#
+#   quorum-git <git arguments>       for example `quorum-git diff --stat main..HEAD`
+#
+# Claude Code's macOS sandbox can make `git` on PATH resolve to Apple's /usr/bin/git launcher, which fails with an
+# xcode-select or xcrun error because it can't write its cache. Then this tries a real git by full path:
+# /opt/homebrew/bin/git, then /usr/local/bin/git (QUORUM_GIT_CANDIDATES, space-separated, replaces that list).
+# With none working, it runs plain `git` so the caller sees the real error. Bash 3.2 compatible.
+set -uo pipefail
+
+works() { "$1" --version >/dev/null 2>&1; }
+
+if works git; then exec git "$@"; fi
+for candidate in ${QUORUM_GIT_CANDIDATES:-/opt/homebrew/bin/git /usr/local/bin/git}; do
+  if [ -x "$candidate" ] && works "$candidate"; then exec "$candidate" "$@"; fi
+done
+exec git "$@"

@@ -13,7 +13,7 @@ laws='Quorum laws (from the quorum plugin):
 2. Branch hygiene: work on a feat/<slug> or fix/<slug> branch with small commits, so any change can be reverted in one step.
 3. Read the repo first: before building or reviewing, read ./CLAUDE.md and ./REVIEW.md and follow them.'
 
-if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ ! -f "$root/REVIEW.md" ]; then
+if "$(cd "$(dirname "$0")" && pwd)/../bin/quorum-git" -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ ! -f "$root/REVIEW.md" ]; then
   laws="$laws
 This repo has no REVIEW.md yet. If the user wants Quorum's review pipeline here, suggest running /quorum:init-pipeline."
 fi

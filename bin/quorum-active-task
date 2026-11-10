@@ -12,6 +12,10 @@ set -euo pipefail
 
 die() { echo "quorum-active-task: $*" >&2; exit 1; }
 
+HERE=$(cd "$(dirname "$0")" && pwd)
+# Through quorum-git, so a sandbox that hides the real git behind Apple's launcher doesn't break this script.
+git() { "$HERE/quorum-git" "$@"; }
+
 repo_root() {
   if [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "$CLAUDE_PROJECT_DIR" ]; then
     printf '%s\n' "$CLAUDE_PROJECT_DIR"
