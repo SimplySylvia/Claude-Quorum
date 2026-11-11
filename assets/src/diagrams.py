@@ -128,10 +128,11 @@ def draw_map(theme):
                             (".claude/hooks/verify-completion.sh", "the fast checks", True)])
 
     # 1 · Spec & eval: research, the spec, then two spec reviewers in parallel.
-    t = band("spec", "1", "Spec & eval", "/quorum:spec-and-eval", 148)
+    t = band("spec", "1", "Spec & eval", "/quorum:spec-and-eval", 148, ["--bug: reproduce it first",
+                                                                       "--deep-research: lenses"])
     cy = t + 34
     x = s.row(CONTENT, cy, [("researcher", "MEDIUM/HIGH, or --research", False),
-                            ("rd.md + eval.md", "you pick the approach", True)])
+                            ("rd.md + eval.md", "linted; every check tried once", True)])
     gx = x + ARROW
     s.arrow(f"M{x + 3:.1f},{cy + CHIP_H / 2} H{gx - 3:.1f}")
     reviewers = [("spec-reviewer: feasibility", "does the spec match the code?"),
@@ -171,9 +172,10 @@ def draw_map(theme):
            size=TAG, color="back", anchor="middle")
 
     # 3 · Build: the builder, from the plan, then the prover's proof.
-    t = band("build", "3", "Build", "/quorum:build", 116, ["then /quorum:simplify-diff",
-                                                         "--worktree: in its own worktree"])
-    s.row(CONTENT, t + 28, [("builder", "follows plan.md; checks must pass", False),
+    t = band("build", "3", "Build", "/quorum:build", 130, ["then /quorum:simplify-diff",
+                                                         "--worktree: in its own worktree",
+                                                         "4+ steps: a builder per step"])
+    s.row(CONTENT, t + 28, [("builder", "test first; checks locked, must pass", False),
                             ("prover", "runs every eval.md check", False)])
 
     # 3–4 · Review loop: reviewers in parallel, the voter, and the builder's fixes.
@@ -206,7 +208,7 @@ def draw_map(theme):
 
     # 7 · Human gate and PR (6, codify-lesson, is optional and starts no agents).
     t = band("ship", "8", "Human gate & PR", "/quorum:pr-draft", 100, ["7 · codify-lesson: optional"])
-    s.row(CONTENT, t + 28, [("pr-writer", "spec + proof → PR description", False),
+    s.row(CONTENT, t + 28, [("pr-writer", "cites each requirement's verdict", False),
                             ("you review and merge", "MEDIUM/HIGH wait for you", True)])
 
     # Any diff: /quorum:review, apart from the task stages (no spine arrow joins it).
@@ -221,6 +223,29 @@ def draw_map(theme):
     s.arrow(f"M{vx + vw / 2:.1f},{ry + CHIP_H + TAG_H + 2} V{gy - 3}")
     s.chip(vx + (vw - chip_w("GitHub review", "--comment, after you approve")) / 2, gy, "GitHub review",
            "--comment, after you approve", doc=True)
+
+    # Research a question: /quorum:research, before any task (also --deep-research inside the spec stage).
+    t = band("research", "", "Research a question", "/quorum:research", 216, ["no task; you approve",
+                                                                               "the sub-questions"])
+    qy = t + 34
+    lenses = [("researcher: repo", "never told what's built"), ("researcher: docs", "pinned versions"),
+              ("researcher: alternatives", "prior art"), ("researcher: counter", "against the leader")]
+    lw = max(chip_w(*r) for r in lenses)
+    group(CONTENT, t + 10, lw * 2 + 32, 140, "in parallel, by effort: 2, 3, or up to 6")
+    for i, (label, tag) in enumerate(lenses):
+        s.chip(CONTENT + 12 + (i % 2) * (lw + 8), qy + (i // 2) * 52, label, tag)
+    rx = CONTENT + lw * 2 + 32 + ARROW
+    s.arrow(f"M{CONTENT + lw * 2 + 35:.1f},{qy + CHIP_H / 2} H{rx - 3:.1f}")
+    col = max(chip_w("quorum-research-check", "re-finds every repo quote"),
+              chip_w("source-verifier", "reopens the pages that matter"),
+              chip_w("research.md", "viability, candidate tasks, gaps"))
+    for i, (label, tag, doc) in enumerate((("quorum-research-check", "re-finds every repo quote", True),
+                                           ("source-verifier", "reopens the pages that matter", False),
+                                           ("research.md", "viability, candidate tasks, gaps", True))):
+        cy = qy + i * 64
+        s.chip(rx + (col - chip_w(label, tag)) / 2, cy, label, tag, doc=doc)
+        if i:
+            s.arrow(f"M{rx + col / 2:.1f},{cy - 64 + CHIP_H + TAG_H + 2} V{cy - 3}")
 
     # Forward flow between bands, down the left of the content column.
     spine = CONTENT - 20
@@ -638,7 +663,7 @@ def draw_stages(theme):
 # /quorum:run: the stages it chains, and where it stops. Each stage: (name, [(kind, text)]), kind "ask" (it asks
 # you and waits) or "halt" (it stops; you decide what next).
 RUN_STAGES = [
-    ("Spec", [("ask", "slug, tier, research; models; docs. --yes accepts all but a HIGH tier")]),
+    ("Spec", [("ask", "one proposal: slug, tier, research, docs; models once per repo. --yes: all but HIGH")]),
     ("Plan", [("ask", "mockup sign-off (UI)"), ("ask", "plan approval. --yes approves a clean plan, except HIGH")]),
     ("Build", []),
     ("Simplify", []),
@@ -706,17 +731,21 @@ def draw_run(theme):
            "so it mixes with the single-stage commands.", size=TAG + 0.5, color="muted")
     for flag, text in (("--fast", "LOW only: spec without reviewers, no plan stage, build, one reviewer, proof, PR draft."),
                        ("--worktree", "builds in its own git worktree, .claude/worktrees/<slug>; this one stays free "
-                                      "for another task.")):
+                                      "for another task."),
+                       ("--bug", "reproduces it first; done only when the proof shows it fixed and failing without "
+                                 "the fix."),
+                       ("--deep-research", "lensed researchers in parallel, every claim checked against its source.")):
         ly += 22
         s.text(LEFT + 4, ly + 4, flag, size=TAG + 0.5, mono=True, weight=600)
-        s.text(LEFT + 4 + mono_w("--worktree", TAG + 0.5) + 10, ly + 4, text, size=TAG + 0.5, color="muted")
+        s.text(LEFT + 4 + mono_w("--deep-research", TAG + 0.5) + 10, ly + 4, text, size=TAG + 0.5, color="muted")
     return s.svg(int(ly + 16), "/quorum:run: spec, plan, build, simplify, review loop, blind test, PR draft, in order. "
-                 "It stops to ask at the spec (slug, tier, research, models, docs; --yes accepts all but a HIGH tier) "
+                 "It stops to ask once at the spec (one proposal of slug, tier, research, and docs, and the models the first time in a repo; --yes accepts all but a HIGH tier) "
                  "and the plan (mockup sign-off for UI, plan approval; --yes approves a clean plan except for HIGH), "
                  "and for your review of MEDIUM and HIGH tasks after the PR draft. It stops if the review loop or the "
                  "blind test halts. Blind-test blockers go back to the review loop. It never pushes or opens the PR. "
                  "--fast takes a LOW task through without spec reviewers or a plan stage, with one reviewer; "
-                 "--worktree builds the task in its own git worktree.")
+                 "--worktree builds the task in its own git worktree; --bug reproduces the bug first and proves it "
+                 "fixed; --deep-research runs lensed researchers in parallel and checks every claim.")
 
 
 if __name__ == "__main__":
