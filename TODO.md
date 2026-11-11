@@ -141,7 +141,7 @@ anywhere.
 
 ## 11. Deep research: what's left
 
-Deep research and `/quorum:research` are built (unreleased). Still to do:
+Deep research and `/quorum:research` shipped in 0.10.0. Still to do:
 
 - **Measure it.** After a few tasks, compare `research_decision` against the cost: does deep research change
   decisions often enough to make it the default for HIGH?
