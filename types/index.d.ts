@@ -61,6 +61,8 @@ export type Snapshot = {
   risk: string
   // state.md's `fast`: a LOW task on the fast path (/quorum:run --fast), with no plan round.
   isFast: boolean
+  // state.md's `bug`: a bug fix (--bug), which starts from a reproduction and must prove it fixed.
+  isBug: boolean
   status: string
   stage: number
   round: number

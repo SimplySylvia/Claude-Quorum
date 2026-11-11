@@ -98,13 +98,14 @@ if [ "$blocks" -ge "$MAX_BLOCKS" ]; then
     state set escalated_from "$status"
     state set status ESCALATED
   fi
-  msg="Quorum: verification checks have failed $blocks times in a row, so the Stop hook is letting this stop through and has marked task '$task' ESCALATED. Fix the environment or the failing checks; the next passing run restores status $(state get escalated_from)."
+  msg="Quorum: verification checks have failed $blocks times in a row, so the Stop hook is letting this stop through and has marked task '$task' ESCALATED. Find the cause before changing more code (the quorum:debugging skill: reproduce, read the whole error, check what changed), then fix the environment or the failing checks; the next passing run restores status $(state get escalated_from)."
   jq -n --arg m "$msg" '{systemMessage: $m}'
   exit 0
 fi
 
 {
   echo "BLOCKED: Project verification checks failed. Fix all failing tests, typechecks, and linters and output the passing proof before finishing."
+  echo "Find the root cause first (the quorum:debugging skill): reproduce the failure, read the whole error, and check what changed. Don't weaken a check to make it pass."
   echo "After fixing, restate your full report (what you changed, your commits, and the passing check output): your next reply replaces your previous one."
   echo "Failure $blocks of $MAX_BLOCKS in a row for task '$task'. Last 50 lines of .claude/hooks/verify-completion.sh:"
   tail -n 50 "$out"

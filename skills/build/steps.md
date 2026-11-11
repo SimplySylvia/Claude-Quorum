@@ -30,7 +30,8 @@ the `pipeline-laws` skill's stage map), then stop.
 a placeholder is off). The task's branch gets its own git worktree, so this working tree stays free: you can spec or
 build another task here meanwhile.
 
-1. `quorum-branch start <slug> --worktree` (add `--fix` when `rd.md` describes a bug fix). It prints the branch,
+1. `quorum-branch start <slug> --worktree` (add `--fix` when `quorum-state get bug` is `true`, or `rd.md` describes a
+   bug fix). It prints the branch,
    then the worktree's path, and records both `base_sha` and `worktree`. Exit 3 means `CLAUDE.md`, `REVIEW.md`, or
    the check script isn't committed (a worktree gets committed files only): show what it printed, say the task
    builds in this working tree instead, and go on below.
@@ -45,7 +46,8 @@ build another task here meanwhile.
    evals, don't offer it), the agents can't follow the task into the worktree: run `quorum-branch remove <slug>`
    (the branch stays), say why in one line, and go on below, which checks that branch out in this working tree.
 
-**Otherwise,** run `quorum-branch start <slug>` (add `--fix` when `rd.md` describes a bug fix). It creates or
+**Otherwise,** run `quorum-branch start <slug>` (add `--fix` when `quorum-state get bug` is `true`, or `rd.md`
+describes a bug fix). It creates or
 switches to the branch and records `base_sha`. If it refuses because of uncommitted changes, show `git status` and
 ask the user to commit or stash. Never discard their changes.
 

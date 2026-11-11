@@ -30,9 +30,15 @@ A prompt that says **fast path** has no `plan.md`: build from `rd.md` and `eval.
 everything about the plan, including `## Deviations`.
 
 ## When given review findings
-Each `[IMPORTANT]` finding names a **Pattern Category**. Fix the cited line, then search every file this task
-touched (`git diff --name-only <base_sha>`) for other instances of the same pattern and fix those too. Don't make
-unrelated changes. If you think a finding is wrong, say why in your report instead of working around it.
+Each `[IMPORTANT]` finding names a **Pattern Category**. Check it against the code before you change anything: open
+the cited line and see the problem for yourself. Then fix the cited line, and search every file this task touched
+(`git diff --name-only <base_sha>`) for other instances of the same pattern and fix those too. Don't make
+unrelated changes.
+
+If a finding is wrong (the code already handles it, or the claim doesn't match the code), don't fix it and don't
+work around it: **dispute** it in your report, with evidence a voter can check: the `file:line` that handles it,
+or a command and its output that shows the claimed failure doesn't happen. A dispute without evidence is a fix you
+skipped.
 
 ## Doing the work
 - **Follow `plan.md`.** Build its steps in order, reuse what it says to reuse, and write the tests, docs, and
@@ -43,6 +49,15 @@ unrelated changes. If you think a finding is wrong, say why in your report inste
   `eval.md` (once the build starts), `verify-completion.sh`, CI workflows, and test, lint, type-check, and format configs, and `git commit
   --no-verify`, unless the plan's `## Checks changes` lists the file. If a check seems wrong, say so in your
   report; never work around it.
+- **Test first.** On the first build, for each `eval.md` row that needs a new test, write the test before the code,
+  run it, and read the failure: it must fail for the reason the requirement gives, not a missing name, an import
+  error, or a typo. Then write the code and see it pass. A test that passes before the code exists can't catch
+  anything: fix the test. Report both runs, quoting the failure's reason.
+  When the task only adds tests (there's no code to write first), show instead that each new test catches what it
+  covers: break that behavior on purpose (one line in the code under test), run the test and quote its failure, then
+  put the line back and see it pass. Never commit the break.
+- **When a check fails, find the cause before changing code.** Use the `quorum:debugging` skill: reproduce it, read
+  the whole error, check what changed, and name the root cause with evidence. Don't try changes until one passes.
 - Make the smallest change that meets the requirements. No debug output, dead code, or drive-by refactors.
 - Use local, temporary, or synthetic data only. Never touch production systems or real credentials.
 - Run `bash .claude/hooks/verify-completion.sh` and every command in `eval.md` that applies. Fix what fails.
@@ -53,7 +68,16 @@ Your final reply is the only thing the caller sees. It must contain:
 1. **Changes:** what you changed and why, by file.
 2. **Commits:** `git log --oneline <base_sha>..HEAD` for this round.
 3. **Proof:** the passing output of `verify-completion.sh` and the `eval.md` checks you ran.
-4. **Open questions or disagreements**, if any.
+4. **Test first** (first build): for each new test, the line of its failing output that gives the reason (before the
+   code, or with the behavior broken on purpose for a test-only task), and its passing output after.
+5. **Disputed:** one block per finding you didn't fix because it's wrong, in this form, or "none":
+
+   ```
+   [IMPORTANT] app/report.py:42 — Pattern Category: Unescaped CSV fields
+   Evidence: app/report.py:40 passes every row through csv.writer, which quotes commas; `python3 app/report.py
+   export tests/data/comma.json` prints "Acme, Inc." in quotes.
+   ```
+6. **Open questions**, if any.
 
 If a hook blocks you from finishing, fix what it reports, then send this whole report again: your next reply
 replaces the previous one.

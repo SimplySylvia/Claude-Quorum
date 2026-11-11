@@ -6,13 +6,14 @@ teardown() { cleanup_repo; }
 
 ctx() { echo '{"hook_event_name":"SessionStart","source":"startup"}' | CLAUDE_PROJECT_DIR="$1" "$HOOKS/session-laws.sh" | jq -r '.hookSpecificOutput.additionalContext'; }
 
-@test "prints valid SessionStart JSON with the three laws" {
+@test "prints valid SessionStart JSON with the four laws" {
   run bash -c "echo '{}' | CLAUDE_PROJECT_DIR='$WORK' '$HOOKS/session-laws.sh' | jq -e '.hookSpecificOutput.hookEventName == \"SessionStart\"'"
   [ "$status" -eq 0 ]
   run ctx "$WORK"
   [[ "$output" == *"Proof before \"done\""* ]]
   [[ "$output" == *"Branch hygiene"* ]]
   [[ "$output" == *"REVIEW.md"* ]]
+  [[ "$output" == *"4. Root cause before fixes"* ]]
 }
 
 @test "suggests init-pipeline in a git repo without REVIEW.md" {

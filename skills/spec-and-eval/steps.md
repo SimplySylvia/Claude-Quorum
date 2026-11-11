@@ -12,6 +12,10 @@ repo root (`quorum-active-task --root`). Don't write application code in this sk
 `<arguments>` may also contain `--yes` (only when the user typed it): then accept your proposed slug, tier, and
 spec without asking, and say what you chose.
 
+`<arguments>` may also contain `--bug`: the request is a bug to fix. See [A bug fix](#a-bug-fix); without the flag,
+when the request clearly describes a bug (something that used to work, or works wrongly), propose the bug path in
+step 3 instead.
+
 `<arguments>` may also contain `--fast` (from `/quorum:run --fast`): the **fast path** for a LOW task. It writes a
 short spec, skips the spec reviewers and the mockup, and goes straight to the build, with no plan round. The checks
 stay: `eval.md`, the Stop hook, the review, and the proof. Each step below says what changes on the fast path. It
@@ -59,6 +63,8 @@ Work out everything else yourself, and state it as a proposal the user can corre
   breaks?"** (the rules are below).
 - **Research:** yes for MEDIUM and HIGH, no for LOW, unless `<arguments>` says `--research` or `--no-research`.
 - **Docs,** for a task that adds something people can use (step 5.2 says how to choose the places).
+- **A bug fix,** when the request describes one and `--bug` wasn't given: propose treating it as one (see
+  [A bug fix](#a-bug-fix)).
 - **The fast path,** for a LOW task without `--fast`: offer it as an option ("or take the fast path: a short spec,
   no plan round, one reviewer"). Choosing it means the same as `--fast`.
 - **Models:** resolve both as in `<plugin root>/skills/pipeline-laws/models.md` (configured defaults:
@@ -127,7 +133,8 @@ LOW only with `--research`. `--no-research` skips it, and so does the fast path 
    uses ripgrep. A check that needs a missing tool is skipped, not passed. Use synthetic data only; never
    production data, shared databases, or real credentials.
    - A bug fix gets a row that shows the new test fails on the old code. Write it so it can run in a separate
-     worktree; `quorum:prover` runs it there.
+     worktree; `quorum:prover` runs it there. A `--bug` task's reproduction is its first row (see
+     [A bug fix](#a-bug-fix)).
    - A UI change gets accessibility rows: reaching the change by keyboard alone, and an axe scan of the changed
      screens for WCAG 2.2 A and AA.
    - Each **Docs:** requirement gets a row that checks the doc names the new thing (for example
@@ -166,6 +173,24 @@ images. Show the default, loading, empty, and error states the requirements ment
 to open `.tasks/<slug>/mockup.html`, and that `/quorum:plan` will ask them to confirm sign-off before planning.
 
 Otherwise, the next step is `/quorum:plan`.
+
+## A bug fix
+
+With `--bug`, or when the user accepts step 3's proposal to treat the request as a bug, these change:
+
+1. **Reproduce it first,** before step 3's proposal: find the smallest command that shows the bug on the current
+   code (a test, a CLI call, a request), run it, and quote what it prints next to what it should print. Use the
+   `quorum:debugging` skill's first two steps. If you can't make it happen, say what you tried and ask for what's
+   missing (the input, the steps, the environment), and stop: a fix for a bug nobody reproduced can't be proven.
+2. In step 4.1, also `quorum-state --task <slug> set bug true`. The build then uses `fix/<slug>`.
+3. **`rd.md`** gets a `## The bug` section after the goal: what happens, what should happen, and the reproduction
+   command with its output today. Requirement 1 is the fix, stated as what the reproduction shows afterwards, for
+   example "**Fixed:** `report.py export data/empty.json` prints the header row and exits 0". Add a requirement
+   for each other place the same mistake could hide, if the code has them.
+4. **`eval.md`** row `1` runs the reproduction and passes when it shows the expected output; row `1b` shows it fails
+   without the fix (it runs in a worktree at the old code). The final proof's `Bug:` verdict rests on these two.
+5. Research is off by default for LOW and MEDIUM bugs (the cause is in this code, not in a choice of approach),
+   and a LOW bug may take the fast path.
 
 ## Redesign
 

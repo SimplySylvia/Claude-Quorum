@@ -7,7 +7,8 @@
 #   quorum-validate [--task SLUG] plan    plan.md: every step names the requirements it serves, each one in rd.md,
 #                                         and every requirement has a step
 #   quorum-validate [--task SLUG] proof   proof-final.md's ## Requirements table: a verdict for every requirement,
-#                                         each MET with its evidence (PARTIAL, MISSING, and CONTRADICTS fail)
+#                                         each MET with its evidence (PARTIAL, MISSING, and CONTRADICTS fail); and
+#                                         for a bug fix (`bug: true`), a "Bug: VERIFIED" line
 #
 # Prints one line per problem, "ERROR: ..." or "WARN: ...", and exits 1 if there's an ERROR. A requirement is a
 # numbered line under rd.md's "## Requirements"; an eval.md row covers requirement N when its # is N, a letter
@@ -136,7 +137,15 @@ EOF
         PARTIAL|MISSING|CONTRADICTS) error "requirement $n is $verdict: $(printf '%s' "$row" | cut -f3-)" ;;
         *) error "requirement $n's verdict \"$verdict\" isn't MET, PARTIAL, MISSING, or CONTRADICTS" ;;
       esac
-    done ;;
+    done
+    if [ "$("$HERE/quorum-state" --task "$task" get bug 2>/dev/null)" = true ]; then
+      bug=$(sed -n 's/^Bug:[[:space:]]*//p' "$DIR/proof-final.md" | head -n 1)
+      case "$bug" in
+        VERIFIED*) ;;
+        '') error "proof-final.md has no \"Bug:\" verdict for this bug fix" ;;
+        *) error "the bug isn't verified fixed: Bug: $bug" ;;
+      esac
+    fi ;;
 esac
 
 [ "$errors" -eq 0 ]

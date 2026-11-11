@@ -17,7 +17,8 @@
 # verdict with evidence for each of its requirements (quorum-validate proof). `pr` is the task's pull request URL.
 # `reviewer_model` and `helper_model` are the models chosen for the task's agents (skills/pipeline-laws/models.md):
 # `inherit` or a value the Agent tool's `model` parameter accepts. `fast: true` marks a LOW task on the fast path
-# (/quorum:run --fast): no plan round, and one reviewer. `worktree` is the git worktree the task's code is in, when
+# (/quorum:run --fast): no plan round, and one reviewer. `bug: true` marks a bug fix (--bug): its spec starts from a
+# reproduction, it builds on fix/<slug>, and its final proof must say "Bug: VERIFIED". `worktree` is the git worktree the task's code is in, when
 # quorum-branch start --worktree made one; its HEAD is the one the proof must match. `unlocked` lists the protected
 # check files (hooks/protect-checks.sh) the user approved changing during the task: the plan's Checks changes, or
 # one the user unlocked themselves.
@@ -34,7 +35,7 @@ die() { echo "quorum-state: $*" >&2; exit 1; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 # Through quorum-git, so a sandbox that hides the real git behind Apple's launcher doesn't break this script.
 git() { "$HERE/quorum-git" "$@"; }
-ORDER="slug kind range session risk fast status worktree round base_sha round_shas stop_blocks signoff plan_rounds plan_approved pending_findings unlocked blind_runs escalated_from reviewer_model helper_model pr"
+ORDER="slug kind range session risk fast bug status worktree round base_sha round_shas stop_blocks signoff plan_rounds plan_approved pending_findings unlocked blind_runs escalated_from reviewer_model helper_model pr"
 LISTS=" round_shas pending_findings unlocked "
 COUNTERS=" round stop_blocks plan_rounds blind_runs "
 STATUSES=" DRAFT-AWAITING-VISUAL-SIGNOFF PLANNING BUILDING IN_REVIEW CONVERGED BLIND-TEST READY AWAITING-HUMAN HALTED ESCALATED REVIEWING FIXING REVIEWED INTERRUPTED "
@@ -163,7 +164,7 @@ validate_scalar() { # key value
       case "$2" in READY|AWAITING-HUMAN) require_proof "$2" ;; esac ;;
     risk) is_in "$2" "$RISKS" || die "unknown risk tier: $2 (LOW, MEDIUM, HIGH)" ;;
     kind) case "$2" in task|review) ;; *) die "kind must be task or review" ;; esac ;;
-    fast) case "$2" in true|false) ;; *) die "fast must be true or false" ;; esac ;;
+    fast|bug) case "$2" in true|false) ;; *) die "$1 must be true or false" ;; esac ;;
     worktree) case "$2" in /*) ;; *) die "worktree must be an absolute path" ;; esac ;;
     range) printf '%s' "$2" | grep -Eq '^[^[:space:]]+$' || die "range must be one git range, with no spaces" ;;
     session) printf '%s' "$2" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_-]*$' || die "session must be a session id: letters, digits, - and _" ;;

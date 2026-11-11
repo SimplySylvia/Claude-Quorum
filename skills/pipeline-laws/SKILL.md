@@ -5,7 +5,7 @@ description: Quorum's universal engineering laws and stage map. Use when decidin
 
 # Quorum laws and stage map
 
-## The three laws
+## The four laws
 
 1. **Proof before "done".** Never say a task, bugfix, or feature is complete without running verification proof
    (tests, typecheck, build, or a live CLI or UI check) and showing the passing output.
@@ -13,6 +13,8 @@ description: Quorum's universal engineering laws and stage map. Use when decidin
    small commits, so any change can be bisected or reverted in one step.
 3. **Read the repo first.** Before building or reviewing, read `./CLAUDE.md` and `./REVIEW.md` and follow them.
    If the repo has no `REVIEW.md` or no `.claude/hooks/verify-completion.sh`, suggest `/quorum:init-pipeline`.
+4. **Root cause before fixes.** When a test, check, or command fails, reproduce it and find why before changing
+   code (the `debugging` skill), and never make a check pass by weakening it.
 
 ## Where a task is, and what comes next
 

@@ -79,5 +79,15 @@ Unrequested: `app/report.py:70` a --tsv flag no requirement asks for
   does something the requirement rules out, even if a check passes.
 - **Unrequested:** code in the diff no requirement asks for, with `file:line`, or "none". It doesn't fail the proof.
 
+**A bug fix** (`quorum-state --task <slug> get bug` is `true`) also gets one line after the table, from `eval.md`'s
+row 1 (the reproduction) and row 1b (it failing without the fix):
+
+- `Bug: VERIFIED (...)`: row 1 passes at HEAD, and row 1b showed it failing on the old code.
+- `Bug: PARTIAL (...)`: row 1 passes, but nothing showed it failing without the fix, so the check may not test the
+  bug.
+- `Bug: FAILED (...)`: row 1 still fails.
+
+Say why in the parentheses. Anything but VERIFIED counts as a failure too.
+
 Every verdict but MET counts as a failure in your `Result:` line, and gets a `## Failures` entry saying what's
 missing. `quorum-state` won't mark the task done without a MET verdict, with evidence, for every requirement.

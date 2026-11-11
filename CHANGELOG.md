@@ -42,6 +42,24 @@ copy with `/plugin marketplace update`.
   is MET. An unmet one goes back to the review loop as a pending `[IMPORTANT]` finding ("Unmet requirement"),
   under the round cap. The dashboard's Requirements section shows each verdict with its evidence, and the PR
   writer uses them.
+- **A bugfix path, `--bug`,** on `/quorum:run` and `/quorum:spec-and-eval`:
+  - The spec reproduces the bug on the current code before anything else, and asks for what's missing if it
+    can't.
+  - `rd.md` gets a `## The bug` section, and the reproduction becomes `eval.md` row 1, with row 1b showing it
+    fails without the fix.
+  - The task records `bug: true` and builds on `fix/<slug>`.
+  - The final proof adds `Bug: VERIFIED`, `PARTIAL`, or `FAILED`, and `quorum-validate proof` accepts only
+    VERIFIED.
+  - A LOW bug can take the fast path. When a request reads like a bug, the proposal offers this path.
+- **Habits inside a build.**
+  - A new model-invocable `debugging` skill: reproduce, read the whole error, check what changed, and name the root
+    cause with evidence before any fix. The builder uses it when a check fails, and the Stop hook's messages point
+    to it.
+  - The builder writes each new test first and shows it failing before the code.
+  - The builder checks every finding against the code, and disputes a wrong one with evidence. The voter rechecks
+    disputes (`disputes.md`), the builder fixes the ones the voter keeps, and an upheld dispute counts toward
+    lessons.
+  - A fourth law, **root cause before fixes**, joins the three in every session.
 - **Fewer questions at the spec stage.** `spec-and-eval` asks why the change is wanted only when the request
   doesn't say. It then states the slug, tier, research choice, docs, and (for LOW) the fast path as one proposal,
   and asks once, together with any open design questions. It no longer asks about each one in turn. A HIGH tier

@@ -41,7 +41,7 @@ and the stage commands share them. Still to do:
 - **The dashboard during a run:** "autopilot · next stop: plan approval" in the band, and a toast at each stop, so a
   user can work elsewhere and come back when asked. The dashboard can't tell a run from single commands today.
 - **Context length.** A whole MEDIUM task is long for one conversation. Measure one with the Spend section and the
-  transcript size, and see whether the chat rule (one line per stage) is enough. If it isn't, item 7 is the fix.
+  transcript size, and see whether the chat rule (one line per stage) is enough. If it isn't, item 6 is the fix.
 
 ## 3. Worktrees: what's left
 
@@ -76,28 +76,7 @@ an edge worth having.
   what it costs in tokens (the dashboard's Spend section now counts them). It's Quorum's own "proof before done"
   applied to its claims, and the strongest argument a README can make.
 
-## 5. Habits inside a build, and a bugfix path
-
-Quorum checks the build from outside, but tells the builder little about how to work. Superpowers' skills for
-specific moments (systematic debugging, red-green TDD, receiving code review) are its best part. Add Quorum's own
-versions, without its "1% chance, you MUST" bootstrap or its "delete code written before the test" rule, and
-without letting anything start the pipeline by itself (`nearmiss-no-auto-review-loop` guards that).
-
-- **A debugging skill, model-invocable:** reproduce, read the whole error, check what changed, and name the root
-  cause before any fix. The builder uses it when a check fails, and the Stop hook's escalation message points to it.
-- **A bugfix path.** spec-kit, Compound Engineering, GSD, and Superpowers all have one; Quorum treats a bug like a
-  feature. `/quorum:run --bug` (or a `fix/<slug>` task from `spec-and-eval`): reproduce first, write the
-  reproduction into `eval.md` as a failing check, fix, and have the prover rerun it for a verdict of verified,
-  partial, or failed (spec-kit's bug extension). LOW bugs can take the fast path.
-- **Test first in the builder.** For each `eval.md` row that needs a new test, write the test and show it failing
-  before the code that makes it pass. The prover checks fail-before-fix only after the build; catching a test that
-  can't fail at build time saves a review round.
-- **Disputed findings.** The builder checks each finding against the code before fixing it, and pushes back with
-  evidence. Today it only says so in its report; send a disputed finding back to the voter with the builder's
-  evidence, and count disputes the voter upholds as a `codify-lesson` signal.
-- **Maybe a fourth law** in `session-laws.sh`, "root cause before fixes", if the hook text stays short.
-
-## 6. Use what Quorum has learned
+## 5. Use what Quorum has learned
 
 `codify-lesson` writes rules to `REVIEW.md`, and the planner and reviewers read section 6. Peers go further with
 what they learn, though both that write lessons by themselves (Compound Engineering, ECC) skip the user's approval;
@@ -114,7 +93,7 @@ keep Quorum's.
   `codify-lesson --audit` propose removing rules that haven't fired in a long time, with the user's yes (Compound
   Engineering's refresh mode, QualityLayer's 90-day retirement).
 
-## 7. Large plans, built in slices
+## 6. Large plans, built in slices
 
 One builder builds the whole plan, so a big MEDIUM or HIGH task has to fit in one agent's context, and `/quorum:run`
 has no checkpoint inside the build. Superpowers runs a fresh implementer per plan task, reviews each one, and keeps a
@@ -131,7 +110,7 @@ expensive failure.
   turns on multi-step work, so use a mid-tier model as the floor for anything that needs judgment.
 - The review loop still reviews the whole branch; this changes the build, not the gates.
 
-## 8. Review lenses chosen by the diff
+## 7. Review lenses chosen by the diff
 
 The peers' reviewer lists cover kinds of defect Quorum's six don't name. Add them as lenses that a reviewer turns on
 when the diff calls for them, not as new agents, since agent count is what peers' users complain about most.
@@ -144,14 +123,14 @@ when the diff calls for them, not as new agents, since agent count is what peers
   Gemini when its CLI is installed, with findings going through the same voter (Compound Engineering, GSD,
   QualityLayer, ECC). It catches what a single model family is blind to.
 
-## 9. CI mode
+## 8. CI mode
 
 A GitHub Action that runs `/quorum:review` headless (`claude -p`) on each PR and posts the kept findings, with the
 repo's `REVIEW.md`. Pairs with item 1: the same reviewers and voter, on every PR, with no one remembering to run
 them. Superpowers' gates are instructions to the model, so it can't do this; Quorum's are agents and scripts. Needs
 the `github-actions` hardening rules (pinned actions, least-privilege token, no script injection from PR titles).
 
-## 10. After the PR, and changing a spec
+## 9. After the PR, and changing a spec
 
 Quorum ends at the drafted PR. Peers follow it further, and let a spec change without starting over.
 
@@ -163,7 +142,7 @@ Quorum ends at the drafted PR. Peers follow it further, and let a spec change wi
   halted, reruns the spec reviewers on the change, and marks the plan for review again. `--redesign` only starts
   over after a halt. Hard-to-update specs are spec-kit's most upvoted issue (#1191).
 
-## 11. `/quorum:diagnose`
+## 10. `/quorum:diagnose`
 
 When a task halts, escalates, or costs more than expected, the post-mortem says what the review loop saw, not why
 the session went that way. Superpowers' `diagnosing-superpowers` reads the session's transcripts and reports what
@@ -172,7 +151,7 @@ happened, with a `path:line` citation for every finding. A Quorum version would 
 back and why, where the tokens went (alongside the dashboard's Spend). Read-only, and it never sends anything
 anywhere.
 
-## 12. Smaller follow-ups from this release
+## 11. Smaller follow-ups from this release
 
 - **Spend per round, kept.** The Spend section only covers agents since the last command, in this session. Keeping
   per-round totals in `state.md` would need the dashboard to write `.tasks/`, which it deliberately never does;
@@ -184,7 +163,7 @@ anywhere.
   the voter rescores a low-confidence finding after checking it. These make real model calls, so they weren't run
   as part of the change.
 
-## 13. A deep research mode
+## 12. A deep research mode
 
 One researcher reports two or three options, which is right for most tasks but thin for a new dependency, a choice
 between architectures, or a field the repo has no precedent in. Anthropic's lead-plus-parallel-subagents research
@@ -192,16 +171,17 @@ beat a single agent by 90% on its own eval, at about 15× the tokens. No peer pl
 supports the claim. The research and the design are in `docs/deep-research-design.md`.
 
 - **`--deep-research [quick|standard|deep]`** on `spec-and-eval` and `run`, and a standalone `/quorum:research`.
-  Both write to `.tasks/<slug>/research/`, so a later `spec-and-eval` for that slug reuses the research, and it's
-  gitignored with the task.
   The main thread is the lead; the workers are `quorum:researcher` with a lens (repo precedent, official docs,
   alternatives, counter-evidence). The user approves the sub-questions first (BMAD's plan gate).
+- **Research can come before the task.** `/quorum:research` creates only the research, in
+  `.tasks/research-<slug>/` (gitignored, no `state.md`), to decide whether a task is worth doing and which way. Its
+  report adds Viability and Candidate tasks, and `spec-and-eval --from-research <slug>` starts a task from one.
 - **Claims carry their evidence:** a tag, the quote, the date fetched, the version, and `path:line @ sha` for repo
   claims, so a script and a new `source-verifier` can check them cheaply.
 - **`secret-guard.sh` also checks web queries,** since deep mode makes many more of them.
 - Opt-in until `state.md` shows the research changed decisions often enough to pay for itself.
 
-## 14. Later
+## 13. Later
 
 - **The official marketplace.** `/quorum:review` exists now, so the first thing a new user tries works in any repo;
   submit once the worktrees release is out.

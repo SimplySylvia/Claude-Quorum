@@ -62,6 +62,7 @@ each run's workspace and bootstraps for Quorum.
 | `run-worktree-second-task` | With one task in review in its own worktree, `/quorum:run` specs a new task in the main working tree and leaves the first task alone |
 | `spec-asks-once` | Given a request that says why, `spec-and-eval` proposes the slug, tier, research, and docs together and asks once, with only design questions beside it |
 | `spec-remembers-models` | With the model choices remembered in `.claude/quorum.json`, `spec-and-eval` doesn't ask about models |
+| `spec-bug-reproduces` | `spec-and-eval --bug` runs the bug on the current code first, records `bug: true`, and writes the reproduction into `rd.md`'s `## The bug` and `eval.md` as row 1, with a row 1b that fails without the fix |
 | `run-high-asks-tier` | Even with `--yes`, `/quorum:run` asks the user to confirm a HIGH tier and builds nothing before an answer |
 | `nearmiss-no-auto-review-loop` | An ordinary "look at my commit" request never starts a Quorum command |
 

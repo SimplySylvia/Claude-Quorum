@@ -86,6 +86,7 @@ Or let one command take a task through every stage, stopping only where you must
 /quorum:run Add a CSV export to the sales report   # spec → plan → build → review → blind test → PR draft
 /quorum:run --fast Fix the typo in the help text   # LOW only: spec → build → one reviewer → PR draft
 /quorum:run --worktree Add a CSV export             # build in its own git worktree; keep working here meanwhile
+/quorum:run --bug summary crashes on a missing file  # reproduce it first; done when it's proven fixed
 /quorum:run                                        # continue the active task from wherever it stopped
 ```
 
@@ -289,6 +290,13 @@ confirm. The tier decides how many layers the task gets:
 - **Proof before done.** The Stop hook blocks finishing during a task until the repo's fast checks pass; after 3
   failures in a row it lets you go and marks the task `ESCALATED`. A task can't be marked `READY` or
   `AWAITING-HUMAN` without the prover's `proof-final.md`, run at the current commit, with no failed check.
+- **Root cause before fixes.** The builder writes each new test first and shows it failing before the code that
+  makes it pass. When a check fails, it follows the `debugging` skill: reproduce, read the whole error, check what
+  changed, and name the cause with evidence before changing code. It also checks each review finding against the
+  code, and disputes a wrong one with evidence; the voter rechecks disputes, and an upheld one becomes a lesson.
+- **Bugs are proven fixed.** With `--bug`, the spec reproduces the bug before anything else. That reproduction
+  becomes the first check, alongside one that shows it failing without the fix. The task isn't done until the final
+  proof says `Bug: VERIFIED`.
 - **Every requirement gets a verdict.** The final proof marks each requirement in `rd.md` as MET, PARTIAL,
   MISSING, or CONTRADICTS. MET needs evidence: the checks that pass, and the `file:line` that does the work, real
   and wired in rather than a stub. Anything but MET goes back to the review loop. The proof also lists code no
@@ -405,7 +413,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 |---|---|
 | `.claude-plugin/plugin.json` | Plugin manifest, including the `userConfig` options |
 | `.claude-plugin/marketplace.json` | Marketplace manifest (lists this repo as its only plugin) |
-| `skills/` | `init-pipeline`, `spec-and-eval`, `plan`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `pr-draft`, `codify-lesson`, `review`, `run`, and the model-invocable `pipeline-laws`. Each stage `run` chains keeps its instructions in `steps.md`, which its `SKILL.md` and `run` both follow |
+| `skills/` | `init-pipeline`, `spec-and-eval`, `plan`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `pr-draft`, `codify-lesson`, `review`, `run`, and the model-invocable `pipeline-laws` and `debugging`. Each stage `run` chains keeps its instructions in `steps.md`, which its `SKILL.md` and `run` both follow |
 | `agents/` | `researcher`, `spec-reviewer`, `planner`, `builder`, `prover`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `verifier-voter`, `security-reviewer`, `blind-user`, `friction-triager`, `pr-writer` |
 | `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `protect-checks.sh`, `secret-guard.sh` (both read commands with `shell-words.sh`), `stop-verify.sh`, `record-pr.sh`, and `dashboard/`, the dashboard's hooks module |
 | `types/` | The type contract for the values the dashboard keeps in the session |

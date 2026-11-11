@@ -120,11 +120,24 @@ Start `quorum:builder` with:
 
 > Task `<slug>`. Fix the `[IMPORTANT]` findings in `<findings file>` (run `quorum-findings important <file>`).
 > Each has a Pattern Category: fix the cited line and every other instance of that pattern in the files this task
-> touched (`git diff --name-only <base_sha>`). Run the checks and commit one fix commit. Categories:
+> touched (`git diff --name-only <base_sha>`). Check each against the code first, and dispute with evidence any
+> that's wrong instead of fixing it. Run the checks and commit one fix commit. Categories:
 > <`quorum-findings categories <file>`>.
 
 The SubagentStop hook makes it pass `verify-completion.sh` before it hands back. Log its commit list with
 `quorum-state log`.
+
+**Disputes.** If the builder's report lists findings under **Disputed**, save that section verbatim to
+`round-<N>/disputed.md`, and start `quorum:verifier-voter`, with `reviewer_model`:
+
+> Task: `<slug>`. The builder disputes these kept findings, with evidence: `.tasks/<slug>/review/round-<N>/disputed.md`.
+> Read `REVIEW.md` and `.tasks/<slug>/rd.md`, check each finding and the builder's evidence against the code, and
+> vote KEEP if the finding stands or DROP if the evidence shows it's wrong.
+
+Save its reply verbatim to `round-<N>/disputes.md`. Start the builder once more with the findings it kept ("The
+voter kept these after your dispute: fix them, or say exactly what stops you"). The ones it dropped are disputes
+upheld: log how many with the round, and they count toward lessons (step 7). The next round's reviewers still check
+the whole fix, so a wrong drop shows up again.
 
 ## 5. HALTED
 
@@ -179,6 +192,9 @@ before it writes a rule, and you never write one here.
   another task or review kept too (`elsewhere`).
 - Read the `## Dropped` sections of this task's `votes.md` files: the same false alarm dropped twice (the same
   claim about the same code, for the same reason) is a lesson too.
+- Each `DROP` in a round's `disputes.md` is a dispute the voter upheld: the reviewers and the first vote kept a
+  finding the code already handled. One is worth a lesson when its reason would recur (a helper the reviewers don't
+  know about, a convention they keep missing).
 - Leave out any that `quorum-learned-rule list` already covers.
 
 Give each one a line: what came back, and `/quorum:codify-lesson <what went wrong, in a few words>`. If there are

@@ -152,3 +152,18 @@ MD
   run "$BIN/quorum-state" set status READY
   [ "$status" -eq 0 ]
 }
+
+@test "proof: a bug fix also needs Bug: VERIFIED" {
+  "$BIN/quorum-state" --task demo set bug true
+  printf 'Proof: demo at abc1234\nResult: ALL PASS\n\n## Requirements\n| Req | Verdict | Evidence |\n|---|---|---|\n| 1 | MET | a |\n| 2 | MET | b |\n| 3 | MET | c |\n' > .tasks/demo/proof-final.md
+  run "$BIN/quorum-validate" proof
+  [ "$status" -eq 1 ]; [[ "$output" == *'no "Bug:" verdict'* ]]
+  printf '\nBug: PARTIAL (passes now; not shown failing on the old code)\n' >> .tasks/demo/proof-final.md
+  run "$BIN/quorum-validate" proof
+  [[ "$output" == *"the bug isn't verified fixed: Bug: PARTIAL"* ]]
+  sed -i.bak 's/^Bug: PARTIAL.*/Bug: VERIFIED (row 1b fails on the old code; row 1 passes at HEAD)/' .tasks/demo/proof-final.md
+  run "$BIN/quorum-validate" proof; [ "$status" -eq 0 ]
+  "$BIN/quorum-state" --task demo set bug false
+  sed -i.bak '/^Bug:/d' .tasks/demo/proof-final.md
+  run "$BIN/quorum-validate" proof; [ "$status" -eq 0 ]
+}

@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: spec-bug-reproduces
+description: /quorum:spec-and-eval --bug reproduces the bug on the current code before writing the spec, records the task as a bug fix, and makes the reproduction its first check, with a row that shows it fails without the fix.
+tags: [spec, bug]
+context:
+  scaffold_script: scaffold.sh

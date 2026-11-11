@@ -16,7 +16,7 @@ import {
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-11' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-12' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-3' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
 const reviews = atom({ plugin: 'quorum', key: 'reviews' } as const, [], { shape: 'reviews-1' })
@@ -192,6 +192,7 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     prUrl: scalar(fm, 'pr'),
     risk,
     isFast: scalar(fm, 'fast') === 'true',
+    isBug: scalar(fm, 'bug') === 'true',
     reviewerModel: scalar(fm, 'reviewer_model'),
     helperModel: scalar(fm, 'helper_model'),
     status,
@@ -318,6 +319,7 @@ function stageDetails(t: Snapshot, known: PullRequest | null): string {
   const plan = [t.planRounds ? `${t.planRounds} plan review round${t.planRounds === 1 ? '' : 's'}` : '',
     t.planApproved ? `approved ${t.planApproved}` : ''].filter(Boolean).join(', ')
   return [
+    t.isBug ? 'bug fix: proven when its reproduction passes and fails without the fix' : '',
     t.isFast ? 'fast path: no plan round, one reviewer' : '',
     t.signoff ? `mockup signed off ${t.signoff}` : '',
     plan,
