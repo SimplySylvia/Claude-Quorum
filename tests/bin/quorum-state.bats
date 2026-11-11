@@ -262,3 +262,11 @@ proof() {
   grep -q '^## Round 1$' .tasks/demo/state.md
   run "$BIN/quorum-state" --task demo log < /dev/null; [ "$status" -eq 1 ]
 }
+
+@test "research_decision records whether research changed the spec" {
+  "$BIN/quorum-state" --task demo init MEDIUM PLANNING
+  "$BIN/quorum-state" --task demo set research_decision changed
+  [ "$("$BIN/quorum-state" --task demo get research_decision)" = changed ]
+  "$BIN/quorum-state" --task demo set research_decision confirmed
+  run "$BIN/quorum-state" --task demo set research_decision maybe; [ "$status" -eq 1 ]
+}

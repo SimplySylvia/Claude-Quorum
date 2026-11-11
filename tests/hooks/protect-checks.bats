@@ -105,3 +105,14 @@ bash_cmd() { jq -n --arg c "$1" '{hook_event_name: "PreToolUse", tool_name: "Bas
   "$BIN/quorum-state" --task demo set status PLANNING
   run write app/report.py "print(','.join(row))";             [ "$status" -eq 0 ]
 }
+
+@test "the researcher writes only research folders, in any session; other agents' writes are unaffected" {
+  "$BIN/quorum-active-task" --clear
+  rw() { jq -n --arg p "$1" --arg a "${2:-quorum:researcher}" '{hook_event_name: "PreToolUse", tool_name: "Write", agent_type: $a, tool_input: {file_path: $p, content: "x"}}' | "$HOOKS/protect-checks.sh"; }
+  run rw .tasks/demo/research/1-repo.md;                 [ "$status" -eq 0 ]
+  run rw "$WORK/.tasks/research-graphql/2-docs.md";      [ "$status" -eq 0 ]
+  run rw app/report.py;                                  [ "$status" -eq 2 ]; [[ "$output" == *"writes only its findings"* ]]
+  run rw .tasks/demo/rd.md;                              [ "$status" -eq 2 ]
+  run rw .tasks/demo/research/../../../app/x.py;         [ "$status" -eq 2 ]
+  run rw app/report.py quorum:builder;                   [ "$status" -eq 0 ]
+}

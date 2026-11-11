@@ -24,7 +24,7 @@ through these stages in order when the user starts it.
 
 | Status | Next command |
 |---|---|
-| (no task) | `/quorum:spec-and-eval`; or, to review a branch, PR, or range without a task, `/quorum:review` |
+| (no task) | `/quorum:spec-and-eval`; or, to review a branch, PR, or range without a task, `/quorum:review`; or, to decide whether there's a task at all and which way, `/quorum:research` |
 | `DRAFT-AWAITING-VISUAL-SIGNOFF` | The user reviews `mockup.html`, then `/quorum:plan`, which records the sign-off |
 | `PLANNING` | `/quorum:plan`: write and review `plan.md`, then approve it |
 | `BUILDING` | `/quorum:build` if no code exists yet, or a large plan's step-by-step build stopped partway (`quorum-plan next` prints a step); otherwise `/quorum:simplify-diff`, then `/quorum:review-loop` |

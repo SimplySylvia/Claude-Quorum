@@ -6,7 +6,7 @@ remembered or configured:
 
 | Choice | `state.md` key | Agents |
 |---|---|---|
-| Reviewers | `reviewer_model` | `spec-reviewer`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `security-reviewer`, `verifier-voter` |
+| Reviewers | `reviewer_model` | `spec-reviewer`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `security-reviewer`, `verifier-voter`, `source-verifier` |
 | Helpers | `helper_model` | `friction-triager`, `pr-writer` |
 
 Every other agent (`researcher`, `planner`, `builder`, `prover`, `blind-user`) always runs on the session's model.

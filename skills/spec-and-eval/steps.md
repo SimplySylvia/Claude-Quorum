@@ -101,6 +101,17 @@ LOW only with `--research`. `--no-research` skips it, and so does the fast path 
    `quorum-lessons history <slug> > .tasks/<slug>/history.md`: what earlier tasks in this repo learned (empty in a
    new repo). On the fast path, STATUS is `BUILDING`,
    and then `quorum-state --task <slug> set fast true`.
+
+   **From an earlier research** (`--from-research <research slug> [<candidate>]` in `<arguments>`): don't research
+   again. Copy `.tasks/research-<research slug>/research.md` to `.tasks/<slug>/research.md`, with a first line
+   "From `.tasks/research-<research slug>/` (<its date>), candidate <n>: <the candidate's line>", and use the option
+   that candidate follows as the approach. Skip the rest of this step unless the user asks to research again.
+
+   **Deep research** (`--deep-research [quick|standard|deep]` in `<arguments>`): instead of sub-steps 2 and 3, read
+   `<plugin root>/skills/research/steps.md` and follow it with `<research dir>` = `.tasks/<slug>/`, the request as
+   the question, and the effort given (default `standard`). Then ask which approach the spec should take, as in
+   sub-step 3. Deep mode is for a new dependency, a choice between architectures, a security-sensitive integration,
+   or a field the repo has no precedent in; for anything less, one researcher is enough, and you may say so.
 2. Start `quorum:researcher` with the request in your own words, without internal names you don't need, and
    nothing from production data:
 
@@ -125,6 +136,11 @@ LOW only with `--research`. `--no-research` skips it, and so does the fast path 
    - Each doc chosen becomes a numbered requirement starting with **Docs:**, naming the file and what it covers,
      for example "**Docs:** add the `--since` flag to the Options table in `docs/cli.md`".
    - If the user says no docs, add a non-goal: "No new docs for this feature (declined at spec time)".
+   **Did the research change anything?** If research ran (any kind, or `--from-research`), record whether it changed
+   a decision, so a later look at `state.md` can tell whether research pays for itself:
+   `quorum-state set research_decision changed` when the spec follows an option the request didn't already imply, or
+   the research added a requirement, non-goal, or edge case; `confirmed` when it only backed what the request asked
+   for, as asked.
    On the fast path, keep `rd.md` and `eval.md` short: the goal, the few requirements the change needs, the
    rollback, and only the edge cases that apply. Every requirement still gets an `eval.md` row.
 3. **`rd.md`** from the template: goal, numbered testable requirements, non-goals, a **one-step** rollback plan,

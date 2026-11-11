@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: source-verifier-catches-fake-citation
+description: source-verifier reopens the Python csv docs, supports the true claim about the line terminator, and rejects the planted claim that QUOTE_ALL is the default.
+tags: [research, source-verifier]
+context:
+  scaffold_script: scaffold.sh

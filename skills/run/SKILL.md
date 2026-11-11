@@ -2,7 +2,7 @@
 name: run
 description: Take a Quorum task through the whole pipeline in one command, from spec to drafted PR, stopping only where you must decide (the tier, the models, docs, mockup sign-off, plan approval, a halt, and the human review). Starts a new task from a request, or continues the active one from wherever it stopped. With --fast, a LOW task takes the fast path: a short spec, a build, one reviewer, and the proof, with no plan round. Follows the same steps as each stage command, keeps every gate and check, and never pushes, opens, or merges a PR.
 disable-model-invocation: true
-argument-hint: "[<what to build>] [--bug] [--fast] [--worktree] [--until spec|plan|build|review|blind|pr] [--yes] [--research | --no-research] [--models]"
+argument-hint: "[<what to build>] [--bug] [--deep-research [quick|standard|deep]] [--fast] [--worktree] [--until spec|plan|build|review|blind|pr] [--yes] [--research | --no-research] [--models]"
 ---
 
 # Run the pipeline
@@ -31,7 +31,11 @@ The stage steps use these. A setting that still reads as `${user_config…}` was
 
 This run's own arguments: `$ARGUMENTS`. They hold an optional request (what to build), and these flags:
 `--until <stage>`, `--yes` (only when the user typed it), `--research` or `--no-research`, `--models`, `--fast`,
-`--worktree`, and `--bug`.
+`--worktree`, `--bug`, and `--deep-research [quick|standard|deep]`.
+
+**`--deep-research`** researches the approach with several researchers in parallel, each through one lens, and
+checks every claim against its source (`skills/research/steps.md`), instead of one researcher. You approve the
+sub-questions first.
 
 **`--bug`** treats the request as a bug: the spec reproduces it before anything else, the reproduction becomes the
 first check, and the final proof must show it fixed (`Bug: VERIFIED`).
@@ -73,7 +77,7 @@ says stop, after the stage `--until` names, or after 12 stages in one run (then 
 
 | Status | Stage to follow | Arguments | `--until` name |
 |---|---|---|---|
-| no task | `spec-and-eval` | the request, plus `--research`, `--no-research`, `--models`, `--yes`, `--fast`, and `--bug` as given | `spec` |
+| no task | `spec-and-eval` | the request, plus `--research`, `--no-research`, `--deep-research`, `--models`, `--yes`, `--fast`, and `--bug` as given | `spec` |
 | `DRAFT-AWAITING-VISUAL-SIGNOFF`, `PLANNING` | `plan` | the slug, plus `--yes` as given unless the risk is HIGH | `plan` |
 | `BUILDING`, `base_sha` not set | `build` | the slug, plus `--worktree` as given | `build` |
 | `BUILDING`, `base_sha` set, and `quorum-plan next` prints a step (a sliced build that stopped partway) | `build` | the slug | `build` |

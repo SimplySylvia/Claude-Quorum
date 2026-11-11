@@ -42,6 +42,24 @@ copy with `/plugin marketplace update`.
   is MET. An unmet one goes back to the review loop as a pending `[IMPORTANT]` finding ("Unmet requirement"),
   under the round cap. The dashboard's Requirements section shows each verdict with its evidence, and the PR
   writer uses them.
+- **Deep research, and research before a task.**
+  - **`/quorum:research <question>`** researches without creating a task, in `.tasks/research-<slug>/`. Its
+    report adds **Viability** and **Candidate tasks**, and `/quorum:spec-and-eval --from-research <slug> <n>`
+    starts a task from one. For runtime questions, it first asks which connected tools to gather evidence from.
+  - **Inside a task,** `--deep-research [quick|standard|deep]` on `spec-and-eval` and `run` does the same
+    research in place of the single researcher.
+  - **How it runs:** the main thread leads. You approve its sub-questions, each with a lens: repo precedent,
+    official docs, alternatives, or counter-evidence. Researchers then work in parallel under tool-call budgets,
+    each writing its own findings file; a hook keeps the researcher's new `Write` inside the research folders.
+  - **Every claim carries its evidence:** `VERIFIED` with `path:line @ sha`, `CITED` with the quote, the URL, the
+    date, and the version, or `ASSUMED`. The new `quorum-research-check` re-finds repo quotes. The new
+    `source-verifier` agent reopens only the pages that matter and drops what they don't say. Assumptions go to
+    you.
+  - **The report:** at most one gap round, then a report in the usual format, plus **Assumptions to confirm** and
+    **Remaining gaps**.
+  - **Measured:** `state.md`'s new `research_decision` records whether research changed the spec.
+  - **The secret guard checks web queries.** `secret-guard.sh` now blocks a WebSearch query or a WebFetch URL that
+    holds a secret (`quorum-secrets text`). A probe confirmed plugin hooks see a subagent's WebSearch.
 - **Large plans are built a step at a time.** A plan with 4 or more steps (not on the fast path) gets a fresh builder
   per step, each starting from the last step's commit and leaving the checks passing. `state.md`'s new
   `built_steps` records each step as it's built, so a cut-off build or a new session resumes at the next step (the

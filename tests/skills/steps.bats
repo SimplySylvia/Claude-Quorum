@@ -30,3 +30,17 @@ VALUES="plugin root|session|arguments|max_rounds|nit_cap|security_on_medium|revi
     done <<< "$(grep -oE "<($VALUES)>" "$REPO_ROOT/skills/$s/steps.md" | sort -u)"
   done
 }
+
+@test "the shared research steps use only values their callers give" {
+  steps="$REPO_ROOT/skills/research/steps.md"
+  if grep -nE '\$ARGUMENTS|\$\{CLAUDE_PLUGIN_ROOT\}|\$\{CLAUDE_SESSION_ID\}|\$\{user_config\.' "$steps"; then
+    echo "research/steps.md uses a placeholder"; return 1
+  fi
+  for caller in research spec-and-eval run; do
+    for v in "plugin root" reviewer_model; do
+      grep -qF -- "- \`<$v>\`:" "$REPO_ROOT/skills/$caller/SKILL.md" || { echo "$caller/SKILL.md doesn't give $v"; return 1; }
+    done
+  done
+  grep -q 'skills/research/steps.md' "$REPO_ROOT/skills/spec-and-eval/steps.md"
+  grep -q 'skills/research/steps.md' "$REPO_ROOT/skills/research/SKILL.md"
+}

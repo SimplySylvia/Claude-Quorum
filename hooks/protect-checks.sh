@@ -21,6 +21,9 @@
 # globs; a glob without a / matches a file name at any depth. A path in the task's `unlocked` list is allowed: the
 # plan's Checks changes, which /quorum:plan unlocks when the user approves the plan, or one the user unlocked.
 #
+# In every session, it also keeps the researcher's Write inside the research folders: a researcher reads untrusted
+# web pages, so it may write only .tasks/<slug>/research/ and .tasks/research-<slug>/, never the repo.
+#
 # Anything else, and any failure to tell, exits 0 at once. Bash 3.2 compatible.
 set -uo pipefail
 
@@ -34,6 +37,16 @@ tool=$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null) || exit 0
 case "$tool" in Edit|Write|NotebookEdit|Bash) ;; *) exit 0 ;; esac
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then cd "$cwd" 2>/dev/null || exit 0; fi
+
+if [ "$(printf '%s' "$input" | jq -r '.agent_type // empty' 2>/dev/null)" = "quorum:researcher" ] && [ "$tool" = Write ]; then
+  path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
+  case "$path" in
+    *..*) ;;
+    .tasks/research-*/*|*/.tasks/research-*/*|.tasks/*/research/*|*/.tasks/*/research/*) exit 0 ;;
+  esac
+  echo "BLOCKED BY QUORUM: the researcher writes only its findings, under .tasks/<slug>/research/ or .tasks/research-<slug>/, not $path." >&2
+  exit 2
+fi
 
 task=$("$BIN/quorum-active-task" 2>/dev/null) || exit 0
 status=$("$BIN/quorum-state" --task "$task" get status 2>/dev/null) || exit 0

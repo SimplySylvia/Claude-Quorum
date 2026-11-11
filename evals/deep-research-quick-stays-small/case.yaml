@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: deep-research-quick-stays-small
+description: /quorum:research --effort quick on a simple question starts no more than 2 researchers, checks their claims, and still writes the full report.
+tags: [research]
+context:
+  scaffold_script: scaffold.sh

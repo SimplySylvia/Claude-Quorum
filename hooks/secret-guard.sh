@@ -6,7 +6,9 @@
 #   - Read, or Grep with a path, of a credential file (bin/quorum-secrets path: .env, private keys, .npmrc, ...);
 #   - Bash commands where a reading command (cat, head, grep, sed, less, ...) or a redirect names one;
 #   - git commit when the lines it adds hold a secret (quorum-secrets staged; with -a or --all, every change to
-#     tracked files). The message names each file:line and the kind of secret, never the secret.
+#     tracked files). The message names each file:line and the kind of secret, never the secret;
+#   - WebSearch whose query, or WebFetch whose URL, holds a secret (quorum-secrets text): research must never send
+#     one off the machine, and deep research searches a lot.
 # Anything else, and any failure to tell, exits 0. Bash 3.2 compatible.
 set -uo pipefail
 
@@ -34,6 +36,12 @@ block() {
 }
 
 case "$tool" in
+  WebSearch|WebFetch)
+    q=$(printf '%s' "$input" | jq -r '.tool_input.query // .tool_input.url // empty')
+    if [ -n "$q" ] && ! kinds=$(printf '%s\n' "$q" | "$BIN/quorum-secrets" text 2>/dev/null); then
+      [ -n "$kinds" ] && block "this $tool would send what looks like a secret ($(printf '%s' "$kinds" | tr '\n' ',' | sed 's/,$//; s/,/, /g')) off the machine. Search with generic terms only."
+    fi ;;
+
   Read)
     path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
     if [ -n "$path" ] && secret "$path"; then block "$path is a credential file."; fi ;;

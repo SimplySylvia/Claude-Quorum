@@ -139,23 +139,15 @@ anywhere.
   the voter rescores a low-confidence finding after checking it. These make real model calls, so they weren't run
   as part of the change.
 
-## 11. A deep research mode
+## 11. Deep research: what's left
 
-One researcher reports two or three options, which is right for most tasks but thin for a new dependency, a choice
-between architectures, or a field the repo has no precedent in. Anthropic's lead-plus-parallel-subagents research
-beat a single agent by 90% on its own eval, at about 15× the tokens. No peer plugin checks that a cited page
-supports the claim. The research and the design are in `docs/deep-research-design.md`.
+Deep research and `/quorum:research` are built (unreleased). Still to do:
 
-- **`--deep-research [quick|standard|deep]`** on `spec-and-eval` and `run`, and a standalone `/quorum:research`.
-  The main thread is the lead; the workers are `quorum:researcher` with a lens (repo precedent, official docs,
-  alternatives, counter-evidence). The user approves the sub-questions first (BMAD's plan gate).
-- **Research can come before the task.** `/quorum:research` creates only the research, in
-  `.tasks/research-<slug>/` (gitignored, no `state.md`), to decide whether a task is worth doing and which way. Its
-  report adds Viability and Candidate tasks, and `spec-and-eval --from-research <slug>` starts a task from one.
-- **Claims carry their evidence:** a tag, the quote, the date fetched, the version, and `path:line @ sha` for repo
-  claims, so a script and a new `source-verifier` can check them cheaply.
-- **`secret-guard.sh` also checks web queries,** since deep mode makes many more of them.
-- Opt-in until `state.md` shows the research changed decisions often enough to pay for itself.
+- **Measure it.** After a few tasks, compare `research_decision` against the cost: does deep research change
+  decisions often enough to make it the default for HIGH?
+- **Cost on the fixture app:** a `standard` run against today's single researcher.
+- **Saved page copies.** hyperresearch checks each sentence against a copy saved at fetch time; Quorum's source
+  verifier reopens the live page, which may have changed since.
 
 ## 12. Later
 

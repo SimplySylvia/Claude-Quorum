@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: deep-research-standard
+description: /quorum:research on a design question splits it into lensed sub-questions, runs 3 researchers in parallel whose findings carry tagged claims, checks the claims, and writes a report with viability, candidate tasks, assumptions, and remaining gaps, creating no task.
+tags: [research]
+context:
+  scaffold_script: scaffold.sh
