@@ -874,11 +874,194 @@ def draw_flow(theme):
                  "A map session plans only: a hook blocks it from changing the code.")
 
 
+# Walkthroughs: what you type, and what then runs, for one kind of work. Stages are (name, group); groups label the
+# command that covers them. Each step is (stage, command, caption, kind, back): command is what you type at that
+# step (None: the last one is still running); kind is "go" (it runs), "ask" (it stops for you), or "back" (a check
+# sends the work back to stage `back`).
+FEATURE_STAGES = [("Chart", "map"), ("Research", "map"), ("Decide", "map"), ("Hand off", "map"),
+                  ("Spec", "run"), ("Plan", "run"), ("Build", "run"), ("Review", "run"), ("Blind test", "run"),
+                  ("PR", "run")]
+FEATURE_GROUPS = {"map": "/quorum:map: plans only, no code", "run": "/quorum:run --map: each task, every stage"}
+FEATURE_STEPS = [
+    (0, "/quorum:map Let regional managers run their own weekly reports",
+     "You name the destination; it grills breadth-first and charts 6 decision tickets", "ask", None),
+    (1, None, "Two research tickets start at once: researchers check the docs for the pinned versions", "go", None),
+    (2, "/quorum:map regional-reporting",
+     "One ticket per session: a researcher gathers the code facts, then you decide", "ask", None),
+    (2, "/quorum:map regional-reporting",
+     "The Feasibility Critic checks each decision against the code before it's recorded", "go", None),
+    (3, "/quorum:map regional-reporting",
+     "Nothing left to decide: tasks.md, 3 slices, reviewed in map mode; you approve it", "ask", None),
+    (4, "/quorum:run --map regional-reporting",
+     "Task 1's spec comes from the map's decisions: nothing decided is asked again", "go", None),
+    (5, None, "The plan is reviewed before any code exists; you approve it", "ask", None),
+    (6, None, "The builder writes each test first, with the checks locked", "go", None),
+    (7, None, "Round 1: the reviewers find an unescaped CSV field, and the voter keeps it", "back", 6),
+    (7, None, "Round 2 converges: nothing IMPORTANT left", "go", None),
+    (8, None, "A first-time user reaches the goal through the CLI, with no source access", "go", None),
+    (9, None, "The proof passes at HEAD and the PR is drafted; you merge it, and task 2 is ready", "ask", None),
+]
+BUG_STAGES = [("Reproduce", "run"), ("Spec", "run"), ("Build", "run"), ("Review", "run"), ("Proof", "run"),
+              ("PR", "run")]
+BUG_GROUPS = {"run": "/quorum:run --bug --fast: a LOW bug, no plan round, every check"}
+BUG_STEPS = [
+    (0, "/quorum:run --bug --fast summary crashes on an empty data file",
+     "It runs the bug first: a traceback, where it should print nothing and exit 0", "go", None),
+    (1, None, "The reproduction is row 1, and row 1b shows it failing without the fix", "go", None),
+    (2, None, "On fix/<slug>: the regression test first, seen failing, then the fix", "go", None),
+    (3, None, "The Logic Hunter finds the same crash in export, and the voter keeps it", "back", 2),
+    (2, None, "The builder fixes every place the bug class appears", "go", None),
+    (3, None, "Round 2 converges: nothing IMPORTANT left", "go", None),
+    (4, None, "Row 1 passes, and row 1b fails on the old code in a worktree: Bug: VERIFIED", "go", None),
+    (5, None, "READY, with the PR drafted; /quorum:retro turns the lesson into a rule", "go", None),
+]
+
+
+def draw_walkthrough(theme, title, stages, groups, steps, label):
+    s = Svg(THEMES[theme])
+    t = THEMES[theme]
+    n = len(stages)
+    gap, bh = 10, 50
+    bw = (W - 2 * LEFT - (n - 1) * gap) / n
+    cx = [LEFT + i * (bw + gap) + bw / 2 for i in range(n)]
+    prompt_y, group_y, top = 60, 126, 154
+    step, hold = 2.8, 2.6
+    cycle = len(steps) * step + hold
+    last, end = len(steps) - 1, cycle - 0.4
+    pct = lambda sec: f"{100 * max(0, min(sec, cycle)) / cycle:.2f}%"
+    css, reduced = ["svg .wtok { transform-box: view-box; }"], []
+
+    def windows(name, spans, fade=0.3, final=0):
+        frames = ["0% { opacity: 0; }"]
+        for a, b in spans:
+            frames += [f"{pct(a)} {{ opacity: 0; }}", f"{pct(a + fade)} {{ opacity: 1; }}",
+                       f"{pct(b - fade)} {{ opacity: 1; }}", f"{pct(b)} {{ opacity: 0; }}"]
+        frames.append("100% { opacity: 0; }")
+        css.append(f"@keyframes {name} {{ {' '.join(frames)} }} .{name} {{ animation: {name} {cycle}s infinite; }}")
+        reduced.append(f".{name} {{ animation: none; opacity: {final}; }}")
+
+    def span(k):
+        return k * step, (k + 1) * step + (hold if k == last else 0)
+
+    s.text(LEFT + 4, 22, title, size=15, weight=700)
+
+    # The prompt: the command you typed most recently, from its step until the next one.
+    s.rect(LEFT, prompt_y - 20, W - 2 * LEFT, 34, "doc", r=8)
+    s.text(LEFT + 14, prompt_y + 2, "you", size=TAG, color="muted")
+    starts = [k for k, st in enumerate(steps) if st[1]]
+    for j, k in enumerate(starts):
+        a = k * step
+        b = starts[j + 1] * step if j + 1 < len(starts) else span(last)[1]
+        if j + 1 < len(starts) and steps[starts[j + 1]][1] == steps[k][1]:
+            b = starts[j + 1] * step + 0.3   # the same command again: no gap between the two windows
+        s.add(f'<text class="cmd{j}" x="{LEFT + 48}" y="{prompt_y + 2}" font-family="{MONO}" font-size="13" '
+              f'font-weight="600" fill="{t["fg"]}" opacity="0">&gt; {escape(steps[k][1])}</text>')
+        windows(f"cmd{j}", [(a, b)], fade=0.25, final=1 if j == len(starts) - 1 else 0)
+
+    # Which command covers which stages.
+    i = 0
+    while i < n:
+        g, j = stages[i][1], i
+        while j + 1 < n and stages[j + 1][1] == g:
+            j += 1
+        x1, x2 = cx[i] - bw / 2, cx[j] + bw / 2
+        s.add(f'<path d="M{x1:.1f},{group_y + 8} V{group_y} H{x2:.1f} V{group_y + 8}" fill="none" '
+              f'stroke="{t["line"]}" stroke-width="1.5"/>')
+        s.text((x1 + x2) / 2, group_y - 6, groups[g], size=TAG, color="muted", anchor="middle", mono=True)
+        i = j + 1
+
+    for i, (name, _) in enumerate(stages):
+        x = cx[i] - bw / 2
+        s.rect(x, top, bw, bh, "chip", r=10)
+        first = next((k for k, st in enumerate(steps) if st[0] == i and st[3] != "back"), None)
+        if first is not None:
+            s.add(f'<rect class="wdone{i}" x="{x:.1f}" y="{top}" width="{bw:.1f}" height="{bh}" rx="10" '
+                  f'fill="{t["go"]}" fill-opacity=".1" stroke="{t["go"]}" stroke-opacity=".45" opacity="0"/>')
+            windows(f"wdone{i}", [((first + 1) * step - 0.3, end)], final=1)
+        for kind, color in (("go", "go"), ("ask", "medium"), ("back", "back")):
+            ks = [k for k, st in enumerate(steps) if st[0] == i and st[3] == kind]
+            if not ks:
+                continue
+            fill = f'fill="{t[color]}" fill-opacity=".1"' if kind != "go" else 'fill="none"'
+            s.add(f'<rect class="w{kind}{i}" x="{x:.1f}" y="{top}" width="{bw:.1f}" height="{bh}" rx="10" {fill} '
+                  f'stroke="{t[color]}" stroke-width="2.5" opacity="0"/>')
+            windows(f"w{kind}{i}", [span(k) for k in ks], final=1 if last in ks else 0)
+        s.text(cx[i], top + bh / 2 + 5, name, size=TAG + 1, weight=600, anchor="middle")
+
+    # Red arcs under the boxes for the steps that send work back.
+    for k, st in enumerate(steps):
+        if st[3] != "back":
+            continue
+        x1, x2, y = cx[st[0]], cx[st[4]], top + bh + 4
+        s.add(f'<path class="warc{k}" d="M{x1:.1f},{y} C{x1:.1f},{y + 34} {x2:.1f},{y + 34} {x2:.1f},{y + 3}" '
+              f'fill="none" stroke="{t["back"]}" stroke-width="1.8" marker-end="url(#arrow-back)" opacity="0"/>')
+        s.add(f'<text class="warc{k}" x="{(x1 + x2) / 2:.1f}" y="{y + 42}" font-family="{FONT}" font-size="{TAG}" '
+              f'font-weight="600" fill="{t["back"]}" text-anchor="middle" opacity="0">sent back</text>')
+        windows(f"warc{k}", [(k * step + 0.5, (k + 1) * step)])
+
+    # The work: a dot that glides to each step's stage.
+    moves = []
+    for k, st in enumerate(steps):
+        a = k * step
+        prev = cx[steps[k - 1][0]] - cx[0] if k else 0
+        moves.append(f"{pct(a - 0.6) if k else '0%'} {{ transform: translateX({prev:.1f}px); "
+                     f"animation-timing-function: cubic-bezier(.45,0,.25,1); }}")
+        moves.append(f"{pct(a)} {{ transform: translateX({cx[st[0]] - cx[0]:.1f}px); }}")
+    final_dx = cx[steps[last][0]] - cx[0]
+    moves.append(f"100% {{ transform: translateX({final_dx:.1f}px); }}")
+    css.append(f"@keyframes wtokmove {{ {' '.join(moves)} }} "
+               f"@keyframes wtokfade {{ 0% {{ opacity: 0; }} {pct(0.4)} {{ opacity: 1; }} {pct(end - 0.3)} "
+               f"{{ opacity: 1; }} 100% {{ opacity: 0; }} }} "
+               f".wtok {{ animation: wtokmove {cycle}s infinite, wtokfade {cycle}s infinite; }}")
+    reduced.append(f".wtok {{ animation: none; transform: translateX({final_dx:.1f}px); opacity: 1; }}")
+    s.add(f'<circle class="wtok" cx="{cx[0]:.1f}" cy="{top - 12}" r="6" fill="{t["go"]}" opacity="0"/>')
+
+    # Captions, one per step.
+    cap_y = top + bh + 74
+    for k, st in enumerate(steps):
+        color = {"go": t["fg"], "ask": t["medium"], "back": t["back"]}[st[3]]
+        s.add(f'<text class="wcap{k}" x="{W / 2}" y="{cap_y}" font-family="{FONT}" font-size="13.5" '
+              f'fill="{color}" text-anchor="middle" opacity="0"><tspan font-weight="700">Step {k + 1} of '
+              f'{len(steps)}:</tspan> {escape(st[2])}</text>')
+        windows(f"wcap{k}", [span(k)], fade=0.25, final=1 if k == last else 0)
+    s.text(W / 2, cap_y + 26, "Teal: it ran and passed · Amber: it stopped for you · Red: a check sent the work back",
+           size=TAG + 0.5, color="muted", anchor="middle")
+    css.append("@media (prefers-reduced-motion: reduce) { " + " ".join(reduced) + " }")
+    s.add("<style>" + " ".join(css) + "</style>")
+    return s.svg(int(cap_y + 40), label)
+
+
+def draw_feature(theme):
+    return draw_walkthrough(theme, "A feature: chart it, research it, build it", FEATURE_STAGES, FEATURE_GROUPS,
+                            FEATURE_STEPS, "Animation: a feature from a map to a merged task. You type /quorum:map "
+                            "with the idea: you name the destination, and it charts 6 decision tickets; two research "
+                            "tickets start at once. Then /quorum:map with the map's slug, one ticket per session: a "
+                            "researcher gathers the code facts, you decide, and the Feasibility Critic checks each "
+                            "decision. With nothing left to decide, it writes tasks.md with 3 slices, reviewed in map "
+                            "mode, and you approve it. Then /quorum:run --map: task 1's spec comes from the map's "
+                            "decisions; you approve the reviewed plan; the builder writes tests first; review round 1 "
+                            "sends an unescaped CSV field back to the builder, and round 2 converges; the blind test "
+                            "passes; the proof passes and the PR is drafted, and once you merge it, task 2 is ready.")
+
+
+def draw_bug(theme):
+    return draw_walkthrough(theme, "A bug fix: reproduce it, fix it, prove it", BUG_STAGES, BUG_GROUPS, BUG_STEPS,
+                            "Animation: a bug fix with /quorum:run --bug --fast. It reproduces the bug first: a "
+                            "traceback where it should print nothing and exit 0. The reproduction becomes check 1, "
+                            "and check 1b shows it failing without the fix. On a fix branch, the builder writes the "
+                            "regression test first, sees it fail, then fixes it. The Logic Hunter finds the same "
+                            "crash in export and sends it back; the builder fixes every place the bug class appears, "
+                            "and round 2 converges. The proof shows check 1 passing and 1b failing on the old code: "
+                            "Bug: VERIFIED. The task is READY with its PR drafted, and /quorum:retro turns the lesson "
+                            "into a rule.")
+
+
 if __name__ == "__main__":
     for name in THEMES:
         for base, draw in (("agent-map", draw_map), ("risk-tiers", draw_tiers), ("review-loop", draw_loop),
                            ("swiss-cheese", draw_cheese), ("stages", draw_stages), ("run", draw_run),
-                           ("map-flow", draw_flow)):
+                           ("map-flow", draw_flow), ("workflow-feature", draw_feature),
+                           ("workflow-bug", draw_bug)):
             path = os.path.join(OUT, f"{base}-{name}.svg")
             with open(path, "w") as f:
                 f.write(draw(name))

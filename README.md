@@ -17,9 +17,9 @@ and nothing counts as done without proof.**
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
 </p>
 
-[Quick start](#quick-start) · [How it works](#how-it-works) · [Running a task](#running-a-task) ·
-[Mapping a large effort](#mapping-a-large-effort) · [Guardrails](#guardrails) · [Reference](#reference) ·
-[Known limits](#known-limits)
+[Quick start](#quick-start) · [Two workflows](#two-workflows-start-to-finish) · [How it works](#how-it-works) ·
+[Running a task](#running-a-task) · [Mapping a large effort](#mapping-a-large-effort) · [Guardrails](#guardrails) ·
+[Reference](#reference) · [Known limits](#known-limits)
 
 </div>
 
@@ -91,6 +91,41 @@ Then, once in the repo you want to protect, bootstrap it, and take a task throug
 
 Every command is user-only: Claude never starts a review loop, or any other Quorum command, on its own. Every one is
 in the [Commands](#commands) reference.
+
+## Two workflows, start to finish
+
+What you type, and what runs. Amber is where Quorum stops for you; everything else goes on by itself.
+
+**A feature: chart it, research it, build it.** Three commands take an idea too big for one task to a merged first
+task: `/quorum:map` charts it and starts the research, `/quorum:map <slug>` settles one decision per session until
+nothing is left, and `/quorum:run --map <slug>` takes each task through every stage.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/workflow-feature-dark.svg">
+    <img src="assets/workflow-feature-light.svg" alt="Animation: a feature from a map to a merged task. You type /quorum:map with the idea: you name the destination, and it charts 6 decision tickets; two research tickets start at once. Then /quorum:map with the map's slug, one ticket per session: a researcher gathers the code facts, you decide, and the Feasibility Critic checks each decision. With nothing left to decide, it writes tasks.md with 3 slices, reviewed in map mode, and you approve it. Then /quorum:run --map: task 1's spec comes from the map's decisions; you approve the reviewed plan; the builder writes tests first; review round 1 sends an unescaped CSV field back to the builder, and round 2 converges; the blind test passes; the proof passes and the PR is drafted, and once you merge it, task 2 is ready." width="880">
+  </picture>
+</p>
+
+```
+/quorum:map Let regional managers run their own weekly reports   # destination, tickets, research
+/quorum:map regional-reporting                                   # one decision per session, then tasks.md
+/quorum:run --map regional-reporting                             # the next ready task, through every stage
+```
+
+**A bug fix: reproduce it, fix it, prove it.** One command. A LOW bug takes the fast path, with no plan round, but
+keeps every check: the reproduction becomes the first one, and the task isn't done until the proof shows it fixed.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/workflow-bug-dark.svg">
+    <img src="assets/workflow-bug-light.svg" alt="Animation: a bug fix with /quorum:run --bug --fast. It reproduces the bug first: a traceback where it should print nothing and exit 0. The reproduction becomes check 1, and check 1b shows it failing without the fix. On a fix branch, the builder writes the regression test first, sees it fail, then fixes it. The Logic Hunter finds the same crash in export and sends it back; the builder fixes every place the bug class appears, and round 2 converges. The proof shows check 1 passing and 1b failing on the old code: Bug: VERIFIED. The task is READY with its PR drafted, and /quorum:retro turns the lesson into a rule." width="880">
+  </picture>
+</p>
+
+```
+/quorum:run --bug --fast summary crashes on an empty data file
+```
 
 ## How it works
 

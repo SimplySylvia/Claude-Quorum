@@ -3,6 +3,15 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
+## Unreleased
+
+### Added
+
+- **Two workflows, start to finish, in the README.** Two new animations show what you type and what runs: a feature
+  charted as a map, researched, decided, handed off, and built through every stage, and a bug fix with
+  `/quorum:run --bug --fast`, from the reproduction to `Bug: VERIFIED`. Each marks where Quorum stops for you and
+  where a check sends work back.
+
 ## 0.11.0 (2026-11-11)
 
 ### Added
