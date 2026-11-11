@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: retro-finds-lessons
+description: /quorum:retro on a task whose review kept the same Pattern Category twice, in a repo with a check verify-completion.sh never runs, proposes wiring in the check and a rule for the repeat, most severe first, and writes nothing before the user picks.
+tags: [retro, lessons]
+context:
+  scaffold_script: scaffold.sh
