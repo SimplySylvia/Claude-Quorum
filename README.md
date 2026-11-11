@@ -17,8 +17,9 @@ and nothing counts as done without proof.**
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
 </p>
 
-[Quick start](#quick-start) · [How it works](#how-it-works) · [Risk tiers](#risk-tiers) · [Guardrails](#guardrails) ·
-[Reference](#reference) · [Contributing](CONTRIBUTING.md) · [Known limits](#known-limits)
+[Quick start](#quick-start) · [How it works](#how-it-works) · [Running a task](#running-a-task) ·
+[Mapping a large effort](#mapping-a-large-effort) · [Guardrails](#guardrails) · [Reference](#reference) ·
+[Known limits](#known-limits)
 
 </div>
 
@@ -31,6 +32,8 @@ doesn't help. Quorum has one mechanism for each:
   already has, is cheap to fix on paper and expensive after review. Two spec reviewers check the spec against the
   code, then the same reviewers who will later check the code review the plan, so the build starts from something
   already checked.
+- **It specs big work on guesses.** An effort too big for one task has decisions nobody has made yet. A map charts
+  them first, gets each one made by you, with the facts behind it, and only then hands the work off as tasks.
 - **It grades its own homework.** The agent that wrote the code shares every assumption behind it. Quorum's
   reviewers are separate subagents with a fresh context: they see the diff, the spec, and the plan, never the
   builder's reasoning, and each looks from its own angle: logic, architecture, repo patterns, docs, tests, or
@@ -39,15 +42,9 @@ doesn't help. Quorum has one mechanism for each:
   prover runs every check in the spec and shows the output, including that each new test fails without the fix.
 - **Reviews never end.** Builder and reviewer argue for dozens of rounds over the same nits. Quorum caps the loop
   at 3 rounds, reviews only new lines after round 1, limits nits to 2, and runs a voter that drops weak findings.
-- **Lessons don't stick.** A bug fixed today comes back next week. `/quorum:codify-lesson` turns it into the
-  cheapest thing that stops it: a check the repo already has but never ran, a regression test, a lint rule, a
-  pattern rule a hook blocks during tasks, or only then a one-line rule in `REVIEW.md`. Each new plan reads what earlier tasks learned, including post-mortems,
-  blockers, and findings that kept coming back, and says how it avoids each. Quorum suggests a lesson when a
-  Pattern Category comes back, the voter drops the same false alarm twice, or the blind test finds what every
-  reviewer missed. It writes one only after you say yes, and `--audit` offers to retire rules no review has cited
-  in months, and steering lines that do nothing. `/quorum:retro` looks over a whole task, map, session, or stretch
-  of work (`--since <date>`) for every such lesson at once, and also at what the session spent its time on: failed
-  commands, long searches, files read again and again.
+- **Lessons don't stick.** A bug fixed today comes back next week. Quorum turns it into the cheapest thing that
+  stops it, a check before a sentence, and each new plan reads what earlier tasks learned. See
+  [Learning from mistakes](#learning-from-mistakes).
 
 The idea underneath is the [Swiss cheese model](https://pmc.ncbi.nlm.nih.gov/articles/PMC1117770/): no single check
 is perfect, so stack several different ones whose holes sit in different places. Each dot below is a kind of defect;
@@ -71,67 +68,33 @@ both the plugin and a single-plugin marketplace:
 /plugin install quorum@quorum
 ```
 
-Then, in the repo you want to protect:
+Then, once in the repo you want to protect, bootstrap it, and take a task through every stage:
 
 ```
-/quorum:init-pipeline          # once per repo: CLAUDE.md, REVIEW.md, verify-completion.sh, .tasks/
-/quorum:spec-and-eval          # per task: risk tier, research, rd.md, eval.md, spec review (and a mockup for UI work)
-/quorum:plan                   # plan.md: files, reuse, tests, docs, a11y; reviewed, then you approve it
-/quorum:build                  # first build on feat/<slug>, following the plan
-/quorum:simplify-diff          # strip debug code and needless abstractions, re-run checks
-/quorum:review-loop            # fresh reviewers check the code against the plan → voter → builder, up to 3 rounds
-/quorum:blind-test             # MEDIUM/HIGH: security pass, then a user test with no source access
-/quorum:pr-draft               # READY / AWAITING-HUMAN: PR description from the spec and proof
-/quorum:codify-lesson          # optional: stop a repeated bug or false alarm (a test, lint or pattern rule, or a line); --audit prunes
-/quorum:retro                  # optional: everything this task and session say the next build should do differently
+/quorum:init-pipeline                            # once: CLAUDE.md, REVIEW.md, verify-completion.sh, .tasks/
+/quorum:run Add a CSV export to the sales report # spec → plan → build → review → blind test → PR draft
 ```
 
-Or let one command take a task through every stage, stopping only where you must decide:
+`/quorum:run` stops only where you must decide, and running it again continues from wherever the task stopped.
 
-```
-/quorum:run Add a CSV export to the sales report          # spec → plan → build → review → blind test → PR draft
-/quorum:run --fast Fix the typo in the help text          # LOW only: spec → build → one reviewer → PR draft
-/quorum:run --worktree Add a CSV export                   # build in its own git worktree; keep working here meanwhile
-/quorum:run --bug summary crashes on a missing file       # reproduce it first; done when it's proven fixed
-/quorum:run --deep-research Add OAuth login to the API    # research the approach with several lensed researchers
-/quorum:run                                               # continue the active task from wherever it stopped
-```
+**Where to start**, by what's in front of you:
 
-See [Running the whole pipeline](#running-the-whole-pipeline).
+| You have | Run |
+|---|---|
+| A change to make | `/quorum:run <what to build>` (see [Running a task](#running-a-task)) |
+| A small change no user can reach: copy, docs, a test | `/quorum:run --fast <what to build>` |
+| A bug | `/quorum:run --bug <what's broken>`: it reproduces the bug first, and is done when it's proven fixed |
+| A branch or pull request to review, with no setup | `/quorum:review` or `/quorum:review 123` (see [Reviewing any diff](#reviewing-any-diff)) |
+| A question: is it worth doing, and which way? | `/quorum:research <question>` (see [Researching before you build](#researching-before-you-build)) |
+| An effort too big for one task, with the way unclear | `/quorum:map <the problem>` (see [Mapping a large effort](#mapping-a-large-effort)) |
+| A finished task, and the wish to do better next time | `/quorum:retro` (see [Learning from mistakes](#learning-from-mistakes)) |
 
-Every command is user-only: Claude never starts a review loop on its own.
-
-To try Quorum's reviewers first, no setup needed, review a branch or pull request you already have:
-
-```
-/quorum:review                 # this branch against the default branch
-/quorum:review 123             # a GitHub PR; add --comment to post the findings on it, after you approve them
-```
-
-See [Reviewing any diff](#reviewing-any-diff).
-
-To decide whether something is worth doing, and which way, before there's a task:
-
-```
-/quorum:research Is it worth caching the parsed sales data, and how?    # researchers in parallel, every claim checked
-/quorum:research --effort quick Which stdlib module should export CSV?  # 2 researchers, 1 round
-/quorum:spec-and-eval --from-research <slug> 1                          # start a task from one of its candidate tasks
-```
-
-It writes only `.tasks/research-<slug>/`: a report with viability, candidate tasks, assumptions to confirm, and
-remaining gaps, and never a task. See [Researching before you build](#researching-before-you-build).
-
-For an effort too big for one task, whose way isn't clear yet, chart it as a map of decisions first:
-
-```
-/quorum:map Let regional managers run their own weekly reports, with trends and alerts    # chart it: destination, tickets
-/quorum:map regional-reporting                       # resolve the next decision with you, one per session
-/quorum:run --map regional-reporting                 # once it's cleared: the next ready task, through the whole pipeline
-```
-
-See [Mapping a large effort](#mapping-a-large-effort).
+Every command is user-only: Claude never starts a review loop, or any other Quorum command, on its own. Every one is
+in the [Commands](#commands) reference.
 
 ## How it works
+
+### A task, stage by stage
 
 A task moves through stages 0 to 8, and each stage catches defects the others miss. Here a task on the repo's
 fixture app carries two planted bugs; a red stage is one sending the work back:
@@ -143,8 +106,8 @@ fixture app carries two planted bugs; a red stage is one sending the work back:
   </picture>
 </p>
 
-Each band below is a command you run, and the chips are the agents it starts, with when each one runs underneath.
-No agent sees the conversation that produced the code.
+Each band below is a command, and the chips are the agents it starts, with when each one runs underneath. No agent
+sees the conversation that produced the code.
 
 <p align="center">
   <picture>
@@ -154,7 +117,7 @@ No agent sees the conversation that produced the code.
 </p>
 
 <details>
-<summary>Files each agent leaves in <code>.tasks/&lt;slug&gt;/</code></summary>
+<summary>Files each agent leaves in <code>.tasks/</code></summary>
 
 | Command | Agent | File |
 |---|---|---|
@@ -170,8 +133,11 @@ No agent sees the conversation that produced the code.
 | | `prover` | `proof-final.md` |
 | `pr-draft` | `pr-writer` | `pr.md`, `pr-body.md` |
 | `research` (no task) | `researcher` per lens, `source-verifier` | `.tasks/research-<slug>/`: `question.md`, `evidence.md`, `research/*.md`, `research.md` |
+| `map` (no task) | `researcher`, `spec-reviewer` (decision mode) | `.tasks/map-<slug>/`: `research/<NN>.md`, `research/<NN>-facts.md`, `research-<NN>/` for deep research, `review/<NN>-feasibility.md` |
+| | map-mode reviewers and `verifier-voter` | `.tasks/map-<slug>/tasks-review/round-<n>/*.md`, `votes.md`, `survivors.md` |
 
-The diagrams are drawn by `assets/src/diagrams.py`; run it again after changing which agents a command starts.
+The paths are under `.tasks/<slug>/` unless they say otherwise. The diagrams are drawn by `assets/src/diagrams.py`;
+run it again after changing which agents a command starts.
 
 </details>
 
@@ -186,7 +152,21 @@ new lines.
   </picture>
 </p>
 
-## Running the whole pipeline
+### From a problem to merged code
+
+For an effort too big for one task, a map comes first. It settles the decisions, then hands them off as tasks, and
+each task goes through every stage above:
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/map-flow-dark.svg">
+    <img src="assets/map-flow-light.svg" alt="From a problem to merged code. 1, chart it with /quorum:map and the problem: the destination, grilled until it's one or two concrete lines, plus what's out of scope; a breadth-first survey of every open decision; then at most 8 tickets, with research tickets started at once, in parallel. If it fits one task, charting stops and points to /quorum:spec-and-eval. 2, decide, with /quorum:map and the map's slug, one ticket per session: claim the first ticket waiting on nothing still open; you decide, after a researcher gathers the facts a code question rests on; the Feasibility Critic checks the decision against the code and earlier decisions; then the next ticket, in the next session. 3, hand off, once nothing is left to decide: tasks.md, vertical slices with a tier, what each waits on, and the decisions behind it; a review by the architecture reviewer, the pattern auditor, the security reviewer for HIGH tasks, and the voter; then you approve it. 4, build each task with /quorum:run --map: the spec comes from decisions.md; the whole pipeline runs, plan, build, review loop, blind test, proof; it drafts the PR and you merge it; then the next task whose blockers have merged. 5, learn with /quorum:retro. A map session plans only: a hook blocks it from changing the code." width="880">
+  </picture>
+</p>
+
+## Running a task
+
+### One command: `/quorum:run`
 
 `/quorum:run` follows each stage's own steps, in order, so a task gets exactly what the separate commands give it:
 the same agents, the same checks, the same caps. It goes on by itself between stages and stops where only you can
@@ -195,18 +175,18 @@ decide:
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/run-dark.svg">
-    <img src="assets/run-light.svg" alt="/quorum:run: spec, plan, build, simplify, review loop, blind test, and PR draft, in order, with arrows between them. It stops to ask once at the spec (one proposal of slug, tier, research, and docs, plus the models the first time in a repo; --yes accepts all but a HIGH tier) and at the plan (mockup sign-off for UI work, then plan approval; --yes approves a clean plan except for HIGH), and after the PR draft for your review of MEDIUM and HIGH tasks; it never pushes or opens the PR. It stops if the review loop halts after the round cap or the blind test's fixes don't converge. Blind-test blockers go back to the review loop. LOW tasks skip the blind test and end READY. --until stops after a stage, and running it again continues from the task's status. --fast takes a LOW task through with no spec reviewers, no plan stage, and one reviewer; --worktree builds the task in its own git worktree; --bug reproduces the bug first and is done only when the proof shows it fixed; --deep-research runs lensed researchers in parallel and checks every claim against its source; --map starts the next ready task of a cleared map." width="880">
+    <img src="assets/run-light.svg" alt="/quorum:run: spec, plan, build, simplify, review loop, blind test, and PR draft, in order, with arrows between them. It stops to ask at the spec (one proposal of slug, tier, research, and docs, plus the models the first time in a repo; --yes accepts all but a HIGH tier; then a follow-up round only if your answers open new questions) and at the plan (mockup sign-off for UI work, then plan approval with the plan's open questions; --yes approves a clean plan except for HIGH), and after the PR draft for your review of MEDIUM and HIGH tasks; it never pushes or opens the PR. It stops if the review loop halts after the round cap or the blind test's fixes don't converge. Blind-test blockers go back to the review loop. LOW tasks skip the blind test and end READY. --until stops after a stage, and running it again continues from the task's status. --fast takes a LOW task through with no spec reviewers, no plan stage, and one reviewer; --worktree builds the task in its own git worktree; --bug reproduces the bug first and is done only when the proof shows it fixed; --deep-research runs lensed researchers in parallel and checks every claim against its source; --map starts the next ready task of a cleared map." width="880">
   </picture>
 </p>
 
 | It stops for | When |
 |---|---|
 | Why the change is wanted | the spec, only when the request doesn't say |
-| One proposal: the slug, risk tier, research, docs for a new feature, and for LOW the fast path | the spec, asked once together with any open design questions (with `--yes`, it accepts the proposal, but still asks about a HIGH tier) |
+| One proposal: the slug, risk tier, research, docs for a new feature, and for LOW the fast path | the spec, asked once together with any open design questions (with `--yes`, it accepts the proposal, but still asks about a HIGH tier); a follow-up round only if your answers open new questions |
 | The reviewer and helper models | the spec, in that same question, only the first time: the answers are remembered for the repo in `.claude/quorum.json` (`--models` asks again), unless the plugin options set them |
 | The research sub-questions | with `--deep-research`, before the researchers start (with `--yes`, it goes on) |
 | Mockup sign-off | UI tasks, before planning, always |
-| Plan approval | after plan review (with `--yes`, approved when nothing `[IMPORTANT]` survives, except for HIGH) |
+| Plan approval, with the plan's open questions | after plan review (with `--yes`, approved when nothing `[IMPORTANT]` survives, except for HIGH) |
 | A halt | the review loop or blind test runs out of rounds, or the Stop hook escalates |
 | Your review | MEDIUM and HIGH tasks end at `AWAITING-HUMAN`, after drafting the PR |
 
@@ -215,18 +195,33 @@ It never pushes, opens, or merges the PR: it ends with the draft and the command
 picks up from the task's status, so you can mix it with the single-stage commands. Between stages it prints one
 line per stage; agents' full replies stay in `.tasks/<slug>/`.
 
-**Large plans are built a step at a time.** A plan with 4 or more steps gets a fresh builder for each step. Each one
-starts from the last step's commit and leaves the checks passing, and `state.md` records each step as it's built
-(`built_steps`). A cut-off build, or a new session, picks up at the next step instead of starting over. The
-dashboard's stage rail shows "Build 2/5". Steps the planner marks mechanical can run on a cheaper model with the
-`mechanical_model` option. The review loop still reviews the whole branch.
+- **`--fast`** is for LOW tasks: a short spec with no spec reviewers or mockup, no plan round, the build, a review by
+  the Logic & Edge-Case Hunter alone (still with the voter and the round cap), the proof, and the PR draft. It drops
+  ceremony, not checks: the Stop hook and the proof before `READY` hold as always. A task the spec puts at MEDIUM or
+  HIGH takes the full pipeline instead. The dashboard shows the Plan stage as skipped.
+- **`--bug`** reproduces the bug before anything else. That reproduction becomes the first check, alongside one that
+  shows it failing without the fix, and the task isn't done until the final proof says `Bug: VERIFIED`.
+- **Large plans are built a step at a time.** A plan with 4 or more steps gets a fresh builder for each step. Each
+  one starts from the last step's commit and leaves the checks passing, and `state.md` records each step as it's
+  built (`built_steps`). A cut-off build, or a new session, picks up at the next step instead of starting over. The
+  dashboard's stage rail shows "Build 2/5". Steps the planner marks mechanical can run on a cheaper model with the
+  `mechanical_model` option. The review loop still reviews the whole branch.
 
-**`--fast`** is for LOW tasks: a short spec with no spec reviewers or mockup, no plan round, the build, a review by
-the Logic & Edge-Case Hunter alone (still with the voter and the round cap), the proof, and the PR draft. It drops
-ceremony, not checks: the Stop hook and the proof before `READY` hold as always. A task the spec puts at MEDIUM or
-HIGH takes the full pipeline instead. The dashboard shows the Plan stage as skipped.
+### Stage by stage
 
-## More than one task at a time
+Each stage is also a command of its own, for when you want to stop between them or rerun one:
+
+```
+/quorum:spec-and-eval          # per task: risk tier, research, rd.md, eval.md, spec review (and a mockup for UI work)
+/quorum:plan                   # plan.md: files, reuse, tests, docs, a11y; reviewed, then you approve it
+/quorum:build                  # first build on feat/<slug>, following the plan
+/quorum:simplify-diff          # strip debug code and needless abstractions, re-run checks
+/quorum:review-loop            # fresh reviewers check the code against the plan → voter → builder, up to 3 rounds
+/quorum:blind-test             # MEDIUM/HIGH: security pass, then a user test with no source access
+/quorum:pr-draft               # READY / AWAITING-HUMAN: PR description from the spec and proof
+```
+
+### More than one task at a time
 
 With `--worktree` (`/quorum:build --worktree` or `/quorum:run --worktree`), or the **A worktree per task** option
 for every task, the build checks the task's branch out in its own git worktree, at `.claude/worktrees/<slug>`. Then
@@ -254,7 +249,9 @@ Two tasks' blind tests at once can clash if both start the app on the same port.
 `/quorum:codify-lesson` writes goes into the main working tree's `REVIEW.md`; a worktree's reviewers see it once
 it's committed and the task's branch has it.
 
-## Researching before you build
+## Before a task
+
+### Researching before you build
 
 `/quorum:research <question>` is for research that decides what the task is: whether something is worth doing, and
 which way. For example, "is it worth caching the parsed data, and how?" It creates only the research, in
@@ -273,24 +270,30 @@ which way. For example, "is it worth caching the parsed data, and how?" It creat
    - `quorum-research-check` re-finds every repo quote, and drops a claim whose quote is gone.
    - The `source-verifier` agent reopens only the pages a decision rests on, plus claims with numbers or no quote.
      It drops what the page doesn't say, and flags docs for the wrong version.
-   - Assumptions come to you, never into a spec as fact.
+   - Assumptions come to you, never into a spec as fact. It offers to settle them in one round.
 4. **One gap round at most**, and then the report: the usual options and recommendation, plus **Viability**,
    **Candidate tasks**, **Assumptions to confirm**, and **Remaining gaps**.
 5. **Starting a task from it.** `/quorum:spec-and-eval --from-research <slug> <n>` starts a task from a candidate,
-   with the research already done.
+   with the research already done. When the candidates are many and depend on each other, it suggests a map.
 
 Inside a task, `--deep-research [quick|standard|deep]` on `/quorum:spec-and-eval` or `/quorum:run` researches the
 same way in place of the single researcher. It's opt-in. `state.md` records whether research changed a decision
 (`research_decision`), to show whether it pays for itself. The secret guard also checks every web query and URL,
 including the researchers'.
 
-## Mapping a large effort
+### Mapping a large effort
 
 Some work is too big for one task, and the way to it isn't clear yet: a new subsystem, a migration, a product area.
 A spec written that early rests on guesses. `/quorum:map` finds the way first, as a map of decisions in
 `.tasks/map-<slug>/`. It's an idea taken from Matt Pocock's
 [wayfinder](https://github.com/mattpocock/skills/blob/main/skills/engineering/wayfinder/SKILL.md) skill, with
 Quorum's research, checks, and task pipeline behind it.
+
+```
+/quorum:map Let regional managers run their own weekly reports, with trends and alerts   # chart it
+/quorum:map regional-reporting            # resolve the next decision with you, one per session
+/quorum:run --map regional-reporting      # once it's cleared: the next ready task, through every stage
+```
 
 1. **Chart it.** It grills you for the **destination**, one or two concrete lines, and what's out of scope. Then it
    grills breadth-first across everything the destination touches, and charts what it finds:
@@ -309,10 +312,11 @@ Quorum's research, checks, and task pipeline behind it.
    context. `--revise` reopens a decision that turned out wrong and lists the decisions that rested on it.
 3. **Hand it off.** Once nothing is left to decide, it breaks the destination into Quorum tasks in `tasks.md`:
    vertical slices, each one pull request, with its tier, the tasks it waits on, and the decisions it rests on.
-   `/quorum:spec-and-eval --from-map <slug> <n>` starts one. The spec saves the map's decisions to
-   `decisions.md`, writes them into the requirements and non-goals, and doesn't ask again what the map decided.
-   The spec reviewers and the planner read them too. `/quorum:run --map <slug>` starts the next ready task and takes
-   it through every stage.
+   You approve the breakdown after it's reviewed (below).
+4. **Build it.** `/quorum:run --map <slug>` starts the next task whose blockers have merged and takes it through
+   every stage; `/quorum:spec-and-eval --from-map <slug> <n>` starts one by number. The spec saves the map's
+   decisions to `decisions.md`, writes them into the requirements and non-goals, and doesn't ask again what the map
+   decided. The spec reviewers and the planner read them too.
 
 **Quorum's agents back up each decision, and none of them makes it:**
 
@@ -333,35 +337,20 @@ editing the repo outside `.tasks/`, writing into it from Bash, committing, or st
 can't lift that, because the agent writes the Notes. Only you answer a `grilling` or `prototype` ticket:
 `quorum-map resolve` refuses one answered by the agent. A task waits until the tasks it depends on have **merged**,
 because its branch starts from the default branch; `quorum-map --map <slug> tasks` shows which have started, which
-merged, and which are ready.
-
-`bin/quorum-map` keeps the map's index, the frontier, claims, and blocking edges without a model, and
-`quorum-map check` catches a broken map: a cycle, a ticket with no question, or a decision missing from the index.
-
-### Grilling
-
-Wherever a decision is yours, Quorum asks in **grilling rounds**: every question that can be asked now, in one
-message, each with the answer it recommends and worded so "yes" accepts it. It looks facts up instead of asking you,
-never asks again what you or a map already decided, and leaves a question that depends on an open one for the next
-round. That happens:
-
-- at the spec: the proposal and design questions together, then a follow-up round only when your answers open new
-  questions;
-- after research: the approach, and each of the research's assumptions to confirm, which never go into a spec as
-  fact until you confirm them;
-- on a spec-review finding only you can settle, such as what a requirement should mean;
-- at plan approval, for the plan's open questions, instead of leaving them for the builder to guess;
-- when choosing a redesign for a halted task;
-- throughout a map.
-
-Building, reviewing, and proving never stop to ask. The `grilling` skill also works on its own: ask Claude to grill
-you on a plan.
+merged, and which are ready. `bin/quorum-map` keeps the map's index, the frontier, claims, and blocking edges
+without a model, and `quorum-map check` catches a broken map: a cycle, a ticket with no question, or a decision
+missing from the index.
 
 ## Reviewing any diff
 
 `/quorum:review` runs the review loop's reviewers and voter on a diff that isn't a Quorum task: the current
 branch, a pull request (`123` or its URL), or a git range (`main..HEAD`). It needs no spec, no plan, and no
 bootstrap.
+
+```
+/quorum:review                 # this branch against the default branch
+/quorum:review 123             # a GitHub PR; add --comment to post the findings on it, after you approve them
+```
 
 - **Intent instead of a spec.** The reviewers judge the change against the PR's description, or the commit
   messages for a branch or range, and the code.
@@ -380,6 +369,48 @@ bootstrap.
 Each review keeps its runs in `.tasks/review-<id>/` (`review-pr-123`, `review-feat-csv-export`), apart from any
 task, so running it again on the same PR reuses its model choice. On a Quorum task's own branch it sends you to
 `/quorum:review-loop`, which checks the code against the task's spec and plan.
+
+## Where Quorum asks you
+
+Wherever a decision is yours, Quorum asks in **grilling rounds**: every question that can be asked now, in one
+message, each with the answer it recommends and worded so "yes" accepts it. It looks facts up instead of asking you,
+never asks again what you or a map already decided, and leaves a question that depends on an open one for the next
+round. That happens:
+
+- **at the spec:** the proposal and design questions together, then a follow-up round only when your answers open
+  new questions;
+- **after research:** the approach, and each of the research's assumptions to confirm, which never go into a spec
+  as fact until you confirm them;
+- **on a spec-review finding only you can settle,** such as what a requirement should mean;
+- **at plan approval,** for the plan's open questions, instead of leaving them for the builder to guess;
+- **when choosing a redesign** for a halted task;
+- **throughout a map.**
+
+Building, reviewing, and proving never stop to ask. With `--yes`, Quorum takes its recommended answers and lists
+them, except where you must answer (a HIGH tier, and a map's grilling and prototype tickets). The `grilling` skill
+also works on its own: ask Claude to grill you on a plan.
+
+## Learning from mistakes
+
+A lesson is only learned once it changes what the next build or review does, and the surest change is one a machine
+checks. Quorum suggests one when a Pattern Category comes back, the voter drops the same false alarm twice, or the
+blind test finds what every reviewer missed, and writes it only after you say yes.
+
+- **`/quorum:codify-lesson`** turns one lesson into the cheapest thing that stops it, in this order: a check the
+  repo already has but `verify-completion.sh` never ran, a regression test, a lint rule, a pattern rule a hook
+  blocks during tasks, a one-line rule in `REVIEW.md`, or a pointer in `CLAUDE.md` when an agent couldn't find
+  something. `--audit` offers to retire rules no review has cited in months, and steering lines that do nothing.
+- **`/quorum:retro`** looks back over a whole task, a map, a session, or a stretch of work (`--since <date>`), after
+  Matt Pocock's [retro](https://github.com/mattpocock/skills/blob/main/skills/engineering/retro/SKILL.md). It reads
+  Quorum's records (rounds, false alarms, blind-test blockers, halts, plan deviations, reopened decisions, research
+  that changed nothing) and the session logs: `quorum-session` counts the tool calls, failed commands, hook blocks,
+  files read again and again, and long searches, never the content. It ranks what it finds most severe first, from
+  checks and review rules to broken commands, missing access, and Quorum settings worth changing; applies the ones
+  you pick in `codify-lesson`'s order; and saves the retro to `.tasks/retro-<date>/`, so a declined idea isn't
+  proposed again for nothing.
+
+Each new plan reads what earlier tasks learned (`quorum-lessons history`): post-mortems, blind-test blockers,
+findings that kept coming back, and the learned rules, and says how it avoids each.
 
 ## The dashboard
 
@@ -401,8 +432,9 @@ finished with its PR open.</sub>
   - **Task card:** title, goal, status, a stage stepper, and the PR once there is one.
   - **Now card:** what the current stage is doing, such as each reviewer's progress and the findings the voter
     kept. Its border turns amber when it's your move and red when the task is stuck.
-  - **Folding sections:** Requirements, Checks, Review rounds, Spend (tokens and models used, the models the task chose, and a warning when an agent ran on another), and Other agents. A
-    section with a problem opens by itself.
+  - **Folding sections:** Requirements, Checks, Review rounds, Spend (tokens and models used, the models the task
+    chose, and a warning when an agent ran on another), Other tasks, and Other agents. A section with a problem opens
+    by itself.
 - **▶ Next** puts the next command in your prompt to send or edit. It never sends it for you.
 - **Toasts** when a task converges, halts, escalates, or is ready for you.
 - **`/quorum:review`:** the one this session is running gets a card of its own, with its reviewers, the voter's
@@ -410,7 +442,8 @@ finished with its PR open.</sub>
   there's no task. Finished reviews stay in a **Reviews** section, and an unfinished one is flagged as interrupted.
 
 The pane docks beside the chat in a wide fullscreen terminal, and sits above the prompt otherwise. The dashboard only
-reads `.tasks/`, so `claude -p`, cloud sessions, and the VS Code chat panel work as before, without it.
+reads `.tasks/`, so `claude -p`, cloud sessions, and the VS Code chat panel work as before, without it. It shows
+tasks and reviews; maps and research aren't on it yet.
 
 ## Risk tiers
 
@@ -433,9 +466,8 @@ confirm. The tier decides how many layers the task gets:
   makes it pass. When a check fails, it follows the `debugging` skill: reproduce, read the whole error, check what
   changed, and name the cause with evidence before changing code. It also checks each review finding against the
   code, and disputes a wrong one with evidence; the voter rechecks disputes, and an upheld one becomes a lesson.
-- **Bugs are proven fixed.** With `--bug`, the spec reproduces the bug before anything else. That reproduction
-  becomes the first check, alongside one that shows it failing without the fix. The task isn't done until the final
-  proof says `Bug: VERIFIED`.
+- **Bugs are proven fixed.** With `--bug`, the spec reproduces the bug before anything else, and the task isn't done
+  until the final proof shows the reproduction passing and failing without the fix (`Bug: VERIFIED`).
 - **Every requirement gets a verdict.** The final proof marks each requirement in `rd.md` as MET, PARTIAL,
   MISSING, or CONTRADICTS. MET needs evidence: the checks that pass, and the `file:line` that does the work, real
   and wired in rather than a stub. Anything but MET goes back to the review loop. The proof also lists code no
@@ -443,13 +475,12 @@ confirm. The tier decides how many layers the task gets:
 - **The spec and plan are linted first.** `quorum-validate` checks, without a model, that every requirement has
   a check and every check a requirement, and that every plan step names the requirements it serves. It also
   flags vague words. The reviewers start only after that passes.
-- **The checks can't be weakened mid-task.** While a task builds or is in review, a hook blocks edits to the task's
-  own `rd.md` and `eval.md` (once its build has started), `verify-completion.sh`, CI workflows, and the usual test, lint, type-check, and format
-  configs. It also blocks
-  `git commit --no-verify` and commits with `core.hooksPath` set. It applies to the builder and the main session
-  alike. A change the task really needs goes in `plan.md`'s **Checks changes**, which you approve with the plan.
-  Otherwise only you can unlock a file, with `! quorum-state push unlocked <path>`. Add your own with the
-  `protected_paths` option or `.claude/quorum.json`.
+- **The checks can't be weakened mid-task.** While a task builds or is in review, a hook blocks edits to the
+  task's own `rd.md` and `eval.md` (once its build has started), `verify-completion.sh`, CI workflows, and the
+  usual test, lint, type-check, and format configs. It also blocks `git commit --no-verify` and commits with
+  `core.hooksPath` set. It applies to the builder and the main session alike. A change the task really needs goes
+  in `plan.md`'s **Checks changes**, which you approve with the plan. Otherwise only you can unlock a file, with
+  `! quorum-state push unlocked <path>`. Add your own with the `protected_paths` option or `.claude/quorum.json`.
 - **Maps don't build.** In a `/quorum:map` session, a hook blocks edits to the repo outside `.tasks/`, Bash commands
   that write into it, commits and pushes, and starting a task's branch. It applies only to that session.
 - **Secrets stay out.** In every session, a hook blocks reading `.env` and other credential files, and blocks a
@@ -460,9 +491,9 @@ confirm. The tier decides how many layers the task gets:
 - **Findings stay on the change.** Before the voter, `quorum-findings scope` drops findings on lines the diff
   doesn't change, or on a line with a lint-ignore comment. It keeps `[PRE-EXISTING]` ones, and says why for each
   drop.
+- **Hard caps.** At most 3 review rounds, then `HALTED` with a post-mortem and two redesign options.
 - **Quiet outside a task.** Apart from the secret guard, the hooks do nothing unless a task is building, in review,
   or escalated, a blind test is running, or the session is working on a map.
-- **Hard caps.** At most 3 review rounds, then `HALTED` with a post-mortem and two redesign options.
 - **Asks before writing** to `CLAUDE.md`, `REVIEW.md`, or your global `~/.claude/CLAUDE.md`, with a diff first.
 - **Local data only.** Blind tests and `eval.md` checks use local, temporary, or synthetic data, never production.
 
@@ -471,15 +502,17 @@ confirm. The tier decides how many layers the task gets:
 Models change often, so Quorum doesn't name any. The first task in a repo asks two questions, with the models
 Claude Code offers at that moment as the choices:
 
-- **Reviewers:** the spec, plan, code, accessibility, and security reviewers and the voter. The recommended answer is
-  your session's model, since these decide what gets fixed.
+- **Reviewers:** the spec, plan, code, accessibility, and security reviewers, the voter, and the source verifier,
+  in tasks, reviews, research, and maps. The recommended answer is your session's model, since these decide what
+  gets fixed.
 - **Helpers:** the PR writer and the friction triager, which summarize and sort. The fastest model is recommended.
 
 The answers go in the task's `state.md`, and every later command uses them. They're also remembered for the repo
 in `.claude/quorum.json` (`quorum-config`), so later tasks don't ask; commit the file to share the choice with your
 team. Run any command that starts reviewers or helpers with `--models` to choose again. To set a choice for every
 repo instead, set the `reviewer_model` and `helper_model` plugin options to `inherit` or a model name; a repo's
-remembered choice wins over them. If a recorded model is retired, Quorum asks again.
+remembered choice wins over them. If a recorded model is retired, Quorum asks again. The researcher, planner,
+builder, prover, and blind user always run on your session's model.
 
 ## What it sets up in your repo
 
@@ -489,18 +522,45 @@ The plugin never hardcodes a test command; it reads them from these files.
 your-repo/
 ├── CLAUDE.md                      # + "## Verification Commands" and a link to REVIEW.md
 ├── REVIEW.md                      # review rules, failure modes for your stack, paths to skip, learned rules
-├── .claude/hooks/
-│   └── verify-completion.sh       # your fast checks: typecheck, lint, unit tests
+├── .claude/
+│   ├── hooks/verify-completion.sh # your fast checks: typecheck, lint, unit tests
+│   └── quorum.json                # remembered model choices, pattern rules, per-repo overrides
 └── .tasks/                        # always gitignored
-    └── <slug>/
-        ├── rd.md                  # requirements, non-goals, risk tier, rollback plan
-        ├── eval.md                # runnable pass/fail checks
-        ├── plan.md                # files, reuse, tests, docs, a11y, security; approved before building
-        ├── mockup.html            # UI tasks only
-        └── state.md               # status, round, SHAs, pending findings, models, the PR once opened
+    ├── <slug>/                    # a task
+    │   ├── rd.md                  # requirements, non-goals, risk tier, rollback plan
+    │   ├── eval.md                # runnable pass/fail checks
+    │   ├── plan.md                # files, reuse, tests, docs, a11y, security; approved before building
+    │   ├── research.md            # MEDIUM/HIGH, or with --research
+    │   ├── decisions.md           # a task from a map: the decisions it rests on
+    │   ├── mockup.html            # UI tasks only
+    │   └── state.md               # status, round, SHAs, pending findings, models, the PR once opened
+    ├── map-<slug>/                # a map: map.md, tickets/, research/, review/, tasks.md
+    ├── research-<slug>/           # a standalone research
+    ├── review-<id>/               # a standalone review
+    └── retro-<date>/              # a retro
 ```
 
 ## Reference
+
+### Commands
+
+| Command | What it does | Options |
+|---|---|---|
+| `/quorum:init-pipeline` | Bootstraps a repo: `CLAUDE.md`'s Verification Commands, `REVIEW.md`, `verify-completion.sh`, `.tasks/` | `--yes` |
+| `/quorum:run [<request>]` | Takes a task through every stage, or continues the active one | `--fast`, `--bug`, `--worktree`, `--deep-research [quick\|standard\|deep]`, `--research`, `--no-research`, `--map <map>`, `--until <stage>`, `--yes`, `--models` |
+| `/quorum:spec-and-eval <request>` | Stage 1: the tier, research, `rd.md`, `eval.md`, and the spec review | `--bug`, `--research`, `--no-research`, `--deep-research [...]`, `--from-research <slug> [<n>]`, `--from-map <map> <n>`, `--redesign <slug>`, `--models` |
+| `/quorum:plan` | Stage 2: `plan.md`, reviewed and approved | `--yes`, `--models` |
+| `/quorum:build` | Stage 3: the build, on `feat/<slug>` or `fix/<slug>` | `--worktree` |
+| `/quorum:simplify-diff` | Strips debug code and needless abstractions, and reruns the checks | |
+| `/quorum:review-loop` | Stages 4–5: the reviewers, the voter, and the builder, up to 3 rounds | `--models` |
+| `/quorum:blind-test` | Stage 6, MEDIUM/HIGH: the security pass, the blind user, live accessibility checks | `--models` |
+| `/quorum:pr-draft` | Stage 8: the PR description from the spec and the proof | `--models` |
+| `/quorum:review [<PR> \| <range>]` | Reviews any diff, with no task | `--comment`, `--fix`, `--tier LOW\|MEDIUM\|HIGH`, `--yes`, `--models` |
+| `/quorum:research <question>` | Researches whether and how, creating no task | `--effort quick\|standard\|deep`, `--yes` |
+| `/quorum:map <problem> \| <map> [<ticket>]` | Charts an effort as decisions, works one ticket, or hands off its tasks | `--revise "<what changed>"`, `--yes` |
+| `/quorum:codify-lesson [<what went wrong>]` | Turns one lesson into a check or a rule | `--audit [--days N]` |
+| `/quorum:retro [<task> \| <map>]` | Finds what the next build should do differently | `--session [<id>]`, `--since YYYY-MM-DD` |
+| `/quorum-dashboard` | Shows or hides the dashboard pane | |
 
 <details>
 <summary><b>Agents</b>: what each of the 14 sees and does</summary>
@@ -563,7 +623,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state`, `quorum-reviews`, `quorum-lessons`, `quorum-secrets`, `quorum-validate`, `quorum-config`, `quorum-plan`, `quorum-map`, `quorum-session`, `quorum-research-check`, `quorum-git` (on the Bash PATH while the plugin is enabled) |
 | `libexec/` | `git`, which `quorum-git` puts first on PATH when it runs a real git by full path, so git's own child processes (`git worktree add` starts some) reach it too |
 | `tests/` | bats tests for every hook and helper, `claude plugin test` tests for the dashboard, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
-| `evals/` | `claude plugin eval` suite: risk tiering, one case per agent, voter false-alarm drops, blind-mode source reads, a near-miss |
+| `evals/` | `claude plugin eval` suite: risk tiering, one case per agent, the spec, plan, build, and run paths, research, maps, the retro, voter false-alarm drops, blind-mode source reads, and a near-miss (listed in [CONTRIBUTING.md](CONTRIBUTING.md#evals)) |
 | `assets/` | The README's animations and diagrams, in light and dark versions; `assets/src/diagrams.py` draws the diagrams, and `assets/src/dashboard-demo.sh` builds a demo task for the dashboard |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`CHANGELOG.md`](CHANGELOG.md) · [`TODO.md`](TODO.md) · [`LICENSE`](LICENSE) | Development guide · release notes · planned features · MIT license |
 
@@ -576,15 +636,18 @@ Tests, evals, trying a local build, redrawing the diagrams, and releasing are in
 ## Known limits
 
 - **Claude Code asks before writing `.claude/hooks/`**, so `init-pipeline` brings one approval prompt.
-- **The check, map, and secret guards read commands, they don't sandbox them.** They catch the plain forms an agent uses
-  (`cat .env`, `sed -i` on a config, `--no-verify`), not a script written to hide what it does. They also don't
+- **The check, map, and secret guards read commands, they don't sandbox them.** They catch the plain forms an agent
+  uses (`cat .env`, `sed -i` on a config, `--no-verify`), not a script written to hide what it does. They also don't
   cover a test script inside `package.json` or `pyproject.toml`, which hold dependencies too. `Grep` over a whole
   folder can still show lines from a `.env` in it.
 - **The blind guard is a safeguard, not a sandbox.** It blocks reading source, but running a script that reads
   source gets through, because running code is how a user runs the app.
 - **Agents add up.** A MEDIUM or HIGH round runs 4–6 reviewers, a voter, and a builder, for up to 3 rounds, after
-  research, two spec reviewers, and up to 2 plan-review rounds. Each task asks which model its reviewers and its
-  helpers use (see [Models](#models)); the researcher, planner, builder, prover, and blind user use your session's.
+  research, two spec reviewers, and up to 2 plan-review rounds. On a map, a code question adds a facts researcher
+  and a decision check, and the hand-off adds 2 to 3 reviewers and the voter. See [Models](#models) for choosing
+  what they run on.
+- **A cut-off map session stays guarded.** If a map session ends before `quorum-map leave`, the guard keeps blocking
+  edits in that session until you run it.
 - **Accessibility checks are partial.** Automated scans find only part of WCAG 2.2; the a11y auditor lists the
   rest under "Needs a human". A clean report isn't a conformance claim.
 - **`verify-completion.sh` should stay fast.** The Stop hook runs it on every finish; put slow suites in `eval.md`.

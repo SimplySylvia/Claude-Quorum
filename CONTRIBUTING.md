@@ -102,9 +102,10 @@ claude plugin install quorum@quorum
 ## Diagrams
 
 Every diagram in the README is an SVG drawn by `assets/src/diagrams.py`, in a light and a dark version: the Swiss
-cheese and stages animations, the agent map (with `/quorum:review`'s band), the review loop, the risk-tier cards, and
-where `/quorum:run` stops. After changing the layers or stages, which agents a command starts, how a review round
-works, what a tier gets, or where `run` stops to ask, update the lists in that script and run it:
+cheese and stages animations, the agent map (with the `/quorum:review`, `/quorum:research`, and `/quorum:map` bands),
+the review loop, the risk-tier cards, where `/quorum:run` stops, and the map flow from a problem to merged code.
+After changing the layers or stages, which agents a command starts, how a review round works, what a tier gets,
+where `run` stops to ask, or the steps of a map, update the lists in that script and run it:
 
 ```bash
 python3 assets/src/diagrams.py

@@ -678,8 +678,10 @@ def draw_stages(theme):
 # /quorum:run: the stages it chains, and where it stops. Each stage: (name, [(kind, text)]), kind "ask" (it asks
 # you and waits) or "halt" (it stops; you decide what next).
 RUN_STAGES = [
-    ("Spec", [("ask", "one proposal: slug, tier, research, docs; models once per repo. --yes: all but HIGH")]),
-    ("Plan", [("ask", "mockup sign-off (UI)"), ("ask", "plan approval. --yes approves a clean plan, except HIGH")]),
+    ("Spec", [("ask", "one proposal: slug, tier, research, docs; models once per repo. --yes: all but HIGH"),
+              ("ask", "a follow-up round only if your answers open new questions")]),
+    ("Plan", [("ask", "mockup sign-off (UI)"),
+              ("ask", "plan approval, with its open questions. --yes approves a clean plan, except HIGH")]),
     ("Build", []),
     ("Simplify", []),
     ("Review loop", [("halt", "HALTED after the round cap")]),
@@ -755,8 +757,8 @@ def draw_run(theme):
         s.text(LEFT + 4, ly + 4, flag, size=TAG + 0.5, mono=True, weight=600)
         s.text(LEFT + 4 + mono_w("--deep-research", TAG + 0.5) + 10, ly + 4, text, size=TAG + 0.5, color="muted")
     return s.svg(int(ly + 16), "/quorum:run: spec, plan, build, simplify, review loop, blind test, PR draft, in order. "
-                 "It stops to ask once at the spec (one proposal of slug, tier, research, and docs, and the models the first time in a repo; --yes accepts all but a HIGH tier) "
-                 "and the plan (mockup sign-off for UI, plan approval; --yes approves a clean plan except for HIGH), "
+                 "It stops to ask at the spec (one proposal of slug, tier, research, and docs, and the models the first time in a repo; --yes accepts all but a HIGH tier; a follow-up round only if your answers open new questions) "
+                 "and the plan (mockup sign-off for UI, plan approval with the plan's open questions; --yes approves a clean plan except for HIGH), "
                  "and for your review of MEDIUM and HIGH tasks after the PR draft. It stops if the review loop or the "
                  "blind test halts. Blind-test blockers go back to the review loop. It never pushes or opens the PR. "
                  "--fast takes a LOW task through without spec reviewers or a plan stage, with one reviewer; "
@@ -765,10 +767,118 @@ def draw_run(theme):
                  "the next ready task of a cleared map.")
 
 
+# From a problem to merged code: a map, then its tasks. Each column: (number, title, command, loop label, boxes);
+# a box is (title, detail, kind): kind "ask" stops for you, "agent" is work Quorum's agents do, "step" is a file or
+# a check.
+FLOW = [
+    ("1", "Chart it", "/quorum:map <problem>", None, [
+        ("Destination", "grilled until it's one or two concrete lines, plus what's out of scope", "ask"),
+        ("Survey", "breadth-first: every open decision, and what each waits on", "ask"),
+        ("Tickets and fog", "at most 8 questions; research tickets start at once, in parallel", "agent"),
+    ]),
+    ("2", "Decide", "/quorum:map <slug>", "next ticket, next session", [
+        ("Claim a ticket", "the first one waiting on nothing still open", "step"),
+        ("You decide", "a researcher first gathers the facts a code question rests on", "ask"),
+        ("Check it", "the Feasibility Critic tests it against the code and earlier decisions", "agent"),
+    ]),
+    ("3", "Hand off", "once nothing is left to decide", None, [
+        ("tasks.md", "vertical slices: a tier, what each waits on, the decisions behind it", "step"),
+        ("Review it", "architecture, patterns, security for HIGH, then the voter", "agent"),
+        ("You approve", "kept findings come with a recommended fix", "ask"),
+    ]),
+    ("4", "Build each task", "/quorum:run --map <slug>", "next ready task, once its blockers merge", [
+        ("Spec from decisions", "decisions.md becomes requirements; nothing decided is asked again", "step"),
+        ("The pipeline", "plan, build, review loop, blind test, proof: every gate", "agent"),
+        ("PR, then you merge", "it drafts the PR; you review and merge it", "ask"),
+    ]),
+]
+
+
+def draw_flow(theme):
+    s = Svg(THEMES[theme])
+    t = THEMES[theme]
+    n, gap, margin = len(FLOW), 44, 38
+    cw = (W - LEFT - margin - (n - 1) * gap) / n
+    top, vgap = 92, 26
+    lines = max(len(wrap(d, TAG, cw - 22)) for _, _, _, _, boxes in FLOW for _, d, _ in boxes)
+    bh = 34 + lines * 14 + 8
+
+    def badge(cx, cy):
+        s.add(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="8" fill="{t["medium"]}"/>'
+              f'<rect x="{cx - 3.6:.1f}" y="{cy - 4:.1f}" width="2.4" height="8" fill="{t["chip"]}"/>'
+              f'<rect x="{cx + 1.2:.1f}" y="{cy - 4:.1f}" width="2.4" height="8" fill="{t["chip"]}"/>')
+
+    s.text(LEFT + 4, 24, "From a problem to merged code", size=15, weight=700)
+    s.text(LEFT + 4 + text_w("From a problem to merged code", 15) + 14, 24,
+           "a map settles the decisions, then each task goes through the whole pipeline", size=13, color="muted")
+    last = top + 2 * (bh + vgap)
+    bottom = last + bh
+    for i, (num, title, cmd, loop, boxes) in enumerate(FLOW):
+        x = LEFT + i * (cw + gap)
+        s.text(x, 56, f"{num} · {title}", size=14, weight=700)
+        s.text(x, 74, cmd, size=11, color="muted", mono=cmd.startswith("/"))
+        for j, (name, detail, kind) in enumerate(boxes):
+            y = top + j * (bh + vgap)
+            s.rect(x, y, cw, bh, "doc" if kind == "step" else "chip", dash="4 3" if kind == "step" else None)
+            s.text(x + 12, y + 22, name, size=LABEL, weight=600)
+            if kind == "ask":
+                badge(x + cw - 16, y + 17)
+            for k, line in enumerate(wrap(detail, TAG, cw - 22)):
+                s.text(x + 12, y + 41 + k * 14, line, size=TAG, color="muted")
+            if j:
+                s.arrow(f"M{x + cw / 2:.1f},{y - vgap + 2:.1f} V{y - 3:.1f}")
+        if i:  # from the previous column's last box, up through the gap, to this column's first
+            mid = x - gap * 0.35
+            s.arrow(f"M{x - gap + 2:.1f},{last + bh * 0.65:.1f} H{mid:.1f} V{top + bh * 0.35:.1f} H{x - 3:.1f}")
+        if loop:  # back up just right of the column, to its first box
+            lx = x + cw + 12
+            s.arrow(f"M{x + cw:.1f},{last + bh * 0.35:.1f} H{lx:.1f} V{top + bh * 0.65:.1f} H{x + cw + 3:.1f}",
+                    color="back")
+            for k, line in enumerate(wrap(loop, TAG, cw * 0.62)):
+                s.text(x + cw, bottom + 18 + k * 14, line, size=TAG, color="back", anchor="end")
+
+    # The way out of charting, and the retro at the end, under the last column.
+    s.text(LEFT, bottom + 18, "fits one task? charting stops and points", size=TAG, color="muted")
+    s.text(LEFT, bottom + 32, "you to /quorum:spec-and-eval", size=TAG, color="muted")
+    rx = LEFT + 3 * (cw + gap)
+    ry = bottom + 62
+    retro = wrap("checks, rules, and pointers for the next effort", TAG, cw - 22)
+    rh = 30 + len(retro) * 14 + 6
+    s.rect(rx, ry, cw, rh, "doc", dash="4 3")
+    s.text(rx + 12, ry + 21, "5 · Learn: /quorum:retro", size=LABEL, weight=600)
+    for k, line in enumerate(retro):
+        s.text(rx + 12, ry + 39 + k * 14, line, size=TAG, color="muted")
+    s.arrow(f"M{rx + cw * 0.2:.1f},{bottom + 2:.1f} V{ry - 3:.1f}")
+    ly = ry + rh + 30
+    badge(LEFT + 10, ly - 4)
+    s.text(LEFT + 26, ly, "stops for you", size=TAG + 0.5, color="muted")
+    s.rect(LEFT + 130, ly - 13, 24, 16, "chip", r=4)
+    s.text(LEFT + 162, ly, "Quorum's agents", size=TAG + 0.5, color="muted")
+    s.rect(LEFT + 290, ly - 13, 24, 16, "doc", r=4, dash="3 2")
+    s.text(LEFT + 322, ly, "a file or a check", size=TAG + 0.5, color="muted")
+    s.text(W - LEFT, ly, "A map session plans only: a hook blocks it from changing the code.", size=TAG + 0.5,
+           color="muted", anchor="end")
+    return s.svg(int(ly + 14), "From a problem to merged code. 1, chart it with /quorum:map and the problem: the "
+                 "destination, grilled until it's one or two concrete lines, plus what's out of scope; a "
+                 "breadth-first survey of every open decision; then at most 8 tickets, with research tickets "
+                 "started at once, in parallel. If it fits one task, charting stops and points to "
+                 "/quorum:spec-and-eval. 2, decide, with /quorum:map and the map's slug, one ticket per session: "
+                 "claim the first ticket waiting on nothing still open; you decide, after a researcher gathers the "
+                 "facts a code question rests on; the Feasibility Critic checks the decision against the code and "
+                 "earlier decisions; then the next ticket, in the next session. 3, hand off, once nothing is left to "
+                 "decide: tasks.md, vertical slices with a tier, what each waits on, and the decisions behind it; a "
+                 "review by the architecture reviewer, the pattern auditor, the security reviewer for HIGH tasks, "
+                 "and the voter; then you approve it. 4, build each task with /quorum:run --map: the spec comes from "
+                 "decisions.md; the whole pipeline runs, plan, build, review loop, blind test, proof; it drafts the "
+                 "PR and you merge it; then the next task whose blockers have merged. 5, learn with /quorum:retro. "
+                 "A map session plans only: a hook blocks it from changing the code.")
+
+
 if __name__ == "__main__":
     for name in THEMES:
         for base, draw in (("agent-map", draw_map), ("risk-tiers", draw_tiers), ("review-loop", draw_loop),
-                           ("swiss-cheese", draw_cheese), ("stages", draw_stages), ("run", draw_run)):
+                           ("swiss-cheese", draw_cheese), ("stages", draw_stages), ("run", draw_run),
+                           ("map-flow", draw_flow)):
             path = os.path.join(OUT, f"{base}-{name}.svg")
             with open(path, "w") as f:
                 f.write(draw(name))

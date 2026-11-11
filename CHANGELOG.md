@@ -59,6 +59,14 @@ copy with `/plugin marketplace update`.
 - **`quorum-branch is-merged <slug>`** tells whether a task's work merged, with or without a worktree; `merged` uses
   it.
 
+### Changed
+
+- **The README is reorganized** around what you have in front of you: a short quick start with a "where to start"
+  table, how a task moves through the stages, a new diagram of a map's flow from a problem to merged code, then
+  running a task, what comes before a task (research and maps), reviewing any diff, where Quorum asks you, and
+  learning from mistakes. A commands table lists every command and its options, and the `.tasks/` tree shows maps,
+  research, reviews, and retros. The run diagram shows the spec's follow-up rounds and the plan's open questions.
+
 ## 0.10.0 (2026-11-11)
 
 ### Added
