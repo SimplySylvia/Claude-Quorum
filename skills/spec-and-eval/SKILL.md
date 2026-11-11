@@ -1,8 +1,8 @@
 ---
 name: spec-and-eval
-description: Start a Quorum task. Classifies the risk tier, researches the approach (MEDIUM/HIGH), writes the requirements (rd.md) and runnable checks (eval.md), has two spec reviewers check them against the code, creates the task's state.md, and for UI work writes a mockup for sign-off. With --redesign <slug>, restarts a HALTED task from a redesign option. Run before writing any code; /quorum:plan comes next.
+description: Start a Quorum task. Classifies the risk tier, researches the approach (MEDIUM/HIGH), writes the requirements (rd.md) and runnable checks (eval.md), has two spec reviewers check them against the code, creates the task's state.md, and for UI work writes a mockup for sign-off. With --from-map <map> <n>, starts a task a cleared /quorum:map handed off, from the map's decisions. With --redesign <slug>, restarts a HALTED task from a redesign option. Run before writing any code; /quorum:plan comes next.
 disable-model-invocation: true
-argument-hint: "<what to build> [--bug] [--research | --no-research | --deep-research [quick|standard|deep]] [--models] | --from-research <slug> [<candidate>] | --redesign <slug>"
+argument-hint: "<what to build> [--bug] [--research | --no-research | --deep-research [quick|standard|deep]] [--models] | --from-research <slug> [<candidate>] | --from-map <map> <n> | --redesign <slug>"
 ---
 
 # Spec a task

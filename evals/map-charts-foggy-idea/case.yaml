@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: map-charts-foggy-idea
+description: /quorum:map on an effort too big for one task names a destination, charts at most 8 typed decision tickets with blocking edges, checks the map, resolves no ticket only the user can answer, and changes no code.
+tags: [map]
+context:
+  scaffold_script: scaffold.sh

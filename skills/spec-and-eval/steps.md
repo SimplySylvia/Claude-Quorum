@@ -16,6 +16,9 @@ spec without asking, and say what you chose.
 when the request clearly describes a bug (something that used to work, or works wrongly), propose the bug path in
 step 3 instead.
 
+`<arguments>` may also contain `--from-map <map> <n>`: start task `<n>` of a cleared map's `tasks.md`. See
+[From a map](#from-a-map).
+
 `<arguments>` may also contain `--fast` (from `/quorum:run --fast`): the **fast path** for a LOW task. It writes a
 short spec, skips the spec reviewers and the mockup, and goes straight to the build, with no plan round. The checks
 stay: `eval.md`, the Stop hook, the review, and the proof. Each step below says what changes on the fast path. It
@@ -45,7 +48,10 @@ without a yes.
 
 ## 2. Understand the request
 
-Read the request, then the code it touches. Ask only what would change what gets built:
+Read the request, then the code it touches. Questions follow Quorum's grilling habit
+(`<plugin root>/skills/grilling/SKILL.md`): look facts up instead of asking them, give each question your
+recommended answer, and never ask what the request, a map's decisions, or the code already settles. Ask only what
+would change what gets built:
 
 - **Why, first.** If the request doesn't say what problem it solves or who it's for, ask that, in one question,
   before anything else, and wait. The answer shapes the requirements more than any process choice. With `--yes`,
@@ -78,6 +84,11 @@ most in one call. Never ask the slug, tier, research, or docs one at a time.
 With `--yes`, accept the proposal without asking and say what you chose, except a **HIGH** tier, which always needs
 the user's yes: the confirm question names HIGH and its reason.
 
+**Follow-up rounds.** That question is the first grilling round. If the answers open questions that couldn't be
+asked before them (a choice that raises another, or an answer too vague to write a requirement from), grill on, one
+round at a time, as the grilling skill says, until nothing that changes the requirements is open. Most specs need no
+second round. Never ask the proposal again. With `--yes`, take your recommended answers and list them.
+
 **The tiers:**
 
 | Tier | Typical changes | Gets |
@@ -107,6 +118,8 @@ LOW only with `--research`. `--no-research` skips it, and so does the fast path 
    "From `.tasks/research-<research slug>/` (<its date>), candidate <n>: <the candidate's line>", and use the option
    that candidate follows as the approach. Skip the rest of this step unless the user asks to research again.
 
+   **From a map** (`--from-map`): see [From a map](#from-a-map) for what this step adds.
+
    **Deep research** (`--deep-research [quick|standard|deep]` in `<arguments>`): instead of sub-steps 2 and 3, read
    `<plugin root>/skills/research/steps.md` and follow it with `<research dir>` = `.tasks/<slug>/`, the request as
    the question, and the effort given (default `standard`). Then ask which approach the spec should take, as in
@@ -120,7 +133,9 @@ LOW only with `--research`. `--no-research` skips it, and so does the fast path 
    > repo before.
 
 3. Save its reply verbatim to `.tasks/<slug>/research.md`. Show the user the options and the recommendation, and
-   ask which approach the spec should take.
+   ask which approach the spec should take, as a grilling round: the approach (the recommendation first), plus each
+   item under the research's **Assumptions to confirm**, each with what you'd assume. A confirmed assumption can
+   become a requirement or an edge case; one the user rejects or leaves open never goes into the spec as fact.
 
 ## 5. Write the spec
 
@@ -145,7 +160,8 @@ LOW only with `--research`. `--no-research` skips it, and so does the fast path 
    rollback, and only the edge cases that apply. Every requirement still gets an `eval.md` row.
 3. **`rd.md`** from the template: goal, numbered testable requirements, non-goals, a **one-step** rollback plan,
    and (MEDIUM/HIGH) the blind-test user goal with its starting URL or command from `CLAUDE.md`. Follow the
-   approach chosen in step 4, and add the research's "For the spec" items that apply.
+   approach chosen in step 4, and add the research's "For the spec" items that apply. A task from a map also
+   follows `decisions.md` (see [From a map](#from-a-map)).
 4. **`eval.md`** from the template: one row per requirement with an **exact command** and what passing looks like,
    plus edge cases (empty, very large, unicode, concurrent, permission denied: whichever apply). Every command
    must run locally, with tools every machine that runs the repo has: `grep`, not `rg`, unless the repo already
@@ -175,11 +191,15 @@ LOW only with `--research`. `--no-research` skips it, and so does the fast path 
    **Feasibility Critic** and **Spec Improver**. Each gets only:
 
    > Persona: <persona>. Task: `<slug>`. Review `.tasks/<slug>/rd.md` and `.tasks/<slug>/eval.md` before any
-   > code is written. Read `CLAUDE.md`, `REVIEW.md`, and `.tasks/<slug>/research.md` if it exists.
+   > code is written. Read `CLAUDE.md`, `REVIEW.md`, and `.tasks/<slug>/research.md` and
+   > `.tasks/<slug>/decisions.md` if they exist.
 
 3. Save the replies verbatim to `.tasks/<slug>/spec-review/feasibility.md` and `improver.md`.
 4. Fix every `[IMPORTANT]` in `rd.md` or `eval.md`, or ask the user about any you think is wrong. Apply the
-   `[NIT]` suggestions you agree with. Run the reviewers once more only if you changed a requirement's meaning.
+   `[NIT]` suggestions you agree with. A finding only the user can settle (what a requirement should mean, whether
+   something is in scope, a trade-off between two requirements) goes to them as one grilling round, with each
+   finding and the fix you recommend, before you change the spec. Run the reviewers once more only if you changed a
+   requirement's meaning.
 5. Show the user both files, what the reviewers found and what you changed, and ask for corrections before going
    on. `quorum-state log` a short block: the two summary lines and what changed.
 
@@ -216,12 +236,33 @@ With `--bug`, or when the user accepts step 3's proposal to treat the request as
 5. Research is off by default for LOW and MEDIUM bugs (the cause is in this code, not in a choice of approach),
    and a LOW bug may take the fast path.
 
+## From a map
+
+`--from-map <map> <n>` starts task `<n>` of `.tasks/map-<map>/tasks.md`, the tasks a cleared map (`/quorum:map`)
+handed off. The map already made the decisions this task rests on, so these change:
+
+1. **Before step 2,** check `quorum-map --map <map> tasks`. Task `<n>`'s state must be `ready`. If it's `blocked`,
+   say which tasks it waits on and that they must merge first (a branch made now wouldn't have their code), and
+   stop. If a task already started from it, say which (its slug and status), and stop.
+2. **The request** is task `<n>`'s line, and the map's destination says why: don't ask it again. Propose its tier
+   as the map gave it (the usual tier rules still apply, and HIGH still needs the user's yes), and research as
+   **no** unless `--research` or `--deep-research` is given: the map's research tickets already answered what it
+   needed.
+3. **Don't ask what the map decided.** Run `quorum-map --map <map> decisions <n>`: the destination, what's out of
+   scope, and each decision the task cites. Read it before step 2, and cite it instead of asking again.
+4. **In step 4.1,** save that output to `.tasks/<slug>/decisions.md`, then `quorum-state --task <slug> set map
+   <map>` and `quorum-state --task <slug> set map_task <n>`.
+5. **In step 5,** each decision that constrains this task becomes a requirement or a non-goal, in its own words,
+   and the map's out-of-scope items that touch this task become non-goals. If the code shows a decision can't be
+   met as the map made it, say so and ask; don't plan around it. `/quorum:map <map> --revise` reopens it.
+
 ## Redesign
 
 `--redesign <slug>` restarts a task whose status is `HALTED`.
 
 1. Check `quorum-state --task <slug> get status` is `HALTED`. Read the post-mortem and the two redesign options at the
-   end of `state.md`, and ask the user which option to take (or their own).
+   end of `state.md`, and ask the user which option to take (or their own), with the one you recommend and why. Then
+   grill on what the chosen design leaves open, as in step 3's follow-up rounds, before rewriting the spec.
 2. Keep the history: move `state.md` to the first free `state.halted-<n>.md`.
 3. Rewrite `rd.md` (and `eval.md` if the checks change) for the chosen design. Keep the same risk tier unless the
    user changes it. Then review the new spec as in step 6; write its `quorum-state log` block after the init in step 4.

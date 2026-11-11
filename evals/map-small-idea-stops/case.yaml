@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: map-small-idea-stops
+description: /quorum:map on a change that fits one task finds no fog, writes no map, and points to /quorum:spec-and-eval or /quorum:run instead.
+tags: [map]
+context:
+  scaffold_script: scaffold.sh

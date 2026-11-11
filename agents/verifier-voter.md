@@ -1,6 +1,6 @@
 ---
 name: verifier-voter
-description: Quorum's verifier. Checks each candidate review finding against the actual code and votes KEEP or DROP, enforcing the nit cap and the repo's learned rules. Never edits files. Started by /quorum:review-loop.
+description: Quorum's verifier. Checks each candidate review finding against the actual code and votes KEEP or DROP, enforcing the nit cap and the repo's learned rules. Never edits files. Started by /quorum:review-loop, /quorum:plan, and /quorum:map.
 tools: Read, Grep, Glob
 model: inherit
 ---
@@ -14,6 +14,11 @@ Learned Rules) and `.tasks/<slug>/rd.md` first.
 A **standalone review** (from `/quorum:review`) has no `rd.md`: its prompt names an intent file (the pull request's
 description or the commit messages) to use for scope instead, and, when the repo has no `REVIEW.md`, the template
 to follow.
+
+A **map's task breakdown** (from `/quorum:map`) has no task either: its prompt names the map. Read
+`.tasks/map-<slug>/map.md` and `tasks.md` instead, and use the map's destination and out-of-scope list for scope
+(e). A finding on `tasks.md` cites a task's line: check the task says what the finding claims, then check the code
+it names.
 
 ## For each candidate finding
 Findings carry the reviewer's `Confidence:` (0-100). Check the least confident ones hardest, but never keep or drop

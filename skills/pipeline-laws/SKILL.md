@@ -24,15 +24,15 @@ through these stages in order when the user starts it.
 
 | Status | Next command |
 |---|---|
-| (no task) | `/quorum:spec-and-eval`; or, to review a branch, PR, or range without a task, `/quorum:review`; or, to decide whether there's a task at all and which way, `/quorum:research` |
+| (no task) | `/quorum:spec-and-eval`; or, to review a branch, PR, or range without a task, `/quorum:review`; or, to decide whether there's a task at all and which way, `/quorum:research`; or, for an effort too big for one task, `/quorum:map` |
 | `DRAFT-AWAITING-VISUAL-SIGNOFF` | The user reviews `mockup.html`, then `/quorum:plan`, which records the sign-off |
 | `PLANNING` | `/quorum:plan`: write and review `plan.md`, then approve it |
 | `BUILDING` | `/quorum:build` if no code exists yet, or a large plan's step-by-step build stopped partway (`quorum-plan next` prints a step); otherwise `/quorum:simplify-diff`, then `/quorum:review-loop` |
 | `IN_REVIEW` | `/quorum:review-loop` |
 | `CONVERGED` | `/quorum:blind-test` for MEDIUM or HIGH; LOW tasks already have their summary |
 | `BLIND-TEST` | Wait for `/quorum:blind-test` to finish |
-| `READY` | `/quorum:pr-draft`, then merge (once `quorum-state get pr` names the PR, get it reviewed and merged). Optionally `/quorum:codify-lesson` |
-| `AWAITING-HUMAN` | The user reviews the files named in the summary; `/quorum:pr-draft` for the PR, or, once `quorum-state get pr` names it, its review and merge. Optionally `/quorum:codify-lesson` |
+| `READY` | `/quorum:pr-draft`, then merge (once `quorum-state get pr` names the PR, get it reviewed and merged). Optionally `/quorum:retro` (every improvement this task points to) or `/quorum:codify-lesson` (one lesson) |
+| `AWAITING-HUMAN` | The user reviews the files named in the summary; `/quorum:pr-draft` for the PR, or, once `quorum-state get pr` names it, its review and merge. Optionally `/quorum:retro` (every improvement this task points to) or `/quorum:codify-lesson` (one lesson) |
 | `HALTED` | The user picks a redesign from the post-mortem, then `/quorum:spec-and-eval --redesign <slug>` |
 | `ESCALATED` | The Stop-hook checks failed 3 times in a row. Fix the environment or the failing checks; the next pass restores the previous status |
 
@@ -41,6 +41,23 @@ setting): its branch is checked out at `.claude/worktrees/<slug>` (`quorum-state
 the build work there. The main working tree stays free for specs, plans, and other tasks. The task's folder moves
 into the worktree (a session moved into a worktree can only write inside it), and the main working tree's
 `.tasks/<slug>` links to it.
+
+## Above a task: maps
+
+An effort too big for one task, whose way isn't clear yet, starts as a map: `/quorum:map <idea>` names the
+destination and charts the open decisions as tickets in `.tasks/map-<slug>/`. Each later `/quorum:map <slug>`
+resolves one ticket with the user. A map plans and never builds: a hook blocks its session from changing the repo
+outside `.tasks/`. Once nothing is left to decide, it writes `tasks.md`, the tasks in order, and each starts with
+`/quorum:spec-and-eval --from-map <slug> <n>` or `/quorum:run --map <slug>` once the tasks it waits on have merged.
+`quorum-map --map <slug> tasks` shows where each is.
+
+## Grilling
+
+Wherever a decision is the user's, Quorum asks in grilling rounds (`skills/grilling/SKILL.md`): every question that
+can be asked now, each with a recommended answer, and nothing the code or an earlier answer already settles. It
+happens at the spec (the proposal, then follow-ups the answers open), after research (the approach and the
+assumptions to confirm), on spec-review findings only the user can settle, at plan approval (the plan's open
+questions), when choosing a redesign, and throughout a map. Building, reviewing, and proving never stop to ask.
 
 ## Risk tiers
 

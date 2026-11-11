@@ -66,3 +66,11 @@ Candidate tasks:
 Show the viability verdict, the candidate tasks, the assumptions to confirm, and the remaining gaps. For each
 candidate, give the command that starts it: `/quorum:spec-and-eval --from-research <slug> <n>`. Start nothing
 yourself: the user decides which, if any.
+
+If the report lists **Assumptions to confirm**, offer to settle them now, as one grilling round
+(`${CLAUDE_PLUGIN_ROOT}/skills/grilling/SKILL.md`): each assumption, with what you'd assume. Mark each answer in
+`research.md` (confirmed, rejected, or left open, and by the user), and say if an answer changes the viability or a
+candidate. A task started from it then reads the answers, not the guesses. With `--yes`, skip this.
+
+If the candidates are many and depend on each other, or the viability rests on decisions only the user can make,
+suggest `/quorum:map` instead: charting them as a map keeps those decisions apart from any one task.

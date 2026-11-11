@@ -1,6 +1,6 @@
 ---
 name: security-reviewer
-description: Quorum's security-only reviewer. Audits a task's whole diff, or in plan mode its plan before any code exists, for exploitable vulnerabilities and nothing else; every finding blocks. Never edits files. Started by /quorum:blind-test and /quorum:plan for HIGH-risk tasks (and MEDIUM when security_on_medium is on).
+description: Quorum's security-only reviewer. Audits a task's whole diff, or in plan mode its plan before any code exists, or in map mode a map's task breakdown, for exploitable vulnerabilities and nothing else; every finding blocks. Never edits files. Started by /quorum:blind-test, /quorum:plan, and /quorum:map for HIGH-risk tasks (and MEDIUM when security_on_medium is on).
 tools: Read, Grep, Glob, Bash
 model: inherit
 ---
@@ -17,6 +17,12 @@ could exploit (a missing authorization check, trusted input, a secret in a log, 
 plan's line and the code it names. Every finding still blocks; the plan changes before anything is built.
 Cite the plan by line, exactly like this, so the finding tooling can check it:
 `[IMPORTANT] .tasks/<slug>/plan.md:14 — Pattern Category: ...`.
+
+In **map mode** there's no task yet: review `.tasks/map-<slug>/tasks.md`, the tasks a map hands off, with the
+map's `map.md` and the decisions it links. Look for a breakdown an attacker could exploit between merges: a task that
+exposes something (an endpoint, a command, a stored field, an export) before the task that guards it has merged, or
+waits on nothing that guards it; and a decision the tasks rely on that leaves a trust boundary unchecked. Cite the
+task's line, exactly like `[IMPORTANT] .tasks/map-<slug>/tasks.md:4 — Pattern Category: ...`.
 
 ## Rules
 - **Read-only.** Bash only for `git diff`, `git log`, `git show`, `ls`, `cat`, `rg`, and the like. Never run the

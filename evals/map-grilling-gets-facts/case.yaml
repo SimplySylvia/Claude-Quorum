@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: map-grilling-gets-facts
+description: Working a map, /quorum:map claims a grilling ticket about the code, starts a researcher for the facts it rests on, and asks the user the question citing them, recording no answer of its own.
+tags: [map]
+context:
+  scaffold_script: scaffold.sh

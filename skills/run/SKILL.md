@@ -1,8 +1,8 @@
 ---
 name: run
-description: Take a Quorum task through the whole pipeline in one command, from spec to drafted PR, stopping only where you must decide (the tier, the models, docs, mockup sign-off, plan approval, a halt, and the human review). Starts a new task from a request, or continues the active one from wherever it stopped. With --fast, a LOW task takes the fast path: a short spec, a build, one reviewer, and the proof, with no plan round. Follows the same steps as each stage command, keeps every gate and check, and never pushes, opens, or merges a PR.
+description: Take a Quorum task through the whole pipeline in one command, from spec to drafted PR, stopping only where you must decide (the tier, the models, docs, mockup sign-off, plan approval, a halt, and the human review). Starts a new task from a request, or the next ready task of a cleared /quorum:map with --map, or continues the active one from wherever it stopped. With --fast, a LOW task takes the fast path: a short spec, a build, one reviewer, and the proof, with no plan round. Follows the same steps as each stage command, keeps every gate and check, and never pushes, opens, or merges a PR.
 disable-model-invocation: true
-argument-hint: "[<what to build>] [--bug] [--deep-research [quick|standard|deep]] [--fast] [--worktree] [--until spec|plan|build|review|blind|pr] [--yes] [--research | --no-research] [--models]"
+argument-hint: "[<what to build> | --map <map>] [--bug] [--deep-research [quick|standard|deep]] [--fast] [--worktree] [--until spec|plan|build|review|blind|pr] [--yes] [--research | --no-research] [--models]"
 ---
 
 # Run the pipeline
@@ -31,7 +31,12 @@ The stage steps use these. A setting that still reads as `${user_config…}` was
 
 This run's own arguments: `$ARGUMENTS`. They hold an optional request (what to build), and these flags:
 `--until <stage>`, `--yes` (only when the user typed it), `--research` or `--no-research`, `--models`, `--fast`,
-`--worktree`, `--bug`, and `--deep-research [quick|standard|deep]`.
+`--worktree`, `--bug`, `--deep-research [quick|standard|deep]`, and `--map <map>`.
+
+**`--map <map>`** starts the next ready task of a cleared map (`/quorum:map`) instead of a request: the first task in
+its `tasks.md` whose blockers have merged (`quorum-map --map <map> next-task`). The spec starts from the map's
+decisions, so it doesn't ask again what the map decided. If no task is ready, show `quorum-map --map <map> tasks`
+(what's started, merged, and waiting on what) and stop.
 
 **`--deep-research`** researches the approach with several researchers in parallel, each through one lens, and
 checks every claim against its source (`skills/research/steps.md`), instead of one researcher. You approve the
@@ -57,8 +62,9 @@ run starts a new task; for a MEDIUM or HIGH task it's dropped.
   leaves the old task's files as they are; it only stops being active (`quorum-active-task --clear`).
 - **No request and no active task:** if `quorum-active-task --list` shows unfinished tasks (a status other than
   `READY`, `AWAITING-HUMAN`, and `HALTED`), for example ones building in their own worktrees, ask whether to
-  continue one of them (`quorum-active-task --set <slug>`) or start a new task. Otherwise ask what to build, then go
-  on with the answer as the request.
+  continue one of them (`quorum-active-task --set <slug>`) or start a new task. If `quorum-map list` shows a map,
+  and `quorum-map --map <map> next-task` finds a ready task in it, offer that too. Otherwise ask what to build, then
+  go on with the answer as the request.
 - Tell the user, in one line, what will happen: the stages ahead (on the fast path: spec, build, review, PR), where it will stop to ask, and that `--until`
   stops it earlier.
 
@@ -77,7 +83,7 @@ says stop, after the stage `--until` names, or after 12 stages in one run (then 
 
 | Status | Stage to follow | Arguments | `--until` name |
 |---|---|---|---|
-| no task | `spec-and-eval` | the request, plus `--research`, `--no-research`, `--deep-research`, `--models`, `--yes`, `--fast`, and `--bug` as given | `spec` |
+| no task | `spec-and-eval` | the request, or with `--map`, `--from-map <map> <n>` for the next ready task; plus `--research`, `--no-research`, `--deep-research`, `--models`, `--yes`, `--fast`, and `--bug` as given | `spec` |
 | `DRAFT-AWAITING-VISUAL-SIGNOFF`, `PLANNING` | `plan` | the slug, plus `--yes` as given unless the risk is HIGH | `plan` |
 | `BUILDING`, `base_sha` not set | `build` | the slug, plus `--worktree` as given | `build` |
 | `BUILDING`, `base_sha` set, and `quorum-plan next` prints a step (a sliced build that stopped partway) | `build` | the slug | `build` |
@@ -94,7 +100,8 @@ says stop, after the stage `--until` names, or after 12 stages in one run (then 
 ## 3. Rules while running
 
 - **Gates are the user's.** Every question a stage's steps ask (the slug, tier, and research choice; the models;
-  docs; mockup sign-off; plan approval; checking out, posting, or filing anything), ask it and wait. Ask with
+  docs; a grilling round; mockup sign-off; plan approval; checking out, posting, or filing anything), ask it and
+  wait. Ask with
   AskUserQuestion where the choices are known, so the run goes on in the same turn after the answer.
 - **`--yes` doesn't cover HIGH.** With `--yes`, the spec steps accept your proposals without asking, except that you
   still ask the user to confirm a HIGH tier. Plan approval for a HIGH task always asks (the table leaves `--yes`

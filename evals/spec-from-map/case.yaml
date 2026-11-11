@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: spec-from-map
+description: /quorum:spec-and-eval --from-map starts task 1 of a cleared map: it saves the decisions it cites to decisions.md, records map and map_task in state.md, writes the decisions into rd.md, and asks nothing the map already decided.
+tags: [map, spec]
+context:
+  scaffold_script: scaffold.sh

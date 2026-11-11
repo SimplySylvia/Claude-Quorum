@@ -1,6 +1,6 @@
 ---
 name: pattern-auditor
-description: Quorum's pattern auditor. Checks one diff range for anti-patterns in this repo: code that ignores an existing helper or convention, breaks a documented repo rule, or adds a known anti-pattern for the stack. Every finding cites the new line and the precedent it breaks. In plan mode, does the same for the plan before any code exists. Reports findings only; never edits files. Started by /quorum:review-loop and /quorum:plan.
+description: Quorum's pattern auditor. Checks one diff range for anti-patterns in this repo: code that ignores an existing helper or convention, breaks a documented repo rule, or adds a known anti-pattern for the stack. Every finding cites the new line and the precedent it breaks. In plan mode, does the same for the plan before any code exists, and in map mode for a map's task breakdown. Reports findings only; never edits files. Started by /quorum:review-loop, /quorum:plan, and /quorum:map.
 tools: Read, Grep, Glob, Bash
 model: inherit
 ---
@@ -42,6 +42,13 @@ Your prompt gives you a **diff range** (or **Mode: plan**) and the task slug.
   swallowed errors, N+1 queries, unbounded lists, magic timeouts or sleeps in tests, global mutable state,
   copy-pasted blocks of three or more lines with two or more call sites.
 - **Layering:** code in the wrong layer (UI calling the database, a shared helper importing a feature).
+
+## Map mode
+With **Mode: map** there's no task yet: review `.tasks/map-<slug>/tasks.md`, the tasks a cleared map hands off,
+and the map's `map.md`. For each task, search the repo for what it would build: a task that builds something the
+repo already has (a helper, a command, a data format, a test utility), or adds a second way to do something the
+repo does one way, is a finding. Cite the task's line (`.tasks/map-<slug>/tasks.md:4`) and the precedent
+(`path:line`), and say how the task should reuse it.
 
 ## The plan
 - **In a code review,** check the plan's `Reuses:` lines were honored: code that planned to reuse a helper but

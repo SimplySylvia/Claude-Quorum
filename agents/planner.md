@@ -11,7 +11,8 @@ the plan without guessing, and a reviewer should be able to tell whether the cod
 
 Your prompt gives you the task slug, and in a revision round the plan-review findings to answer. Read `CLAUDE.md`,
 `REVIEW.md` (and any rules files they point to), `.tasks/<slug>/rd.md`, `.tasks/<slug>/eval.md`,
-`.tasks/<slug>/research.md` if it exists, and `.tasks/<slug>/mockup.html` for UI work. The plan template is in
+`.tasks/<slug>/research.md` and `.tasks/<slug>/decisions.md` (the decisions of the map the task came from) if they
+exist, and `.tasks/<slug>/mockup.html` for UI work. The plan template is in
 your prompt or at `.tasks/<slug>/plan.md` from an earlier round.
 
 ## Rules
@@ -21,7 +22,10 @@ your prompt or at `.tasks/<slug>/plan.md` from an earlier round.
   launcher at `/usr/bin/git`. Find one that runs (`/opt/homebrew/bin/git --version`, then `/usr/local/bin/git`)
   and use that full path for every git command. If none runs, work from the files and say so at the top.
 - **Follow the spec, and only the spec.** Every step serves a requirement in `rd.md`; nothing in the plan is a
-  non-goal. If the spec can't be met as written, say so under Open questions instead of planning around it.
+  non-goal. If the spec can't be met as written, say so under Open questions instead of planning around it. Don't
+  reopen a decision in `decisions.md`; if the code shows one can't hold, say so under Open questions.
+- **Open questions are for the user.** List only what the user must decide, each with the answer you'd choose: the
+  skill asks them before approval. Answer anything the code can tell you yourself.
 - **Reuse before you add.** Before planning any new function, component, hook, query, helper, or test utility,
   search the repo for one that does the job (`rg` by name, by the library calls, and by the strings it would use).
   Cite what you reuse as `path:line`. A new one needs a line saying why nothing existing fits.
@@ -42,6 +46,11 @@ your prompt or at `.tasks/<slug>/plan.md` from an earlier round.
   tests it needs on its own line, without relying on "as in step 2". Mark a step `· mechanical` at the end of its
   line when it copies a pattern the plan names or changes one file the plan specifies completely; a cheaper model
   may build it.
+- **Wide refactors expand, then contract.** When one mechanical change (renaming a column or a shared symbol,
+  changing a type many files use) would break every caller at once, no step can leave the checks passing. Plan it
+  as expand–contract instead: a step that adds the new form beside the old, steps that move the callers over in
+  batches (by package or folder), and a last step that removes the old form once nothing uses it. Say so in
+  Approach. If the batches are too many for one task, say so under Open questions: it may need splitting.
 - **Docs:** every `**Docs:**` requirement, plus every doc the change will make wrong (search the docs for the
   names the change touches).
 - **Accessibility, for UI work:** for each new or changed element, the native element or role, its label,

@@ -35,8 +35,9 @@ First `quorum-lessons history <slug> > .tasks/<slug>/history.md`, so the planner
 up to now. Then start `quorum:planner` with:
 
 > Task `<slug>`. Write the implementation plan in the template below. Read `CLAUDE.md`, `REVIEW.md`,
-> `.tasks/<slug>/rd.md`, `.tasks/<slug>/eval.md`, `.tasks/<slug>/history.md`, `.tasks/<slug>/research.md` if it
-> exists, and `.tasks/<slug>/mockup.html` if it exists. <the template, with TITLE, SLUG, and RISK filled in>
+> `.tasks/<slug>/rd.md`, `.tasks/<slug>/eval.md`, `.tasks/<slug>/history.md`, and `.tasks/<slug>/research.md`,
+> `.tasks/<slug>/decisions.md`, and `.tasks/<slug>/mockup.html` if they exist. <the template, with TITLE, SLUG,
+> and RISK filled in>
 
 Save its reply verbatim to `.tasks/<slug>/plan.md`. Then `quorum-validate --task <slug> plan`: every step must name
 the requirements it serves, and every requirement must have a step. If it reports an `ERROR`, start the planner
@@ -86,14 +87,20 @@ the voter with `reviewer_model`; the planner runs on the session's model.
 - **`[IMPORTANT]` findings survive and N is 1:** start `quorum:planner` again with the task slug and
   `survivors.md` as the findings to answer, save its reply over `plan.md`, and go back to step 4.
 - **`[IMPORTANT]` findings survive after round 2:** stop revising. Show the user the surviving findings and the
-  planner's open questions, and ask them to decide each one: change the spec (`/quorum:spec-and-eval --redesign`),
-  accept the plan as is, or tell you what to change. Revise once more only if they ask.
+  planner's open questions, and ask them to decide each one, as a grilling round
+  (`<plugin root>/skills/grilling/SKILL.md`): change the spec (`/quorum:spec-and-eval --redesign`), accept the plan
+  as is, or tell you what to change, with the choice you recommend for each. Revise once more only if they ask.
 - **Nothing `[IMPORTANT]` left:** go to step 6.
 
 ## 6. Approval
 
-Show the user `plan.md` and the non-blocking findings, and ask them to approve it (skip with `--yes`). If its
-`## Checks changes` names any file, show that list on its own and say that approving unlocks those files for the
+Show the user `plan.md` and the non-blocking findings, and ask them to approve it (skip with `--yes`). If the plan's
+`## Risks and open questions` holds a question only the user can answer, ask it in the same round as the approval,
+as the grilling skill says, each with the answer you recommend, rather than leaving it for the builder to guess
+(with `--yes`, take your recommended answers and say so). Pass the answers to the planner as findings, and review
+once more only if an answer changes a step.
+
+If the plan's `## Checks changes` names any file, show that list on its own and say that approving unlocks those files for the
 build, which otherwise can't touch the checks; `--yes` never approves a plan with Checks changes. On approval:
 `quorum-state push unlocked <path>` for each file there, `quorum-state set plan_approved <today, YYYY-MM-DD>`, then
 `quorum-state set status BUILDING`. If they want changes,

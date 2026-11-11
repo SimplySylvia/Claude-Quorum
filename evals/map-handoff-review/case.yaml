@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: map-handoff-review
+description: On a cleared map, /quorum:map writes tasks.md, has the architecture reviewer and the pattern auditor review it in map mode and the voter vote, and puts the kept findings to the user before approving the breakdown.
+tags: [map]
+context:
+  scaffold_script: scaffold.sh
