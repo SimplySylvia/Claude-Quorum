@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# Find lessons worth suggesting to /quorum:codify-lesson, from the findings the voter kept.
+# Find lessons worth suggesting to /quorum:codify-lesson, from the findings the voter kept; and what earlier work in
+# the repo learned, for a new task's plan.
 #
 #   quorum-lessons SLUG
+#   quorum-lessons history SLUG     what other tasks and reviews learned, as Markdown for the planner and researcher:
+#                                   the learned rules (REVIEW.md section 6), halted tasks' post-mortems, blind-test
+#                                   blockers the triage called CAUSED, disputes the voter upheld, and Pattern
+#                                   Categories kept in more than one round. Nothing about SLUG itself
 #
 # SLUG is a task, or a standalone review (review-<id>). Prints one line per lesson, tab-separated:
 #
@@ -17,13 +22,64 @@ set -euo pipefail
 die() { echo "quorum-lessons: $*" >&2; exit 1; }
 
 HERE=$(cd "$(dirname "$0")" && pwd)
+mode=lessons
+if [ "${1:-}" = history ]; then mode=history; shift; fi
 slug=${1:-}
-[ -n "$slug" ] || die "usage: quorum-lessons SLUG"
+[ -n "$slug" ] || die "usage: quorum-lessons SLUG | quorum-lessons history SLUG"
 printf '%s' "$slug" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$' || die "invalid slug: $slug"
 
-ROOT=$("$HERE/quorum-active-task" --root)
+# The main working tree's .tasks/, which links every task's folder, even from inside a task's worktree.
+ROOT=$("$HERE/quorum-active-task" --main)
 TASKS="$ROOT/.tasks"
 [ -d "$TASKS/$slug" ] || die "no task or review named $slug in .tasks/"
+
+# history: the Markdown described above. Each part is left out when it has nothing.
+history() {
+  local f other out
+  out=$(
+    rules=$("$HERE/quorum-learned-rule" list 2>/dev/null || true)
+    if [ -n "$rules" ]; then printf '## Learned rules (REVIEW.md section 6)\n%s\n\n' "$(printf '%s\n' "$rules" | sed 's/^/- /')"; fi
+
+    pm=""
+    for f in "$TASKS"/*/state.md; do
+      [ -f "$f" ] || continue
+      other=$(basename "$(dirname "$f")"); [ "$other" = "$slug" ] && continue
+      block=$(awk '/^## Post-mortem/ { on = 1 } on && /^## / && !/^## Post-mortem/ { exit } on { print }' "$f")
+      [ -n "$block" ] && pm="$pm### $other
+$(printf '%s\n' "$block" | sed 1d)
+
+"
+    done
+    [ -z "$pm" ] || printf '## Post-mortems of halted tasks\n%s' "$pm"
+
+    caused=""
+    for f in "$TASKS"/*/blind/triage-*.md; do
+      [ -f "$f" ] || continue
+      other=${f#"$TASKS"/}; other=${other%%/*}; [ "$other" = "$slug" ] && continue
+      items=$(awk '/^[A-Z-]+:[ \t]*$/ { on = ($0 ~ /^CAUSED:/); next } on && /^- / { print }' "$f")
+      [ -n "$items" ] && caused="$caused$(printf '%s\n' "$items" | sed "s|^- |- $other: |")
+"
+    done
+    [ -z "$caused" ] || printf '## Blind-test blockers the reviewers missed\n%s\n' "$caused"
+
+    upheld=""
+    for f in "$TASKS"/*/review/round-*/disputes.md; do
+      [ -f "$f" ] || continue
+      other=${f#"$TASKS"/}; other=${other%%/*}; [ "$other" = "$slug" ] && continue
+      items=$(grep '^DROP ' "$f" || true)
+      [ -n "$items" ] && upheld="$upheld$(printf '%s\n' "$items" | sed "s|^DROP |- $other: |")
+"
+    done
+    [ -z "$upheld" ] || printf '## Findings the code already handled (disputes the voter upheld)\n%s\n' "$upheld"
+
+    repeats=$(kept | awk -F '\t' -v slug="$slug" '
+      function key(c) { c = tolower(c); gsub(/[ \t]+/, " ", c); return c }
+      $1 != slug { k = $1 SUBSEP key($3); if (!((k, $2) in seen)) { seen[k, $2] = 1; n[k]++; if (!(k in name)) name[k] = $3; where[k] = $1 } }
+      END { for (k in n) if (n[k] > 1) print "- " name[k] " (" where[k] ", " n[k] " rounds)" }' | sort)
+    [ -z "$repeats" ] || printf '## Pattern Categories that kept coming back\n%s\n' "$repeats"
+  )
+  if [ -n "$out" ]; then printf '# What earlier work in this repo learned\n\n%s\n' "$out"; fi
+}
 
 # One record per kept category: FOLDER<TAB>ROUND<TAB>CATEGORY
 kept() {
@@ -36,6 +92,8 @@ kept() {
     done
   done
 }
+
+[ "$mode" = lessons ] || { history; exit 0; }
 
 kept | awk -F '\t' -v slug="$slug" '
   function key(c) { c = tolower(c); gsub(/[ \t]+/, " ", c); sub(/^ /, "", c); sub(/ $/, "", c); return c }

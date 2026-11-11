@@ -6,7 +6,10 @@
 #   - Edit, Write, and NotebookEdit of a protected file;
 #   - Bash commands that write one (a > or >> redirect, tee, cp, mv, rm, truncate, ln, install, sed -i, perl -i);
 #   - git commit with --no-verify (or -n), or with core.hooksPath set, which skip the repo's commit hooks;
-#   - quorum-state push, set, or clear of `unlocked`: only the user unlocks a file, with `! quorum-state ...`.
+#   - quorum-state push, set, or clear of `unlocked`: only the user unlocks a file, with `! quorum-state ...`;
+#   - Edit, Write, and NotebookEdit whose new text matches a pattern rule (`pattern_rules` in the main working
+#     tree's .claude/quorum.json, which quorum-learned-rule pattern add writes) for that file: a lesson the repo
+#     learned, enforced instead of remembered.
 #
 # Protected: the task's own spec and checks (.tasks/<slug>/rd.md and eval.md, which the prover holds it to) once its
 # build has started (base_sha is set; a fast-path task is BUILDING while it still writes them),
@@ -94,7 +97,25 @@ block() {
 case "$tool" in
   Edit|Write|NotebookEdit)
     path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
-    if rel=$(protected "$path"); then block "$tool $rel is a protected check file."; fi ;;
+    if rel=$(protected "$path"); then block "$tool $rel is a protected check file."; fi
+    MAIN=$("$BIN/quorum-active-task" --main 2>/dev/null) || MAIN=$CODE
+    if [ -f "$MAIN/.claude/quorum.json" ] && jq -e '.pattern_rules | length > 0' "$MAIN/.claude/quorum.json" >/dev/null 2>&1; then
+      rel=$path; rel=${rel#"$CODE"/}; rel=${rel#"$(pwd -P)"/}; rel=${rel#"$(pwd)"/}; rel=${rel#"$MAIN"/}
+      text=$(printf '%s' "$input" | jq -r '.tool_input.new_string // .tool_input.content // .tool_input.new_source // empty')
+      rules=$(jq -r '.pattern_rules[] | "\(.glob)\t\(.pattern)\t\(.message)"' "$MAIN/.claude/quorum.json" 2>/dev/null)
+      while IFS="$(printf '\t')" read -r glob regex msg; do
+        [ -n "$glob" ] && [ -n "$regex" ] || continue
+        set -f; matched=1; glob_match "$rel" "$glob" && matched=0; set +f
+        [ "$matched" = 0 ] || continue
+        if printf '%s' "$text" | grep -Eq -- "$regex" 2>/dev/null; then
+          {
+            echo "BLOCKED BY QUORUM: this change to $rel matches a rule the repo learned: $msg"
+            echo "(pattern rule: $regex, for $glob, in .claude/quorum.json)"
+          } >&2
+          exit 2
+        fi
+      done <<< "$rules"
+    fi ;;
 
   Bash)
     cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')

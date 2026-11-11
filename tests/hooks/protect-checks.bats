@@ -92,3 +92,16 @@ bash_cmd() { jq -n --arg c "$1" '{hook_event_name: "PreToolUse", tool_name: "Bas
   "$BIN/quorum-state" --task demo push unlocked .tasks/demo/eval.md
   run edit .tasks/demo/eval.md;               [ "$status" -eq 0 ]
 }
+
+@test "a pattern rule the repo learned blocks matching new code in matching files, during a task only" {
+  "$BIN/quorum-learned-rule" pattern add "app/*.py" "','\\.join\\(" "Use write_csv(); never join fields by hand." >/dev/null
+  write() { jq -n --arg p "$1" --arg c "$2" '{hook_event_name: "PreToolUse", tool_name: "Write", tool_input: {file_path: $p, content: $c}}' | "$HOOKS/protect-checks.sh"; }
+  change() { jq -n --arg p "$1" --arg c "$2" '{hook_event_name: "PreToolUse", tool_name: "Edit", tool_input: {file_path: $p, old_string: "x", new_string: $c}}' | "$HOOKS/protect-checks.sh"; }
+  run write app/report.py "print(','.join(row))"
+  [ "$status" -eq 2 ]; [[ "$output" == *"matches a rule the repo learned: Use write_csv(); never join fields by hand."* ]]
+  run change app/export.py "x = ','.join(r)";                 [ "$status" -eq 2 ]
+  run write tests/test_report.py "assert ','.join(a) == b";   [ "$status" -eq 0 ]
+  run write app/report.py "write_csv(rows)";                  [ "$status" -eq 0 ]
+  "$BIN/quorum-state" --task demo set status PLANNING
+  run write app/report.py "print(','.join(row))";             [ "$status" -eq 0 ]
+}

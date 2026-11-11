@@ -41,7 +41,7 @@ and the stage commands share them. Still to do:
 - **The dashboard during a run:** "autopilot · next stop: plan approval" in the band, and a toast at each stop, so a
   user can work elsewhere and come back when asked. The dashboard can't tell a run from single commands today.
 - **Context length.** A whole MEDIUM task is long for one conversation. Measure one with the Spend section and the
-  transcript size, and see whether the chat rule (one line per stage) is enough. If it isn't, item 6 is the fix.
+  transcript size, and see whether the chat rule (one line per stage) is enough. If it isn't, item 5 is the fix.
 
 ## 3. Worktrees: what's left
 
@@ -76,24 +76,7 @@ an edge worth having.
   what it costs in tokens (the dashboard's Spend section now counts them). It's Quorum's own "proof before done"
   applied to its claims, and the strongest argument a README can make.
 
-## 5. Use what Quorum has learned
-
-`codify-lesson` writes rules to `REVIEW.md`, and the planner and reviewers read section 6. Peers go further with
-what they learn, though both that write lessons by themselves (Compound Engineering, ECC) skip the user's approval;
-keep Quorum's.
-
-- **Find the lessons that apply to this change.** The researcher and the planner read past post-mortems
-  (`HALTED` tasks' `state.md`), blind-test triage, and the learned rules that match the files the task touches, and
-  the plan says which ones it answers. Compound Engineering's `learnings-researcher` feeds its planner this way, and
-  GSD's planner reads the last three phases' learnings.
-- **The cheapest form that stops the repeat.** `codify-lesson` offers, in order: a test, a lint rule, a hook rule
-  (blocking a pattern during a task), and only then a line in `REVIEW.md`. A rule enforced by code doesn't depend on
-  a reviewer remembering it (Compound Engineering's form ladder, BMAD's project-context, Anthropic's `hookify`).
-- **Prune stale rules.** Record when the voter or a reviewer last cited each learned rule, and have
-  `codify-lesson --audit` propose removing rules that haven't fired in a long time, with the user's yes (Compound
-  Engineering's refresh mode, QualityLayer's 90-day retirement).
-
-## 6. Large plans, built in slices
+## 5. Large plans, built in slices
 
 One builder builds the whole plan, so a big MEDIUM or HIGH task has to fit in one agent's context, and `/quorum:run`
 has no checkpoint inside the build. Superpowers runs a fresh implementer per plan task, reviews each one, and keeps a
@@ -110,7 +93,7 @@ expensive failure.
   turns on multi-step work, so use a mid-tier model as the floor for anything that needs judgment.
 - The review loop still reviews the whole branch; this changes the build, not the gates.
 
-## 7. Review lenses chosen by the diff
+## 6. Review lenses chosen by the diff
 
 The peers' reviewer lists cover kinds of defect Quorum's six don't name. Add them as lenses that a reviewer turns on
 when the diff calls for them, not as new agents, since agent count is what peers' users complain about most.
@@ -123,14 +106,14 @@ when the diff calls for them, not as new agents, since agent count is what peers
   Gemini when its CLI is installed, with findings going through the same voter (Compound Engineering, GSD,
   QualityLayer, ECC). It catches what a single model family is blind to.
 
-## 8. CI mode
+## 7. CI mode
 
 A GitHub Action that runs `/quorum:review` headless (`claude -p`) on each PR and posts the kept findings, with the
 repo's `REVIEW.md`. Pairs with item 1: the same reviewers and voter, on every PR, with no one remembering to run
 them. Superpowers' gates are instructions to the model, so it can't do this; Quorum's are agents and scripts. Needs
 the `github-actions` hardening rules (pinned actions, least-privilege token, no script injection from PR titles).
 
-## 9. After the PR, and changing a spec
+## 8. After the PR, and changing a spec
 
 Quorum ends at the drafted PR. Peers follow it further, and let a spec change without starting over.
 
@@ -142,7 +125,7 @@ Quorum ends at the drafted PR. Peers follow it further, and let a spec change wi
   halted, reruns the spec reviewers on the change, and marks the plan for review again. `--redesign` only starts
   over after a halt. Hard-to-update specs are spec-kit's most upvoted issue (#1191).
 
-## 10. `/quorum:diagnose`
+## 9. `/quorum:diagnose`
 
 When a task halts, escalates, or costs more than expected, the post-mortem says what the review loop saw, not why
 the session went that way. Superpowers' `diagnosing-superpowers` reads the session's transcripts and reports what
@@ -151,7 +134,7 @@ happened, with a `path:line` citation for every finding. A Quorum version would 
 back and why, where the tokens went (alongside the dashboard's Spend). Read-only, and it never sends anything
 anywhere.
 
-## 11. Smaller follow-ups from this release
+## 10. Smaller follow-ups from this release
 
 - **Spend per round, kept.** The Spend section only covers agents since the last command, in this session. Keeping
   per-round totals in `state.md` would need the dashboard to write `.tasks/`, which it deliberately never does;
@@ -163,7 +146,7 @@ anywhere.
   the voter rescores a low-confidence finding after checking it. These make real model calls, so they weren't run
   as part of the change.
 
-## 12. A deep research mode
+## 11. A deep research mode
 
 One researcher reports two or three options, which is right for most tasks but thin for a new dependency, a choice
 between architectures, or a field the repo has no precedent in. Anthropic's lead-plus-parallel-subagents research
@@ -181,7 +164,7 @@ supports the claim. The research and the design are in `docs/deep-research-desig
 - **`secret-guard.sh` also checks web queries,** since deep mode makes many more of them.
 - Opt-in until `state.md` shows the research changed decisions often enough to pay for itself.
 
-## 13. Later
+## 12. Later
 
 - **The official marketplace.** `/quorum:review` exists now, so the first thing a new user tries works in any repo;
   submit once the worktrees release is out.

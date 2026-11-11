@@ -46,3 +46,41 @@ teardown() { cleanup_repo; }
   run "$BIN/quorum-learned-rule" add "x"
   [ "$status" -eq 1 ]
 }
+
+@test "remove takes a rule out of section 6, with or without its source" {
+  "$BIN/quorum-learned-rule" add "Rule one." "t, 2026-01-01"
+  "$BIN/quorum-learned-rule" add "Rule two."
+  run "$BIN/quorum-learned-rule" remove "rule one."
+  [ "$status" -eq 0 ]; [ "$output" = "removed: Rule one. (t, 2026-01-01)" ]
+  [ "$("$BIN/quorum-learned-rule" list)" = "Rule two." ]
+  run "$BIN/quorum-learned-rule" remove "Rule three."; [ "$status" -eq 1 ]
+}
+
+@test "audit dates each rule's last citation, and calls an old uncited rule stale" {
+  old=$(date -v-200d +%Y-%m-%d 2>/dev/null || date -d '200 days ago' +%Y-%m-%d)
+  recent=$(date -v-10d +%Y-%m-%d 2>/dev/null || date -d '10 days ago' +%Y-%m-%d)
+  "$BIN/quorum-learned-rule" add "All CSV output goes through write_csv() in app/report.py." "a, $old"
+  "$BIN/quorum-learned-rule" add "Missing-file errors print one line on stderr and exit 1." "b, $old"
+  "$BIN/quorum-learned-rule" add "Dates are ISO 8601 in every output." "c, $recent"
+  mkdir -p .tasks/t/review/round-1
+  echo 'DROP [IMPORTANT] app/report.py:9 — (d) learned rule: "All CSV output goes through write_csv()"' > .tasks/t/review/round-1/votes.md
+  touch -t "$(date -v-20d +%Y%m%d0000 2>/dev/null || date -d '20 days ago' +%Y%m%d0000)" .tasks/t/review/round-1/votes.md
+  run "$BIN/quorum-learned-rule" audit
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 3 ]
+  [[ "${lines[0]}" == "All CSV output goes through write_csv() in app/report.py. (a, $old)	$old	"*"	kept" ]]
+  [[ "${lines[0]}" != *"	never	"* ]]
+  [ "${lines[1]}" = "Missing-file errors print one line on stderr and exit 1. (b, $old)	$old	never	stale" ]
+  [ "${lines[2]}" = "Dates are ISO 8601 in every output. (c, $recent)	$recent	never	kept" ]
+  run "$BIN/quorum-learned-rule" audit --days 300
+  [[ "${lines[1]}" == *"	kept" ]]
+}
+
+@test "pattern rules go in .claude/quorum.json, once each" {
+  run "$BIN/quorum-learned-rule" pattern add "app/*.py" "','\.join\(" "Use write_csv(); never join fields by hand." "csv, 2026-11-11"
+  [ "$status" -eq 0 ]
+  jq -e '.pattern_rules[0].glob == "app/*.py" and .pattern_rules[0].source == "csv, 2026-11-11"' .claude/quorum.json
+  [ "$("$BIN/quorum-learned-rule" pattern list)" = "$(printf 'app/*.py\t%s\t%s' "','\.join\(" "Use write_csv(); never join fields by hand.")" ]
+  run "$BIN/quorum-learned-rule" pattern add "app/*.py" "','\.join\(" "again"; [ "$status" -eq 3 ]
+  run "$BIN/quorum-learned-rule" pattern add "*.py" "(" "bad regex"; [ "$status" -eq 1 ]
+}

@@ -24,7 +24,9 @@ plan says what the finding claims, then check the code it names to see whether t
 
 - **DROP** if it is (a) factually wrong about the code; (b) already handled elsewhere in the call stack (name
   where); (c) a style preference, or a `[NIT]` beyond the first ${user_config.nit_cap} (2 if that reads as a placeholder); (d) against a learned rule
-  in `REVIEW.md` section 6; or (e) outside the task's scope in `rd.md` and not a bug the change introduces.
+  in `REVIEW.md` section 6, quoting its first words as `learned rule: "<its first five to eight words>"` (KEEP lines
+  that rest on a rule quote it the same way), so `quorum-learned-rule audit` can tell which rules still fire; or (e)
+  outside the task's scope in `rd.md` and not a bug the change introduces.
 - **KEEP** otherwise. Keep a real bug even if the reviewer described it badly; rewrite its Mechanism line to be
   accurate, and set its `Confidence:` line to your own after checking (add one if it had none). Merge duplicates (two reviewers, one bug) into one finding.
 - If a kept finding is tagged wrong, retag it (for example a bug that predates the change is `[PRE-EXISTING]`).
@@ -45,6 +47,7 @@ Mechanism: "Acme, Inc." is written unquoted, so the row has four columns instead
 ## Dropped
 DROP [IMPORTANT] app/report.py:7 — (b) load() errors are caught in main() at app/report.py:30.
 DROP [NIT] app/report.py:18 — (c) style preference.
+DROP [IMPORTANT] app/report.py:51 — (d) learned rule: "Don't flag load() for missing error handling".
 ```
 
 If nothing survives, the first line is `Summary: 0 issues found. Ready to land.`

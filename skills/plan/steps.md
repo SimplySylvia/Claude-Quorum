@@ -31,11 +31,12 @@ If the status is `DRAFT-AWAITING-VISUAL-SIGNOFF`, ask the user whether they've r
 
 ## 3. Write the plan
 
-Start `quorum:planner` with:
+First `quorum-lessons history <slug> > .tasks/<slug>/history.md`, so the planner sees what earlier tasks learned
+up to now. Then start `quorum:planner` with:
 
 > Task `<slug>`. Write the implementation plan in the template below. Read `CLAUDE.md`, `REVIEW.md`,
-> `.tasks/<slug>/rd.md`, `.tasks/<slug>/eval.md`, `.tasks/<slug>/research.md` if it exists, and
-> `.tasks/<slug>/mockup.html` if it exists. <the template, with TITLE, SLUG, and RISK filled in>
+> `.tasks/<slug>/rd.md`, `.tasks/<slug>/eval.md`, `.tasks/<slug>/history.md`, `.tasks/<slug>/research.md` if it
+> exists, and `.tasks/<slug>/mockup.html` if it exists. <the template, with TITLE, SLUG, and RISK filled in>
 
 Save its reply verbatim to `.tasks/<slug>/plan.md`. Then `quorum-validate --task <slug> plan`: every step must name
 the requirements it serves, and every requirement must have a step. If it reports an `ERROR`, start the planner

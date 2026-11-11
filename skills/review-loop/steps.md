@@ -142,7 +142,8 @@ the whole fix, so a wrong drop shows up again.
 ## 5. HALTED
 
 When IMPORTANT findings survive round max_rounds, line patching has failed. Set `quorum-state set status HALTED`,
-then `quorum-active-task --clear`, and `quorum-state log` a post-mortem:
+then `quorum-active-task --clear`, and `quorum-state log` a post-mortem, a block starting with the heading
+`## Post-mortem` (later tasks' plans read it, through `quorum-lessons history`):
 
 - **What kept failing:** the Pattern Categories that survived, and the rounds they appeared in.
 - **Why patches didn't converge:** your reading of the root cause (for example a design that can't satisfy two

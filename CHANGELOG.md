@@ -42,6 +42,23 @@ copy with `/plugin marketplace update`.
   is MET. An unmet one goes back to the review loop as a pending `[IMPORTANT]` finding ("Unmet requirement"),
   under the round cap. The dashboard's Requirements section shows each verdict with its evidence, and the PR
   writer uses them.
+- **Plans learn from earlier tasks.** `quorum-lessons history` gathers what other tasks in the repo learned:
+  - the learned rules;
+  - halted tasks' `## Post-mortem` blocks;
+  - blind-test blockers the triage marked `CAUSED`;
+  - disputes the voter upheld;
+  - Pattern Categories that kept coming back.
+
+  The spec and plan stages save it as `history.md`. The researcher weighs it, and the plan's new `## Lessons`
+  section names each lesson that applies and the step that answers it.
+- **`codify-lesson` picks the cheapest form that stops the repeat:** a regression test, a lint rule, a **pattern
+  rule**, and only then a line in `REVIEW.md`. A test or lint rule becomes a `/quorum:run --fast` task. A pattern
+  rule is a glob, a regex, and a message (`quorum-learned-rule pattern add`, in `.claude/quorum.json`); while a task
+  builds or is in review, `protect-checks.sh` blocks an Edit or Write that adds matching code to a matching file.
+- **Stale rules can be retired.** Reviewers and the voter quote the learned rules they apply
+  (`learned rule: "..."`). `quorum-learned-rule audit` reports each rule's age and last citation, and
+  `/quorum:codify-lesson --audit` offers to remove rules no review has cited in 90 days, with your yes
+  (`quorum-learned-rule remove`).
 - **A bugfix path, `--bug`,** on `/quorum:run` and `/quorum:spec-and-eval`:
   - The spec reproduces the bug on the current code before anything else, and asks for what's missing if it
     can't.

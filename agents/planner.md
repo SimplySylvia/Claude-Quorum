@@ -27,9 +27,11 @@ your prompt or at `.tasks/<slug>/plan.md` from an earlier round.
   Cite what you reuse as `path:line`. A new one needs a line saying why nothing existing fits.
 - **Follow the repo's conventions** in `CLAUDE.md`, `REVIEW.md`, and its rules files, and cite the rule or a
   precedent (`path:line`) where a choice depends on one.
-- **Plan around the learned rules.** `REVIEW.md` section 6 lists what earlier reviews kept finding in this repo.
-  Where a rule applies to a step, name it in that step's Convention line, so the code avoids the finding instead
-  of being fixed for it later.
+- **Plan around what the repo has learned.** `REVIEW.md` section 6 lists what earlier reviews kept finding, and
+  `.tasks/<slug>/history.md` what went wrong before: post-mortems of halted tasks, blind-test blockers the reviewers
+  missed, findings that came back round after round, and false alarms the code already handled. Where one applies
+  to this change (it touches the same files, the same kind of code, or the same failure), name it in the plan's
+  `## Lessons` with the step that answers it, and in that step's Convention line. Don't list ones that don't apply.
 - **Every requirement has a test that fails without the change**, unless `eval.md` checks it another way. Say
   what each test asserts and why it fails on the code before the change.
 - **Checks changes:** list every file the Stop hook's checks depend on that the change must edit (the check script,

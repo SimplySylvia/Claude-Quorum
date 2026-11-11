@@ -24,6 +24,11 @@
 <!-- UI work only; otherwise "Not applicable (no UI change)". One line per new or changed element. -->
 - <!-- element: native element or role · label · keyboard · focus · how changes are announced -->
 
+## Lessons
+<!-- From history.md and REVIEW.md section 6: each earlier failure or learned rule that this change could repeat,
+     and the step that keeps it from happening. "None apply" if none do. -->
+- None apply
+
 ## Checks changes
 <!-- Files the Stop hook's checks depend on that this change must edit: .claude/hooks/verify-completion.sh, CI
      workflows, and test, lint, type-check, or format configs. While the task builds and is in review they're

@@ -83,7 +83,8 @@ Collect the blocking problems: every `[IMPORTANT]` from the security pass and th
   Then `quorum-state set status IN_REVIEW` and tell the user to run `/quorum:review-loop`, which fixes them
   first, reviews the fix, and returns here.
 - **Some, and `blind_runs` is 2 or more:** the fixes aren't converging. `quorum-state set status HALTED`,
-  `quorum-active-task --clear`, and `quorum-state log` a post-mortem with two redesign options, as
+  `quorum-active-task --clear`, and `quorum-state log` a post-mortem, under the heading `## Post-mortem`, with two
+  redesign options, as
   `/quorum:review-loop` does. Tell the user to run `/quorum:spec-and-eval --redesign <slug>`.
 
 `quorum-state log` a short block for this run either way: the security and accessibility summary lines, the blind

@@ -97,13 +97,16 @@ Do this when step 3's proposal, as the user confirmed it, includes research: by 
 LOW only with `--research`. `--no-research` skips it, and so does the fast path unless `--research` is given.
 
 1. `quorum-state --task <slug> init <RISK> <STATUS>`, where STATUS is `DRAFT-AWAITING-VISUAL-SIGNOFF` for a UI
-   change and `PLANNING` otherwise. Then `quorum-active-task --set <slug>`. On the fast path, STATUS is `BUILDING`,
+   change and `PLANNING` otherwise. Then `quorum-active-task --set <slug>`, and
+   `quorum-lessons history <slug> > .tasks/<slug>/history.md`: what earlier tasks in this repo learned (empty in a
+   new repo). On the fast path, STATUS is `BUILDING`,
    and then `quorum-state --task <slug> set fast true`.
 2. Start `quorum:researcher` with the request in your own words, without internal names you don't need, and
    nothing from production data:
 
    > Task `<slug>`. Question: what's the best way to <the request> in this repo? <Any focus the user gave.> Read
-   > `CLAUDE.md` and `REVIEW.md` first.
+   > `CLAUDE.md` and `REVIEW.md` first, and `.tasks/<slug>/history.md` if it has anything: what went wrong in this
+   > repo before.
 
 3. Save its reply verbatim to `.tasks/<slug>/research.md`. Show the user the options and the recommendation, and
    ask which approach the spec should take.

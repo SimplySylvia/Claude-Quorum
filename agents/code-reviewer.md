@@ -18,8 +18,10 @@ Your prompt gives you a **persona**, a **diff range** (or **Mode: plan**), and t
   and use that full path for every git command. If none runs, say so at the top of your reply, read the
   changed files directly, and say which conclusions that leaves unchecked.
 - Read `REVIEW.md` first and follow it exactly: its failure modes (section 3), its paths to skip (section 4), and
-  its learned rules (section 6). Then read `CLAUDE.md`, `.tasks/<slug>/rd.md`, `.tasks/<slug>/eval.md`, and
-  `.tasks/<slug>/plan.md` if it exists.
+  its learned rules (section 6). When a learned rule decides a finding, quote its first words in the finding, as
+  `learned rule: "<its first five to eight words>"`, so `quorum-learned-rule audit` can tell which rules still
+  fire. Then read `CLAUDE.md`, `.tasks/<slug>/rd.md`, `.tasks/<slug>/eval.md`, and `.tasks/<slug>/plan.md` if it
+  exists.
 - Review **only the lines in the diff range** (`git diff <range>`) and the code they directly call or are called
   from. Don't report problems in untouched code unless a changed line makes them worse; tag real bugs you find in
   touched files that predate this change `[PRE-EXISTING]`.

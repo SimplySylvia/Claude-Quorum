@@ -3,15 +3,58 @@
 #
 #   quorum-learned-rule list              print the current rules, one per line
 #   quorum-learned-rule add "RULE" [SRC]  append "- RULE (SRC)" to section 6; exit 3 if an identical rule exists
+#   quorum-learned-rule remove "RULE"     remove the rule that matches RULE (its source may be left off); exit 1 if
+#                                         none does
+#   quorum-learned-rule audit [--days N]  one line per rule: RULE<TAB>ADDED<TAB>LAST CITED<TAB>stale|kept. ADDED is
+#                                         the date in its source, LAST CITED the newest review file under .tasks/
+#                                         that quotes it as `learned rule: "<its first words>"` ("never" if none).
+#                                         A rule is stale when it's older than N days (default 90) and no review
+#                                         cited it in that time
+#   quorum-learned-rule pattern add GLOB REGEX "MESSAGE" [SRC]
+#                                         record a pattern rule in .claude/quorum.json: while a task builds or is in
+#                                         review, hooks/protect-checks.sh blocks an Edit or Write that puts text
+#                                         matching REGEX (extended, as grep -E) into a file matching GLOB, showing
+#                                         MESSAGE. A GLOB without a / matches a file name at any depth
+#   quorum-learned-rule pattern list      the pattern rules: GLOB<TAB>REGEX<TAB>MESSAGE
 #
-# The rule must be one line. Only section 6 is touched; everything else in REVIEW.md is kept byte for byte.
-# Bash 3.2 compatible.
+# The rule must be one line. Only section 6 is touched; everything else in REVIEW.md is kept byte for byte. The
+# files are the main working tree's. Bash 3.2 compatible.
 set -euo pipefail
 
 die() { echo "quorum-learned-rule: $*" >&2; exit 1; }
 HERE=$(cd "$(dirname "$0")" && pwd)
-ROOT=$("$HERE/quorum-active-task" --root)
+ROOT=$("$HERE/quorum-active-task" --main)
 FILE="$ROOT/REVIEW.md"
+CONFIG="$ROOT/.claude/quorum.json"
+
+# pattern: the pattern rules, in .claude/quorum.json, before REVIEW.md is needed.
+if [ "${1:-}" = pattern ]; then
+  command -v jq >/dev/null 2>&1 || die "pattern rules need jq"
+  case "${2:-}" in
+    list)
+      [ -f "$CONFIG" ] || exit 0
+      jq -r '.pattern_rules // [] | .[] | "\(.glob)\t\(.pattern)\t\(.message)"' "$CONFIG" ;;
+    add)
+      glob=${3:-}; regex=${4:-}; msg=${5:-}; src=${6:-}
+      [ -n "$glob" ] && [ -n "$regex" ] && [ -n "$msg" ] || die "usage: quorum-learned-rule pattern add GLOB REGEX \"MESSAGE\" [SRC]"
+      # grep exits 1 for no match (the regex is fine) and 2 for a bad regex
+      rc=0; printf '' | grep -E -- "$regex" >/dev/null 2>&1 || rc=$?
+      [ "$rc" -le 1 ] || die "not a valid extended regex: $regex"
+      mkdir -p "$(dirname "$CONFIG")"; [ -f "$CONFIG" ] || printf '{}\n' > "$CONFIG"
+      if jq -e --arg g "$glob" --arg r "$regex" '(.pattern_rules // []) | any(.glob == $g and .pattern == $r)' "$CONFIG" >/dev/null; then
+        echo "quorum-learned-rule: that pattern rule is already there" >&2; exit 3
+      fi
+      tmp="$CONFIG.$$"
+      jq --arg g "$glob" --arg r "$regex" --arg m "$msg" --arg s "$src" \
+        '.pattern_rules = ((.pattern_rules // []) + [{glob: $g, pattern: $r, message: $m} + (if $s == "" then {} else {source: $s} end)])' \
+        "$CONFIG" > "$tmp" || { rm -f "$tmp"; die "can't update $CONFIG: is it valid JSON?"; }
+      mv "$tmp" "$CONFIG"
+      printf '%s\t%s\t%s\n' "$glob" "$regex" "$msg" ;;
+    *) die "usage: quorum-learned-rule pattern add GLOB REGEX \"MESSAGE\" [SRC] | pattern list" ;;
+  esac
+  exit 0
+fi
+
 [ -f "$FILE" ] || die "no REVIEW.md in $ROOT (run /quorum:init-pipeline)"
 grep -q '^## 6\. Learned Rules' "$FILE" || die "REVIEW.md has no '## 6. Learned Rules' section"
 
@@ -46,5 +89,41 @@ case "${1:-}" in
       }' "$FILE" > "$tmp"
     mv "$tmp" "$FILE"
     printf '%s\n' "$line" ;;
-  *) die "usage: quorum-learned-rule list | add \"RULE\" [SOURCE]" ;;
+  remove)
+    want=$(norm "${2:-}"); [ -n "$want" ] || die "remove needs the rule"
+    found=""
+    while IFS= read -r r; do [ "$(norm "$r")" = "$want" ] && found=$r; done < <(rules)
+    [ -n "$found" ] || die "no learned rule matches: ${2:-}"
+    tmp=$(mktemp "$FILE.XXXXXX")
+    awk -v rule="- $found" '/^## 6\. Learned Rules/ { in6 = 1 } in6 && /^## / && !/^## 6\./ { in6 = 0 }
+      in6 && $0 == rule && !gone { gone = 1; next } { print }' "$FILE" > "$tmp"
+    mv "$tmp" "$FILE"
+    printf 'removed: %s\n' "$found" ;;
+  audit)
+    days=90; [ "${2:-}" = --days ] && days=${3:-90}
+    printf '%s' "$days" | grep -Eq '^[0-9]+$' || die "--days needs a number"
+    now=$(date +%s)
+    epoch_of() { date -j -f %Y-%m-%d "$1" +%s 2>/dev/null || date -d "$1" +%s 2>/dev/null; }
+    mtime_of() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
+    # Every citation: EPOCH<TAB>quoted words, normalized, from review and vote files under .tasks/.
+    cites=$(for f in "$ROOT"/.tasks/*/review/round-*/*.md "$ROOT"/.tasks/*/plan-review/round-*/*.md "$ROOT"/.tasks/*/run-*/*.md; do
+        [ -f "$f" ] || continue
+        t=$(mtime_of "$f")
+        grep -o 'learned rule: "[^"]*"' "$f" 2>/dev/null | sed 's/^learned rule: "//; s/"$//' | while IFS= read -r q; do
+          printf '%s\t%s\n' "$t" "$(norm "$q")"
+        done
+      done)
+    while IFS= read -r r; do
+      [ -n "$r" ] || continue
+      added=$(printf '%s' "$r" | sed -nE 's/.*\(.*([0-9]{4}-[0-9]{2}-[0-9]{2})\)$/\1/p')
+      key=$(norm "$r")
+      last=$(printf '%s\n' "$cites" | awk -F '\t' -v key="$key" 'length($2) >= 10 && index(key, $2) == 1 && $1 > m { m = $1 } END { if (m) print m }')
+      cited=never; [ -z "$last" ] || cited=$(date -r "$last" +%Y-%m-%d 2>/dev/null || date -d "@$last" +%Y-%m-%d)
+      old=0
+      if [ -n "$added" ] && a=$(epoch_of "$added") && [ -n "$a" ] && [ $(( (now - a) / 86400 )) -gt "$days" ]; then old=1; fi
+      recent=0; [ -n "$last" ] && [ $(( (now - last) / 86400 )) -le "$days" ] && recent=1
+      verdict=kept; [ "$old" = 1 ] && [ "$recent" = 0 ] && verdict=stale
+      printf '%s\t%s\t%s\t%s\n' "$r" "${added:-unknown}" "$cited" "$verdict"
+    done < <(rules) ;;
+  *) die "usage: quorum-learned-rule list | add \"RULE\" [SOURCE] | remove \"RULE\" | audit [--days N] | pattern ..." ;;
 esac

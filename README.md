@@ -39,10 +39,13 @@ doesn't help. Quorum has one mechanism for each:
   prover runs every check in the spec and shows the output, including that each new test fails without the fix.
 - **Reviews never end.** Builder and reviewer argue for dozens of rounds over the same nits. Quorum caps the loop
   at 3 rounds, reviews only new lines after round 1, limits nits to 2, and runs a voter that drops weak findings.
-- **Lessons don't stick.** A bug fixed today comes back next week. `/quorum:codify-lesson` turns it into a
-  one-line rule in the repo's `REVIEW.md`, which every future review and plan reads. Quorum suggests one when a
+- **Lessons don't stick.** A bug fixed today comes back next week. `/quorum:codify-lesson` turns it into the
+  cheapest thing that stops it: a regression test, a lint rule, a pattern rule a hook blocks during tasks, or
+  only then a one-line rule in `REVIEW.md`. Each new plan reads what earlier tasks learned, including post-mortems,
+  blockers, and findings that kept coming back, and says how it avoids each. Quorum suggests a lesson when a
   Pattern Category comes back, the voter drops the same false alarm twice, or the blind test finds what every
-  reviewer missed; it writes a rule only after you say yes.
+  reviewer missed. It writes one only after you say yes, and `--audit` offers to retire rules no review has cited
+  in months.
 
 The idea underneath is the [Swiss cheese model](https://pmc.ncbi.nlm.nih.gov/articles/PMC1117770/): no single check
 is perfect, so stack several different ones whose holes sit in different places. Each dot below is a kind of defect;
@@ -77,7 +80,7 @@ Then, in the repo you want to protect:
 /quorum:review-loop            # fresh reviewers check the code against the plan → voter → builder, up to 3 rounds
 /quorum:blind-test             # MEDIUM/HIGH: security pass, then a user test with no source access
 /quorum:pr-draft               # READY / AWAITING-HUMAN: PR description from the spec and proof
-/quorum:codify-lesson          # optional: save a repeated bug or false alarm as a rule
+/quorum:codify-lesson          # optional: stop a repeated bug or false alarm (a test, lint or pattern rule, or a line); --audit prunes
 ```
 
 Or let one command take a task through every stage, stopping only where you must decide:

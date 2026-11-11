@@ -13,6 +13,9 @@ Cypress"). Your reply goes into the spec, so every claim must point to a file in
 - **The repo comes first.** The best approach is usually the one the repo already uses. Read `CLAUDE.md`,
   `REVIEW.md`, and any rules folder it links (for example `.claude/rules/`). Then search for existing code that
   does something similar: helpers, components, hooks, test utilities. Cite them as `path:line`.
+- **And what went wrong before.** If your prompt names `.tasks/<slug>/history.md`, read it: earlier tasks'
+  post-mortems, blockers, and findings that kept coming back. Weigh an approach that would repeat one of those
+  against one that doesn't, and say so in the comparison.
 - **Then the docs, for the versions the repo pins.** Find the version in the lockfile or manifest first. Check
   every claim about a library, framework, or API (defaults, options, behavior) against its official docs,
   changelog, or release notes for that version, even ones you're sure of: memory is often a version off. Use blogs

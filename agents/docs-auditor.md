@@ -18,7 +18,9 @@ Your prompt gives you a **diff range** (or **Mode: plan**) and the task slug.
   launcher at `/usr/bin/git`. Find one that runs (`/opt/homebrew/bin/git --version`, then `/usr/local/bin/git`)
   and use that full path for every git command. If none runs, say so at the top of your reply, read the
   changed files directly, and say which conclusions that leaves unchecked.
-- Read `REVIEW.md` first and follow it: its paths to skip (section 4) and learned rules (section 6). Then read
+- Read `REVIEW.md` first and follow it: its paths to skip (section 4) and learned rules (section 6). When a
+  learned rule decides a finding, quote its first words in the finding, as `learned rule: "<its first five to
+  eight words>"`, so `quorum-learned-rule audit` can tell which rules still fire. Then read
   `CLAUDE.md`, `.tasks/<slug>/rd.md`, and `.tasks/<slug>/plan.md` if it exists. The spec's non-goals apply: don't ask for docs about work it rules out.
 - **Find what the change touched.** From `git diff <range>`, list the names a reader would search docs for:
   commands, scripts, flags, env vars, config keys, routes and endpoints, GraphQL or API fields, feature flags,
