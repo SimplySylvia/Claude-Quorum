@@ -42,6 +42,12 @@ copy with `/plugin marketplace update`.
   is MET. An unmet one goes back to the review loop as a pending `[IMPORTANT]` finding ("Unmet requirement"),
   under the round cap. The dashboard's Requirements section shows each verdict with its evidence, and the PR
   writer uses them.
+- **Large plans are built a step at a time.** A plan with 4 or more steps (not on the fast path) gets a fresh builder
+  per step, each starting from the last step's commit and leaving the checks passing. `state.md`'s new
+  `built_steps` records each step as it's built, so a cut-off build or a new session resumes at the next step (the
+  new `quorum-plan` reads the plan's steps). The planner writes steps that stand alone, and marks mechanical ones,
+  which the new `mechanical_model` option can send to a cheaper model. The dashboard shows "Build 2/5". The review
+  loop still reviews the whole branch.
 - **Plans learn from earlier tasks.** `quorum-lessons history` gathers what other tasks in the repo learned:
   - the learned rules;
   - halted tasks' `## Post-mortem` blocks;
@@ -97,6 +103,12 @@ copy with `/plugin marketplace update`.
 
 ### Fixed
 
+- **A spec's checks are tried before they're locked.** The spec stage now runs every `eval.md` command once on the
+  current code. A command may fail, since nothing is built yet, but it must run, so a broken row is fixed while
+  `eval.md` can still change. `quorum-validate spec` rejects `grep -P`, which macOS grep lacks, and warns on
+  `mktemp` and `timeout`. Temporary files go under `.tasks/<slug>/tmp/`.
+- **`\|` in an `eval.md` table cell is a `|`.** The prover runs it that way, and `quorum-validate` and the
+  dashboard no longer split the cell there.
 - **A LOW task without `--fast` gets its spec reviewers again.** The spec steps' fast-path rule didn't name its
   condition, and a `/quorum:run --yes` on a LOW task read it as its own and skipped both spec reviewers. The steps
   now say a task is on the fast path only with `--fast`. `run-low-to-ready` checks that the reviewers ran, and

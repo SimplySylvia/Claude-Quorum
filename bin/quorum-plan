@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Read a task's plan.md steps, for building a large plan one step at a time.
+#
+#   quorum-plan [--task SLUG] steps          the numbers of plan.md's steps (under "## Steps"), one per line
+#   quorum-plan [--task SLUG] sliced         exit 0 if the plan is built a step at a time: 4 or more steps, and not
+#                                            the fast path
+#   quorum-plan [--task SLUG] next           the first step not yet in state.md's built_steps; nothing (exit 1) when
+#                                            every step is built
+#   quorum-plan [--task SLUG] mechanical N   exit 0 if step N is marked "· mechanical": it copies a pattern the
+#                                            plan names, or changes one file the plan specifies completely
+#   quorum-plan [--task SLUG] show N         step N's text: its line and the indented lines under it
+#
+# Without --task, the slug comes from quorum-active-task. Bash 3.2 compatible.
+set -euo pipefail
+
+die() { echo "quorum-plan: $*" >&2; exit 2; }
+HERE=$(cd "$(dirname "$0")" && pwd)
+SLICE_AT=4
+
+task=""
+if [ "${1:-}" = "--task" ]; then task=${2:-}; [ -n "$task" ] || die "--task needs a slug"; shift 2; fi
+[ -n "$task" ] || task=$("$HERE/quorum-active-task") || exit 2
+printf '%s' "$task" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$' || die "invalid slug: $task"
+PLAN="$("$HERE/quorum-active-task" --root)/.tasks/$task/plan.md"
+
+steps_section() { awk '$0 == "## Steps" { on = 1; next } on && /^#{1,2}[ \t]/ { exit } on { print }' "$PLAN"; }
+steps() { steps_section | sed -n 's/^\([0-9][0-9]*\)\.[[:space:]].*/\1/p'; }
+
+cmd=${1:-}
+case "$cmd" in
+  steps|sliced|next|mechanical|show) [ -f "$PLAN" ] || die "no plan.md for task $task" ;;
+  *) die "usage: quorum-plan [--task SLUG] steps | sliced | next | mechanical N | show N" ;;
+esac
+
+case "$cmd" in
+  steps) steps ;;
+  sliced)
+    [ "$("$HERE/quorum-state" --task "$task" get fast 2>/dev/null)" != true ] || exit 1
+    [ "$(steps | wc -l | tr -d ' ')" -ge "$SLICE_AT" ] ;;
+  next)
+    built=" $("$HERE/quorum-state" --task "$task" get built_steps 2>/dev/null | tr '\n' ' ') "
+    for n in $(steps); do
+      case "$built" in *" $n "*) ;; *) printf '%s\n' "$n"; exit 0 ;; esac
+    done
+    exit 1 ;;
+  mechanical|show)
+    n=${2:-}; printf '%s' "$n" | grep -Eq '^[0-9]+$' || die "$cmd needs a step number"
+    text=$(steps_section | awk -v n="$n" '$0 ~ "^" n "\\.[ \t]" { on = 1; print; next } on && /^[0-9]+\.[ \t]/ { exit } on && /^[ \t]*$/ { next } on && /^[ \t]/ { print } on && /^[^ \t]/ { exit }')
+    [ -n "$text" ] || die "plan.md has no step $n"
+    if [ "$cmd" = show ]; then printf '%s\n' "$text"
+    else printf '%s\n' "$text" | head -n 1 | grep -Eq '·[[:space:]]*mechanical'; fi ;;
+esac

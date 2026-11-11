@@ -6,7 +6,7 @@ import {
   parseProof, parseSpec, prDetail, prFromUrl, prNext,
   requirementState, roleOf,
   roundReviewers, slugFromHead, spendOf, stageOf, stages, tokenCount,
-  keptFindings, normalizePath, modelMismatches, choiceLabel, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, latestRun, liveReview, shortRange,
+  keptFindings, countPlanSteps, normalizePath, modelMismatches, choiceLabel, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, latestRun, liveReview, shortRange,
 } from '../../hooks/dashboard/task'
 
 const state = (status: string, extra = '') => `---
@@ -216,6 +216,10 @@ describe('task helpers', () => {
     expect(countFindings(CANDIDATES)).toEqual({ important: 2, nit: 2, preExisting: 0 })
     expect(slugFromHead('ref: refs/heads/fix/a.b-c\n')).toBe('a.b-c')
     expect(slugFromHead('ref: refs/heads/main')).toBe('')
+  })
+
+  test('an escaped pipe in a table cell is a | in that cell, not a new column', () => {
+    expect(evalRows('## Task checks\n| # | Requirement | Command |\n|---|---|---|\n| 1 | a \\| b | `x \\| y` |\n')).toEqual([{ id: '1', label: 'a | b' }])
   })
 
   test('reads requirements, eval rows, and the prover table, and joins them', () => {
@@ -534,6 +538,16 @@ test('a fast-path task says so under the stage rail, with no plan rounds', async
   await pane.unmount()
 })
 
+test('a large plan built a step at a time shows its progress on the Build stage', async ($, on) => {
+  const plan = '# Plan\n\n## Steps\n1. **One** — a\n2. **Two** — b\n   - detail\n3. **Three** — c\n4. **Four** — d\n5. **Five** — e\n\n## Tests\n1. not a step\n'
+  const building = state('BUILDING').replace('pending_findings: ["app/report.py:42"]', 'pending_findings: []\nbuilt_steps: ["1", "2"]')
+  world(on, { ...repo('BUILDING'), '.tasks/export-csv/state.md': building, '.tasks/export-csv/plan.md': plan })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /Build 2\/5/ })).toBeDefined()
+  await pane.unmount()
+})
+
 test('a HALTED or ESCALATED task stays on the stage it stopped at, across a restart', async ($, on) => {
   const files: Record<string, string> = repo('ESCALATED')
   files['.tasks/export-csv/state.md'] = state('ESCALATED', 'escalated_from: BUILDING\n')
@@ -735,6 +749,11 @@ test('a section the person closes stays closed, even while it holds a problem', 
   await pane.press({ key: 'toggle-checks' })
   expect(await pane.find({ type: 'Text', text: /1 finding pending for the builder/ })).toBeDefined()
   await pane.unmount()
+})
+
+test('a plan\'s steps are the numbered lines under its Steps heading', () => {
+  expect(countPlanSteps('## Steps\n1. a\n2. b\n   - c\n\n## Tests\n1. no\n')).toBe(2)
+  expect(countPlanSteps('')).toBe(0)
 })
 
 test('git\'s relative paths resolve', () => {

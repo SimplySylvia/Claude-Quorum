@@ -4,7 +4,7 @@ load ../helpers
 # Each stage /quorum:run chains keeps its instructions in steps.md. Placeholders are only filled in inside a
 # SKILL.md, so a value a step uses must be given by the stage's SKILL.md and by run's.
 STAGES="spec-and-eval plan build simplify-diff review-loop blind-test pr-draft"
-VALUES="plugin root|session|arguments|max_rounds|nit_cap|security_on_medium|reviewer_model|helper_model|worktrees"
+VALUES="plugin root|session|arguments|max_rounds|nit_cap|security_on_medium|reviewer_model|helper_model|worktrees|mechanical_model"
 
 @test "every stage has a steps.md, and its SKILL.md points to it" {
   for s in $STAGES; do

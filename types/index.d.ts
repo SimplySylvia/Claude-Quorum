@@ -63,6 +63,9 @@ export type Snapshot = {
   isFast: boolean
   // state.md's `bug`: a bug fix (--bug), which starts from a reproduction and must prove it fixed.
   isBug: boolean
+  // plan.md's step count, and how many state.md's built_steps lists: a plan of 4 or more is built a step at a time.
+  planSteps: number
+  builtSteps: number
   status: string
   stage: number
   round: number

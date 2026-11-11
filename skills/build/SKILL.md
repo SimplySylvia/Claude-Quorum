@@ -15,3 +15,4 @@ The steps use these values. A setting that still reads as `${user_config…}` wa
 - `<arguments>`: `$ARGUMENTS`
 - `<session>`: `${CLAUDE_SESSION_ID}`
 - `<worktrees>`: ${user_config.worktrees} (default `false`)
+- `<mechanical_model>`: ${user_config.mechanical_model} (default empty: the session's model)

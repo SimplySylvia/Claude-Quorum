@@ -5,7 +5,9 @@
 - **Approach:** <!-- One or two sentences, and the research option it follows, if there was research. -->
 
 ## Steps
-<!-- In the order the builder should do them. One step per change; each names its files and requirements. -->
+<!-- In the order the builder should do them. One step per change; each names its files and requirements. A plan of
+     4 or more steps is built a step at a time, so each step must leave the checks passing and stand on its own.
+     End a step's line with "· mechanical" when it copies a named pattern or changes one fully specified file. -->
 1. **<what changes>** — `path/to/file` · requirements: 1, 2
    - Reuses: `path:line` <!-- the existing helper, component, or pattern; or "new: <why nothing existing fits>" -->
    - Convention: <!-- the rule or precedent this follows, if a choice depends on one -->

@@ -121,6 +121,14 @@ export function slugFromHead(head: string): string {
   return m?.[1] ?? ''
 }
 
+// How many steps plan.md has under "## Steps" (bin/quorum-plan steps).
+export function countPlanSteps(plan: string): number {
+  return section(plan, 'Steps').filter(l => /^\d+\.\s/.test(l)).length
+}
+
+// A plan of this many steps or more is built a step at a time (bin/quorum-plan sliced).
+export const SLICE_AT = 4
+
 // The numbered items under rd.md's "## Requirements".
 export function countRequirements(rd: string): number {
   return section(rd, 'Requirements').filter(l => /^\d+\.\s+\S/.test(l)).length
@@ -230,9 +238,10 @@ function section(text: string, heading: string): string[] {
   return lines.slice(start + 1, end < 0 ? undefined : end)
 }
 
-// A markdown table's body rows as trimmed cells, header and separator left out.
+// A markdown table's body rows as trimmed cells, header and separator left out. In a cell, \| is a literal |.
 function tableRows(lines: string[]): string[][] {
-  const rows = lines.filter(l => l.trim().startsWith('|')).map(l => l.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim()))
+  const rows = lines.filter(l => l.trim().startsWith('|'))
+    .map(l => l.trim().replace(/\\\|/g, '\u0001').replace(/^\||\|$/g, '').split('|').map(c => c.replace(/\u0001/g, '|').trim()))
   return rows.filter((cells, i) => !cells.every(c => /^:?-+:?$/.test(c)) && !(i === 0 && cells[0] === '#'))
 }
 

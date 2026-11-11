@@ -37,6 +37,11 @@ your prompt or at `.tasks/<slug>/plan.md` from an earlier round.
 - **Checks changes:** list every file the Stop hook's checks depend on that the change must edit (the check script,
   CI workflows, test, lint, type-check, or format configs). They're locked during the build unless listed, and the
   user sees the list on its own. Never list one to make a check easier to pass.
+- **Steps that stand alone.** A plan of 4 or more steps is built one step at a time, each by a fresh builder that
+  sees only its step. Order the steps so each leaves the repo's checks passing, and give each the files, reuse, and
+  tests it needs on its own line, without relying on "as in step 2". Mark a step `· mechanical` at the end of its
+  line when it copies a pattern the plan names or changes one file the plan specifies completely; a cheaper model
+  may build it.
 - **Docs:** every `**Docs:**` requirement, plus every doc the change will make wrong (search the docs for the
   names the change touches).
 - **Accessibility, for UI work:** for each new or changed element, the native element or role, its label,

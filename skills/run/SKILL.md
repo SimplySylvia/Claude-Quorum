@@ -26,6 +26,7 @@ The stage steps use these. A setting that still reads as `${user_config…}` was
 - `<reviewer_model>`: ${user_config.reviewer_model} (default `ask`)
 - `<helper_model>`: ${user_config.helper_model} (default `ask`)
 - `<worktrees>`: ${user_config.worktrees} (default `false`)
+- `<mechanical_model>`: ${user_config.mechanical_model} (default empty: the session's model)
 - `<arguments>`: what this skill passes to each stage (the **Arguments** column below), not its own.
 
 This run's own arguments: `$ARGUMENTS`. They hold an optional request (what to build), and these flags:
@@ -75,7 +76,8 @@ says stop, after the stage `--until` names, or after 12 stages in one run (then 
 | no task | `spec-and-eval` | the request, plus `--research`, `--no-research`, `--models`, `--yes`, `--fast`, and `--bug` as given | `spec` |
 | `DRAFT-AWAITING-VISUAL-SIGNOFF`, `PLANNING` | `plan` | the slug, plus `--yes` as given unless the risk is HIGH | `plan` |
 | `BUILDING`, `base_sha` not set | `build` | the slug, plus `--worktree` as given | `build` |
-| `BUILDING`, `base_sha` set | `simplify-diff`, then `review-loop` | none | `build` (before the review loop) |
+| `BUILDING`, `base_sha` set, and `quorum-plan next` prints a step (a sliced build that stopped partway) | `build` | the slug | `build` |
+| `BUILDING`, `base_sha` set, every step built | `simplify-diff`, then `review-loop` | none | `build` (before the review loop) |
 | `IN_REVIEW` | `review-loop` | none | `review` |
 | `CONVERGED` | `blind-test` | none | `blind` |
 | `BLIND-TEST` | an earlier blind test was cut off: `rm -f .tasks/<slug>/.blind-mode-active .tasks/.blind-mode-active`, stop any server it left running, `quorum-state set status CONVERGED`, say so, and follow `blind-test` | none | `blind` |

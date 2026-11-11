@@ -31,6 +31,7 @@ environment setup, such as a version manager to load first) and `.tasks/<slug>/e
 - **Servers:** if a row needs a server, start it in the background with the command the row or `CLAUDE.md` gives,
   log to `.tasks/<slug>/prove-server.log`, wait until it answers, and stop it when you're done. Never point a
   check at production, a shared database, or real credentials.
+- In `eval.md`'s table, `\|` stands for `|`: a Markdown table cell has to escape it. Run the command with `|`.
 - Run each command exactly as written. If a row has no runnable command, report it as SKIPPED with the reason.
   Don't invent a substitute.
 - Repeat-run rows (for example "10 consecutive runs") report the count that passed.

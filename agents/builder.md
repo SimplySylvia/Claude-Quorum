@@ -25,6 +25,11 @@ A prompt that says **Standalone review** comes from `/quorum:review --fix`: ther
 sweeping each Pattern Category through the files the reviewed range touched (the prompt gives the range), and skip
 everything about the plan. The checks are `verify-completion.sh`; the SubagentStop hook still makes them pass.
 
+## One step of a large plan
+A prompt that says **Build step K** builds only that step of `plan.md`, starting from the steps already committed.
+Don't redo them or start later ones, even where you see how. Leave the repo's checks passing, since the next step's
+builder starts from your commit, and commit once for the step.
+
 ## Fast-path builds
 A prompt that says **fast path** has no `plan.md`: build from `rd.md` and `eval.md`, keep the change small, and skip
 everything about the plan, including `## Deviations`.

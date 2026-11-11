@@ -9,14 +9,14 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { Check, Findings, KeptFinding, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, Section, Snapshot, Stage } from '../../types'
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
-  parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, stageOf, stages, tokenCount,
+  parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, SLICE_AT, stageOf, stages, tokenCount,
   keptFindings, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange,
 } from './task'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-12' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-13' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-3' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
 const reviews = atom({ plugin: 'quorum', key: 'reviews' } as const, [], { shape: 'reviews-1' })
@@ -193,6 +193,8 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     risk,
     isFast: scalar(fm, 'fast') === 'true',
     isBug: scalar(fm, 'bug') === 'true',
+    planSteps: countPlanSteps((await readOr($, `${dir}/plan.md`)) ?? ''),
+    builtSteps: list(fm, 'built_steps').length,
     reviewerModel: scalar(fm, 'reviewer_model'),
     helperModel: scalar(fm, 'helper_model'),
     status,
@@ -840,7 +842,9 @@ export const register: Register = (on, options) => {
           <Text>
             {rail.map((s, i) => {
               const [glyph, color] = GLYPH[s.state]
-              const label = s.name === 'Review' && t.round > 0 ? `${s.name} ${t.round}/${t.maxRounds}` : s.name
+              const sliced = t.planSteps >= SLICE_AT && !t.isFast && s.state === 'active'
+              const label = s.name === 'Review' && t.round > 0 ? `${s.name} ${t.round}/${t.maxRounds}`
+                : s.name === 'Build' && sliced ? `${s.name} ${t.builtSteps}/${t.planSteps}` : s.name
               return (
                 <Text key={s.name} color={color} bold={s.state === 'active' || s.state === 'stuck'} dimColor={s.state === 'todo' || s.state === 'skipped'}>
                   {i > 0 ? <Text dimColor> ─ </Text> : null}{glyph}{label}

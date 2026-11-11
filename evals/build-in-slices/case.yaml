@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: build-in-slices
+description: /quorum:build on an approved plan of four steps starts one builder per step, records each step in built_steps as it's built, and commits once per step.
+tags: [build, slices]
+context:
+  scaffold_script: scaffold.sh

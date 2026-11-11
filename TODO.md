@@ -76,22 +76,15 @@ an edge worth having.
   what it costs in tokens (the dashboard's Spend section now counts them). It's Quorum's own "proof before done"
   applied to its claims, and the strongest argument a README can make.
 
-## 5. Large plans, built in slices
+## 5. Large plans: what's left
 
-One builder builds the whole plan, so a big MEDIUM or HIGH task has to fit in one agent's context, and `/quorum:run`
-has no checkpoint inside the build. Superpowers runs a fresh implementer per plan task, reviews each one, and keeps a
-progress file so it can pick up after compaction; it names re-running finished tasks after compaction as its most
-expensive failure.
+A plan of 4 or more steps is built a step at a time, with a checkpoint per step, and mechanical steps can use a
+cheaper model. Still to do:
 
-- **One builder per `plan.md` step** for plans past a size, each starting from the last step's commit, with a
-  checkpoint per step in `state.md` so `/quorum:run` resumes at the next step.
 - **Independent steps in parallel.** GSD and Compound Engineering both run independent units as waves of fresh
   workers, each in its own worktree, after checking the units don't touch the same files. Worth it once the
-  slices work one at a time and the worktree helpers (item 3) have had a real run.
-- **A cheaper model for mechanical steps,** as an option: a step that copies a pattern the plan names, or touches one
-  file with a complete spec. Superpowers' finding is worth keeping: the cheapest models take two or three times the
-  turns on multi-step work, so use a mid-tier model as the floor for anything that needs judgment.
-- The review loop still reviews the whole branch; this changes the build, not the gates.
+  slices have had a real run on a large task.
+- **Measure it.** Compare one MEDIUM task's context and cost built whole and in slices, with the Spend section.
 
 ## 6. Review lenses chosen by the diff
 

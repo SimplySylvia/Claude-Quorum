@@ -8,6 +8,9 @@ as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers alr
 
 Use the slug in `<arguments>`, or `quorum-active-task`. Work from the repo root.
 
+**Picking up a sliced build.** If `base_sha` is set and `quorum-state get built_steps` lists any step, an earlier
+build stopped partway: skip to step 3 and build from `quorum-plan next`.
+
 **Worktree.** If `quorum-state get worktree` prints a path and `quorum-active-task --code` prints another, the
 task's code is in its own git worktree: call `EnterWorktree` with that `path` first, so you and the agents you start
 work there. In a worktree, run one simple command per Bash call, with no `&&`, pipes into `bash` or `python`, or
@@ -67,6 +70,27 @@ On the fast path, use this prompt instead:
 > current branch, run the checks, and commit. This is the first build; there are no review findings yet.
 
 The builder's SubagentStop hook keeps it working until `.claude/hooks/verify-completion.sh` passes.
+
+**A large plan is built a step at a time.** If `quorum-plan sliced` exits 0 (`plan.md` has 4 or more steps, and
+the task isn't on the fast path), don't start one builder for the whole plan. One agent's context would have to
+hold all of it, and a cut-off build would start again from nothing. Instead, while `quorum-plan next` prints a
+step K (N is the number of `quorum-plan steps`):
+
+1. Start `quorum:builder`, with `<mechanical_model>` as its `model` when `quorum-plan mechanical K` exits 0 and
+   that setting is set (empty, or reading as a placeholder, means the session's model), with:
+
+   > Build step K of task `<slug>`'s approved plan, and only that step. Read `CLAUDE.md`, `REVIEW.md`,
+   > `.tasks/<slug>/rd.md`, `.tasks/<slug>/eval.md`, and `.tasks/<slug>/plan.md`. Steps <`quorum-state get
+   > built_steps`, or "none"> are built and committed; don't redo them, and don't start later steps. Step K:
+   > <`quorum-plan show K`>. Leave the repo's checks passing, commit one commit for this step, and note any
+   > deviation under the plan's `## Deviations`. There are no review findings yet.
+
+2. When it hands back (its SubagentStop hook has made the checks pass), `quorum-state push built_steps K`, and say
+   one line: `▸ Build step K/N: <what it did>, <commit>`.
+
+If a step can't be finished (the checks keep failing and the task escalates), stop and say which step. The next
+`/quorum:build` or `/quorum:run` starts at that step, not at the beginning. When `quorum-plan next` prints
+nothing, every step is built: go on to the proof.
 
 ## 4. Report
 

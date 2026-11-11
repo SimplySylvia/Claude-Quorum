@@ -142,8 +142,13 @@ LOW only with `--research`. `--no-research` skips it, and so does the fast path 
      screens for WCAG 2.2 A and AA.
    - Each **Docs:** requirement gets a row that checks the doc names the new thing (for example
      `grep -n -- '--since' docs/cli.md`), and whose "Passes when" says what the section must explain.
-5. **Lint it.** `quorum-validate --task <slug> spec` checks that every requirement has a Task checks row and every
-   row names a requirement and says how it passes. Fix every `ERROR` now, so the reviewers spend their time on
+5. **Try each check once.** Run every Task checks command now, on the code as it is (read `\|` in a cell as `|`).
+   Most should fail, since nothing is built yet, but each must *run*: "command not found", "invalid option", a
+   syntax error, or a sandbox refusal means the row itself is broken. Fix it now: once the build starts, `rd.md`
+   and `eval.md` are locked. Keep temporary files under `.tasks/<slug>/tmp/`, not `mktemp`'s system folder, which a
+   sandbox can block.
+6. **Lint it.** `quorum-validate --task <slug> spec` checks that every requirement has a Task checks row and every
+   row names a requirement and says how it passes, and rejects commands that break on a common machine (`grep -P`). Fix every `ERROR` now, so the reviewers spend their time on
    judgment. Reword a requirement a `WARN` flags as vague, or keep it if the word is precise in context.
 
 ## 6. Review the spec

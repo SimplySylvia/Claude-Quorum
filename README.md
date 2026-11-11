@@ -188,6 +188,12 @@ It never pushes, opens, or merges the PR: it ends with the draft and the command
 picks up from the task's status, so you can mix it with the single-stage commands. Between stages it prints one
 line per stage; agents' full replies stay in `.tasks/<slug>/`.
 
+**Large plans are built a step at a time.** A plan with 4 or more steps gets a fresh builder for each step. Each one
+starts from the last step's commit and leaves the checks passing, and `state.md` records each step as it's built
+(`built_steps`). A cut-off build, or a new session, picks up at the next step instead of starting over. The
+dashboard's stage rail shows "Build 2/5". Steps the planner marks mechanical can run on a cheaper model with the
+`mechanical_model` option. The review loop still reviews the whole branch.
+
 **`--fast`** is for LOW tasks: a short spec with no spec reviewers or mockup, no plan round, the build, a review by
 the Logic & Edge-Case Hunter alone (still with the voter and the round cap), the proof, and the PR draft. It drops
 ceremony, not checks: the Stop hook and the proof before `READY` hold as always. A task the spec puts at MEDIUM or
@@ -403,6 +409,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `helper_model` | `ask` | Model for the PR writer and the friction triager: `ask`, `inherit`, or a model name |
 | `secret_guard` | `true` | Block reading credential files and committing lines that look like secrets |
 | `protected_paths` | (none) | More check files a task can't change while it builds or is in review, as comma-separated globs |
+| `mechanical_model` | (none: the session's model) | Model for the steps of a large plan that the plan marks mechanical; a mid-tier model at the least |
 | `worktrees` | `false` | Build each task in its own git worktree (see [More than one task at a time](#more-than-one-task-at-a-time)) |
 | `blind_block_dirs` | `src,app,lib,packages,Source,Content` | Folders the blind user can't read |
 | `blind_block_exts` | `ts,tsx,js,jsx,py,rs,go,cpp,h,java,kt,rb` | File types the blind user can't read |
@@ -420,7 +427,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `agents/` | `researcher`, `spec-reviewer`, `planner`, `builder`, `prover`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `verifier-voter`, `security-reviewer`, `blind-user`, `friction-triager`, `pr-writer` |
 | `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `protect-checks.sh`, `secret-guard.sh` (both read commands with `shell-words.sh`), `stop-verify.sh`, `record-pr.sh`, and `dashboard/`, the dashboard's hooks module |
 | `types/` | The type contract for the values the dashboard keeps in the session |
-| `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state`, `quorum-reviews`, `quorum-lessons`, `quorum-secrets`, `quorum-validate`, `quorum-config`, `quorum-git` (on the Bash PATH while the plugin is enabled) |
+| `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state`, `quorum-reviews`, `quorum-lessons`, `quorum-secrets`, `quorum-validate`, `quorum-config`, `quorum-plan`, `quorum-git` (on the Bash PATH while the plugin is enabled) |
 | `libexec/` | `git`, which `quorum-git` puts first on PATH when it runs a real git by full path, so git's own child processes (`git worktree add` starts some) reach it too |
 | `tests/` | bats tests for every hook and helper, `claude plugin test` tests for the dashboard, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
 | `evals/` | `claude plugin eval` suite: risk tiering, one case per agent, voter false-alarm drops, blind-mode source reads, a near-miss |

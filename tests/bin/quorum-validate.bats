@@ -167,3 +167,23 @@ MD
   sed -i.bak '/^Bug:/d' .tasks/demo/proof-final.md
   run "$BIN/quorum-validate" proof; [ "$status" -eq 0 ]
 }
+
+@test "spec: an escaped pipe stays in its cell; grep -P is an error, and mktemp a warning" {
+  cat > .tasks/demo/eval.md <<'MD'
+## Task checks
+| # | Requirement | Command | Passes when |
+|---|---|---|---|
+| 1 | Export | `grep -nE 'a\|b' app/report.py` | a line |
+| 2 | Quoted | `grep -nP '[^\x00-\x7F]' app/report.py` | a line |
+| 3 | Docs | `d=$(mktemp -d) && cp README.md "$d"` | copied |
+| 3b | Docs | `grep -c x README.md \| grep -qP '^\d+$'` | a count |
+MD
+  run "$BIN/quorum-validate" spec
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ERROR: eval.md row 2 uses grep -P"* ]]
+  [[ "$output" == *"WARN: eval.md row 3 uses mktemp"* ]]
+  [[ "$output" != *"row 1"* ]]
+  # the grep -P after an escaped pipe is still part of row 3b's command
+  [[ "$output" == *"ERROR: eval.md row 3b uses grep -P"* ]]
+  [ "$(printf '%s\n' "$output" | grep -c '^ERROR')" -eq 2 ]
+}

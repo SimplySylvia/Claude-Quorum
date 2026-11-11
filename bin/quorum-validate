@@ -34,8 +34,9 @@ section() { awk -v h="## $2" '$0 == h { on = 1; next } on && /^#{1,2}[ \t]/ { ex
 # The numbers of rd.md's requirements, one per line, and "N<TAB>text".
 requirements() { section "$DIR/rd.md" Requirements | sed -n 's/^\([0-9][0-9]*\)\.[[:space:]]\{1,\}\([^[:space:]].*\)$/\1	\2/p'; }
 # A markdown table's rows as tab-separated trimmed cells, the separator row left out; the header row comes first.
-table() { awk '/^[ \t]*\|/ { l = $0; sub(/^[ \t]*\|/, "", l); sub(/\|[ \t]*$/, "", l); n = split(l, c, "|"); out = ""; sep = 1
-            for (i = 1; i <= n; i++) { v = c[i]; gsub(/^[ \t]+|[ \t]+$/, "", v); if (v !~ /^:?-+:?$/) sep = 0; out = out (i > 1 ? "\t" : "") v }
+# In a cell, \| is a literal | (Markdown's escape), so it doesn't split the cell and reads back as |.
+table() { awk '/^[ \t]*\|/ { l = $0; gsub(/\\\|/, "\001", l); sub(/^[ \t]*\|/, "", l); sub(/\|[ \t]*$/, "", l); n = split(l, c, "|"); out = ""; sep = 1
+            for (i = 1; i <= n; i++) { v = c[i]; gsub(/\001/, "|", v); gsub(/^[ \t]+|[ \t]+$/, "", v); if (v !~ /^:?-+:?$/) sep = 0; out = out (i > 1 ? "\t" : "") v }
             if (!sep) print out }'; }
 # covers ID N: an eval or proof row id ID names requirement N.
 covers() {
@@ -84,6 +85,17 @@ EOF
         pass=$(printf '%s' "$row" | cut -f"$pcol" | tr -d '[:space:]')
         [ -n "$cmd" ] || error "eval.md row $id has no command"
         [ -n "$pass" ] || error "eval.md row $id doesn't say what passing looks like"
+        full=$(printf '%s' "$row" | cut -f"$ccol")
+        # Commands that break on a common machine, or in Claude Code's sandbox, before any code is wrong.
+        if printf '%s' "$full" | grep -Eq '(^|[^a-z])grep[[:space:]]+(-[A-Za-z]*P|--perl-regexp)'; then
+          error "eval.md row $id uses grep -P, which macOS grep doesn't have; use grep -E"
+        fi
+        if printf '%s' "$full" | grep -Eq '(^|[^a-z])mktemp([[:space:]]|$)'; then
+          warn "eval.md row $id uses mktemp; a sandbox can block the system temp folder: use a folder under .tasks/$task/tmp/"
+        fi
+        if printf '%s' "$full" | grep -Eq '(^|[^a-z-])timeout[[:space:]]+[0-9]'; then
+          warn "eval.md row $id uses timeout, which macOS doesn't have"
+        fi
       fi
     done <<EOF
 $body
