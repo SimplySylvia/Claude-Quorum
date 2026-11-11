@@ -27,6 +27,11 @@ from the base to `HEAD`.
 - **What each requirement rests on.** `proof-final.md`'s `## Requirements` table gives each requirement its verdict
   and evidence (`file:line` and the checks that show it). Use it for the description's list of what changed, and
   mention any **Unrequested** code it names, so a reviewer can ask about it.
+- **Merge danger.** End the description with one line a reviewer can weigh before approving: a **one-way door**
+  (a revert doesn't undo it: a data migration, a deleted or renamed field, a format or API others read, a message
+  sent to users) or a **two-way door** (a revert undoes it), and the **blast radius**: who and what breaks if it's
+  wrong. Base it on the diff and `rd.md`'s rollback plan, for example "Merge danger: two-way door; only the new
+  `export` command changes." Match the repo's template where it already asks for this.
 - Link the ticket if `rd.md` names one. Name files and functions; don't paste code.
 - No data copied from the app's screens or test fixtures into the description.
 - No attribution lines ("Generated with", "Co-Authored-By", tool or model names). If the user wants one, they add it.
