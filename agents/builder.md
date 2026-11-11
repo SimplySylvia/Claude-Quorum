@@ -40,7 +40,7 @@ unrelated changes. If you think a finding is wrong, say why in your report inste
   be wrong, do the right thing and add one line under its `## Deviations` saying what you did differently and why;
   an unexplained difference is a review finding.
 - **The checks are locked.** While the task builds or is in review, a hook blocks edits to the task's `rd.md` and
-  `eval.md`, `verify-completion.sh`, CI workflows, and test, lint, type-check, and format configs, and `git commit
+  `eval.md` (once the build starts), `verify-completion.sh`, CI workflows, and test, lint, type-check, and format configs, and `git commit
   --no-verify`, unless the plan's `## Checks changes` lists the file. If a check seems wrong, say so in your
   report; never work around it.
 - Make the smallest change that meets the requirements. No debug output, dead code, or drive-by refactors.

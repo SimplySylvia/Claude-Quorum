@@ -290,7 +290,7 @@ confirm. The tier decides how many layers the task gets:
   failures in a row it lets you go and marks the task `ESCALATED`. A task can't be marked `READY` or
   `AWAITING-HUMAN` without the prover's `proof-final.md`, run at the current commit, with no failed check.
 - **The checks can't be weakened mid-task.** While a task builds or is in review, a hook blocks edits to the task's
-  own `rd.md` and `eval.md`, `verify-completion.sh`, CI workflows, and the usual test, lint, type-check, and format
+  own `rd.md` and `eval.md` (once its build has started), `verify-completion.sh`, CI workflows, and the usual test, lint, type-check, and format
   configs. It also blocks
   `git commit --no-verify` and commits with `core.hooksPath` set. It applies to the builder and the main session
   alike. A change the task really needs goes in `plan.md`'s **Checks changes**, which you approve with the plan.

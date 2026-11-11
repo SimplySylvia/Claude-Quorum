@@ -9,7 +9,8 @@ copy with `/plugin marketplace update`.
 
 - **The checks can't be weakened during a task.** A new hook, `protect-checks.sh`, applies while a task is
   `BUILDING` or `IN_REVIEW`, to the builder and the main session alike. It blocks:
-  - edits to the task's own `rd.md` and `eval.md` (what the prover holds it to), `verify-completion.sh`,
+  - edits to the task's own `rd.md` and `eval.md` (what the prover holds it to) once its build has started,
+    `verify-completion.sh`,
     `.claude/settings*.json`, CI configs, commit hooks, and the usual test, lint,
     type-check, and format configs, whether by `Edit` or `Write` or by a Bash redirect, `tee`, `cp`, `mv`, `rm`, or
     `sed -i`;
