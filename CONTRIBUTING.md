@@ -68,6 +68,12 @@ each run's workspace and bootstraps for Quorum.
 | `deep-research-quick-stays-small` | `/quorum:research --effort quick` starts at most 2 researchers, checks their claims, and still writes the full report |
 | `deep-research-standard` | `/quorum:research` splits a design question into lensed sub-questions, runs 3 researchers with tagged claims, checks them, and reports viability, candidate tasks, assumptions, and gaps, starting no task |
 | `run-high-asks-tier` | Even with `--yes`, `/quorum:run` asks the user to confirm a HIGH tier and builds nothing before an answer |
+| `map-small-idea-stops` | `/quorum:map` on a change that fits one task writes no map and points to `/quorum:spec-and-eval` or `/quorum:run` |
+| `map-charts-foggy-idea` | `/quorum:map` on a large effort names a destination, charts 2 to 8 typed tickets, checks the map, answers no ticket only the user can, and edits no code |
+| `map-grilling-gets-facts` | Working a map, `/quorum:map` starts one facts-only researcher before a grilling question about the code, asks it citing what the code does, and records no answer itself |
+| `map-handoff-review` | On a cleared map, `/quorum:map` writes `tasks.md`, starts the map-mode reviewers and the voter, and asks you to approve the breakdown before any task starts |
+| `spec-from-map` | `spec-and-eval --from-map` saves the decisions to `decisions.md`, records `map` and `map_task`, writes the decision and the out-of-scope item into `rd.md`, and asks nothing the map decided |
+| `retro-finds-lessons` | `/quorum:retro` on a task whose review kept the same Pattern Category twice proposes a rule for it and wiring in the repo's unused `fmt-check`, most severe first, and writes nothing before you pick |
 | `nearmiss-no-auto-review-loop` | An ordinary "look at my commit" request never starts a Quorum command |
 
 ```bash

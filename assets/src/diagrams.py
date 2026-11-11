@@ -206,8 +206,8 @@ def draw_map(theme):
                             ("a11y-auditor: live", "UI change", False), ("friction-triager", "if friction", False),
                             ("prover", "no blockers", False)])
 
-    # 7 · Human gate and PR (6, codify-lesson, is optional and starts no agents).
-    t = band("ship", "8", "Human gate & PR", "/quorum:pr-draft", 100, ["7 · codify-lesson: optional"])
+    # 7 · Human gate and PR (6, retro or codify-lesson, is optional and starts no agents).
+    t = band("ship", "8", "Human gate & PR", "/quorum:pr-draft", 100, ["7 · retro, codify-lesson:", "optional"])
     s.row(CONTENT, t + 28, [("pr-writer", "cites each requirement's verdict", False),
                             ("you review and merge", "MEDIUM/HIGH wait for you", True)])
 
@@ -246,6 +246,20 @@ def draw_map(theme):
         s.chip(rx + (col - chip_w(label, tag)) / 2, cy, label, tag, doc=doc)
         if i:
             s.arrow(f"M{rx + col / 2:.1f},{cy - 64 + CHIP_H + TAG_H + 2} V{cy - 3}")
+
+    # Map a large effort: /quorum:map, before any task; a cleared map hands its tasks to the spec stage.
+    t = band("map", "", "Map a large effort", "/quorum:map", 240, ["plans only: a hook", "blocks building"])
+    my, step = t + 28, CHIP_H + TAG_H + 22
+    s.row(CONTENT, my, [("grilling rounds", "destination, then breadth", True),
+                        ("researcher", "per research ticket; deep if weighty", False),
+                        ("quorum-map check", "no cycles, full index", True)])
+    s.row(CONTENT, my + step, [("researcher: facts", "before a code question", False),
+                               ("you decide", "one ticket per run", True),
+                               ("spec-reviewer: decision", "checks it against the code", False)])
+    s.row(CONTENT, my + 2 * step, [("tasks.md", "once cleared", True),
+                                   ("reviewers: map mode", "architecture, patterns, security", False),
+                                   ("verifier-voter", "you approve", False),
+                                   ("--from-map", "once blockers merge", True)])
 
     # Forward flow between bands, down the left of the content column.
     spine = CONTENT - 20
@@ -286,7 +300,8 @@ def draw_map(theme):
            "follows bands 1 to 8 in order by itself, stopping only where you decide (see the run diagram)",
            size=TAG + 0.5, color="muted")
     return s.svg(int(ly + 26), "Quorum agent map: the agents each command starts, when they run, the loops "
-                                "that send work back, and /quorum:review for any diff")
+                                "that send work back, /quorum:review for any diff, /quorum:research, and "
+                                "/quorum:map for an effort too big for one task")
 
 
 def wrap(text, size, width):
@@ -734,7 +749,8 @@ def draw_run(theme):
                                       "for another task."),
                        ("--bug", "reproduces it first; done only when the proof shows it fixed and failing without "
                                  "the fix."),
-                       ("--deep-research", "lensed researchers in parallel, every claim checked against its source.")):
+                       ("--deep-research", "lensed researchers in parallel, every claim checked against its source."),
+                       ("--map", "starts the next ready task of a cleared /quorum:map, from the map's decisions.")):
         ly += 22
         s.text(LEFT + 4, ly + 4, flag, size=TAG + 0.5, mono=True, weight=600)
         s.text(LEFT + 4 + mono_w("--deep-research", TAG + 0.5) + 10, ly + 4, text, size=TAG + 0.5, color="muted")
@@ -745,7 +761,8 @@ def draw_run(theme):
                  "blind test halts. Blind-test blockers go back to the review loop. It never pushes or opens the PR. "
                  "--fast takes a LOW task through without spec reviewers or a plan stage, with one reviewer; "
                  "--worktree builds the task in its own git worktree; --bug reproduces the bug first and proves it "
-                 "fixed; --deep-research runs lensed researchers in parallel and checks every claim.")
+                 "fixed; --deep-research runs lensed researchers in parallel and checks every claim; --map starts "
+                 "the next ready task of a cleared map.")
 
 
 if __name__ == "__main__":

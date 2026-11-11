@@ -1,6 +1,6 @@
 # TODO
 
-Feature work to come back to, most valuable first. Items 0 to 3 finish work already shipped; the rest are
+Feature work to come back to, most valuable first. Items 0 to 3, 11, and 12 finish work already shipped; the rest are
 sketches. Each item says why it matters, which mostly comes from comparing Quorum with the plugins people use for
 the same job, from two audits on 2026-11-10:
 
@@ -149,7 +149,27 @@ Deep research and `/quorum:research` shipped in 0.10.0. Still to do:
 - **Saved page copies.** hyperresearch checks each sentence against a copy saved at fetch time; Quorum's source
   verifier reopens the live page, which may have changed since.
 
-## 12. Later
+## 12. Maps, grilling, and retro: what's left
+
+`/quorum:map`, grilling, and `/quorum:retro` shipped in 0.11.0, from a comparison with Matt Pocock's skills
+(mattpocock/skills, 2026-10-31): wayfinder, grilling, and retro. Still to do, after a few real maps:
+
+- **The first chart's size.** Charting stops at 8 tickets so later ones don't go stale before early answers change
+  them. Check whether real maps hit 8 and whether the fog graduated well, then keep it, make it a setting, or tie it
+  to which questions are already sharp.
+- **What the map's agents cost.** A code question's facts researcher and the decision check add two agents per
+  ticket, and the hand-off review two to four. Measure how often each changes a decision; drop the ones that don't.
+- **A cut-off map session.** Its `.tasks/.map-sessions/<id>` marker stays, and the guard keeps blocking that session
+  until `quorum-map leave`. Clear markers whose session ended, or say so in `/quorum:map` with no arguments.
+- **Maps on the dashboard.** The pane shows tasks only; a map's frontier and its ready tasks would fit the **Other
+  tasks** list.
+- **Ticket numbers.** Tickets are numbered `01` to `99`; a 100th breaks listing. Widen the numbers, or have
+  `quorum-map new` refuse past 99.
+- **A tracker.** Wayfinder keeps its map on GitHub or Linear issues, so the frontier shows in the tracker's UI. Quorum
+  keeps it in `.tasks/`; mirroring tickets to a tracker would let a team see and claim them.
+- **The evals.** `map-*`, `spec-from-map`, and `retro-finds-lessons` are written but not yet run.
+
+## 13. Later
 
 - **The official marketplace.** `/quorum:review` exists now, so the first thing a new user tries works in any repo;
   submit once the worktrees release is out.

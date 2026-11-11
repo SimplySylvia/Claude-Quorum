@@ -3,6 +3,62 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
+## Unreleased
+
+### Added
+
+- **Maps, for an effort too big for one task.** `/quorum:map <idea>` names the destination, grills breadth-first for
+  the open decisions, and charts them in `.tasks/map-<slug>/` as at most 8 tickets, each a question with a type
+  (`grilling`, `research`, `prototype`, or `task`) and the tickets it waits on. What it can't phrase yet goes under
+  **Not yet specified**, and work beyond the destination under **Out of scope**. Research tickets start at once, a
+  `researcher` each, in parallel. Each later `/quorum:map <slug>` claims the first ticket on the frontier, resolves
+  it with you, adds a line to **Decisions so far**, and stops; `--revise` reopens a decision and lists what rested on
+  it. Once nothing is left to decide, it writes `tasks.md`: the destination as Quorum tasks, vertical slices with
+  their tiers, their order, and the decisions they rest on. If an idea fits one task, it says so and writes nothing.
+  The idea comes from Matt Pocock's [wayfinder](https://github.com/mattpocock/skills) skill.
+- **Quorum's agents work the map.** A grilling ticket about the code or a dependency first gets a `researcher` in
+  a new facts-only mode (what the code does, what the docs say, the constraints; no recommendation). A weighty
+  research ticket gets a deep research, with its claims checked against their sources. Before a grilling or
+  prototype decision is recorded, the `spec-reviewer` checks it against the code and the map's earlier decisions, in
+  a new decision mode. The task breakdown is reviewed in a new map mode by the `code-reviewer` (Architecture, Security
+  & Drift Hunter), the `pattern-auditor`, and for HIGH tasks the `security-reviewer`, then voted on by the
+  `verifier-voter`, before you approve it.
+- **`/quorum:spec-and-eval --from-map <map> <n>`** starts a map's task once the tasks it waits on have merged. It
+  saves the decisions the task rests on to `decisions.md`, writes them into the requirements and non-goals, and
+  doesn't ask again what the map decided; the spec reviewers and the planner read them too. `state.md` records `map`
+  and `map_task`. **`/quorum:run --map <map>`** starts the next ready task and takes it through every stage.
+- **A map guard.** `hooks/map-guard.sh` keeps a map session from building: it blocks edits to the repo outside
+  `.tasks/`, Bash writes into it, commits and pushes, and `quorum-branch start`. It applies only to the session
+  that's working on a map.
+- **`bin/quorum-map`** keeps a map without a model: tickets, blocking edges (refusing cycles), the frontier,
+  claims, resolutions and the map's index, out-of-scope rulings, reopening, the task graph, and `check`, which
+  reports a broken map. Only the user can answer a `grilling` or `prototype` ticket: `resolve` refuses one the agent
+  answered.
+- **Grilling, wherever a decision is yours.** A new model-invocable `grilling` skill asks in rounds: every question
+  that can be asked now, each with a recommended answer, nothing the code or an earlier answer settles. The spec
+  asks follow-up rounds when the answers open new questions, asks the approach and the research's assumptions to
+  confirm as a round, and sends a spec-review finding only you can settle to you before changing the spec. Plan
+  approval asks the plan's open questions instead of leaving them to the builder. A redesign grills what the chosen
+  option leaves open, and `/quorum:research` offers a round on its assumptions.
+- **`/quorum:retro`**, after Matt Pocock's `retro` skill. It looks back over a task, a map, a session, or every task
+  since a date (`--since`), and finds what the next build should do differently: checks to wire in or add, review
+  rules, `CLAUDE.md` pointers, broken commands, steering lines that do nothing, what agents couldn't see, and Quorum
+  settings worth changing. It reads Quorum's records and the session logs, ranks what it finds most severe first,
+  applies only what you pick (in `codify-lesson`'s cheapest-form order), and saves the retro to
+  `.tasks/retro-<date>/` so the next one doesn't propose a declined idea again. A new `bin/quorum-session` finds a
+  session's log and summarizes it as data (calls per tool, subagents, failed calls, hook blocks, files reread, long
+  searches), never its content.
+- **Merge danger in the PR draft.** The PR writer ends the description with a one-way or two-way door call and the
+  blast radius.
+- **Wide refactors expand, then contract.** The planner plans a rename or retype that would break every caller at
+  once as expand–contract steps, each leaving the checks passing.
+- **`/quorum:codify-lesson` looks at the environment too.** It first offers to wire in a check the repo already has
+  but `verify-completion.sh` doesn't run, and offers a one-line pointer in `CLAUDE.md` when an agent couldn't find
+  something. `--audit` also lists steering lines that do nothing: rules a check now enforces, lines that restate any
+  agent's defaults, and pointers to files that are gone.
+- **`quorum-branch is-merged <slug>`** tells whether a task's work merged, with or without a worktree; `merged` uses
+  it.
+
 ## 0.10.0 (2026-11-11)
 
 ### Added
