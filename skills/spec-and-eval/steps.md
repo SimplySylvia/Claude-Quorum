@@ -107,6 +107,9 @@ Do this for MEDIUM and HIGH tasks, and for LOW when `<arguments>` contains `--re
      screens for WCAG 2.2 A and AA.
    - Each **Docs:** requirement gets a row that checks the doc names the new thing (for example
      `grep -n -- '--since' docs/cli.md`), and whose "Passes when" says what the section must explain.
+5. **Lint it.** `quorum-validate --task <slug> spec` checks that every requirement has a Task checks row and every
+   row names a requirement and says how it passes. Fix every `ERROR` now, so the reviewers spend their time on
+   judgment. Reword a requirement a `WARN` flags as vague, or keep it if the word is precise in context.
 
 ## 6. Review the spec
 

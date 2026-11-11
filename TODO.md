@@ -41,15 +41,14 @@ and the stage commands share them. Still to do:
 - **The dashboard during a run:** "autopilot · next stop: plan approval" in the band, and a toast at each stop, so a
   user can work elsewhere and come back when asked. The dashboard can't tell a run from single commands today.
 - **Context length.** A whole MEDIUM task is long for one conversation. Measure one with the Spend section and the
-  transcript size, and see whether the chat rule (one line per stage) is enough. If it isn't, item 10 is the fix.
+  transcript size, and see whether the chat rule (one line per stage) is enough. If it isn't, item 9 is the fix.
 
 ## 3. A fast path for LOW tasks: what's left
 
-`/quorum:run --fast` shipped in 0.8.0. Still to do:
+`/quorum:run --fast` shipped in 0.8.0, and `run-fast-low` passed on 2026-11-11. Still to do:
 
-- **Run its eval,** `run-fast-low`, which makes real model calls.
 - **Whether `run` should offer it by itself** when the spec settles on LOW, instead of waiting for the flag (see
-  item 7).
+  item 6).
 
 ## 4. Worktrees: what's left
 
@@ -84,24 +83,7 @@ an edge worth having.
   what it costs in tokens (the dashboard's Spend section now counts them). It's Quorum's own "proof before done"
   applied to its claims, and the strongest argument a README can make.
 
-## 6. A verdict for every requirement
-
-The prover checks each `eval.md` row, and the reviewers read `rd.md`, but nothing gives each requirement a verdict
-of its own. Four peers do: spec-kit's `converge`, GSD's goal-backward verifier, BMAD's intent-alignment lens, and
-QualityLayer's recorded evidence for each acceptance point.
-
-- **Map each requirement to the code** at the end of the review loop: met, missing, partial, contradicts, or
-  unrequested (code no requirement asked for). Check that what it relies on is wired in, not a stub (GSD's "exists,
-  substantive, wired"). This could be a mode of the prover, or a lens of the Logic & Edge-Case Hunter; a missing or
-  contradicting requirement is `[IMPORTANT]`.
-- **Store the evidence** for each requirement in `proof-final.md` next to the check that shows it, so the PR writer
-  and the dashboard's Requirements section can cite it.
-- **A spec lint before the spec reviewers.** A `bin/quorum-validate` that checks every requirement has an `eval.md`
-  row, every row names a requirement, and no requirement uses words the reviewers would flag as vague; later, that
-  every `plan.md` step traces to a requirement. Deterministic, so the reviewers spend their tokens on judgment
-  (OpenSpec's `validate --strict`, spec-kit's `analyze`).
-
-## 7. Fewer questions at the spec stage
+## 6. Fewer questions at the spec stage
 
 `spec-and-eval` asks mostly about process: the slug, the tier, research, and two model choices, on every task.
 Superpowers' brainstorming asks why the user wants the change first, asks only questions whose answers would change
@@ -117,7 +99,7 @@ questions from 41 to 23 across its test conversations.
 - Measure it the way Superpowers does: count questions per spec in the `risk-tier-*` and `run-*` evals before and
   after.
 
-## 8. Habits inside a build, and a bugfix path
+## 7. Habits inside a build, and a bugfix path
 
 Quorum checks the build from outside, but tells the builder little about how to work. Superpowers' skills for
 specific moments (systematic debugging, red-green TDD, receiving code review) are its best part. Add Quorum's own
@@ -138,7 +120,7 @@ without letting anything start the pipeline by itself (`nearmiss-no-auto-review-
   evidence, and count disputes the voter upholds as a `codify-lesson` signal.
 - **Maybe a fourth law** in `session-laws.sh`, "root cause before fixes", if the hook text stays short.
 
-## 9. Use what Quorum has learned
+## 8. Use what Quorum has learned
 
 `codify-lesson` writes rules to `REVIEW.md`, and the planner and reviewers read section 6. Peers go further with
 what they learn, though both that write lessons by themselves (Compound Engineering, ECC) skip the user's approval;
@@ -155,7 +137,7 @@ keep Quorum's.
   `codify-lesson --audit` propose removing rules that haven't fired in a long time, with the user's yes (Compound
   Engineering's refresh mode, QualityLayer's 90-day retirement).
 
-## 10. Large plans, built in slices
+## 9. Large plans, built in slices
 
 One builder builds the whole plan, so a big MEDIUM or HIGH task has to fit in one agent's context, and `/quorum:run`
 has no checkpoint inside the build. Superpowers runs a fresh implementer per plan task, reviews each one, and keeps a
@@ -172,7 +154,7 @@ expensive failure.
   turns on multi-step work, so use a mid-tier model as the floor for anything that needs judgment.
 - The review loop still reviews the whole branch; this changes the build, not the gates.
 
-## 11. Review lenses chosen by the diff
+## 10. Review lenses chosen by the diff
 
 The peers' reviewer lists cover kinds of defect Quorum's six don't name. Add them as lenses that a reviewer turns on
 when the diff calls for them, not as new agents, since agent count is what peers' users complain about most.
@@ -185,14 +167,14 @@ when the diff calls for them, not as new agents, since agent count is what peers
   Gemini when its CLI is installed, with findings going through the same voter (Compound Engineering, GSD,
   QualityLayer, ECC). It catches what a single model family is blind to.
 
-## 12. CI mode
+## 11. CI mode
 
 A GitHub Action that runs `/quorum:review` headless (`claude -p`) on each PR and posts the kept findings, with the
 repo's `REVIEW.md`. Pairs with item 1: the same reviewers and voter, on every PR, with no one remembering to run
 them. Superpowers' gates are instructions to the model, so it can't do this; Quorum's are agents and scripts. Needs
 the `github-actions` hardening rules (pinned actions, least-privilege token, no script injection from PR titles).
 
-## 13. After the PR, and changing a spec
+## 12. After the PR, and changing a spec
 
 Quorum ends at the drafted PR. Peers follow it further, and let a spec change without starting over.
 
@@ -204,7 +186,7 @@ Quorum ends at the drafted PR. Peers follow it further, and let a spec change wi
   halted, reruns the spec reviewers on the change, and marks the plan for review again. `--redesign` only starts
   over after a halt. Hard-to-update specs are spec-kit's most upvoted issue (#1191).
 
-## 14. `/quorum:diagnose`
+## 13. `/quorum:diagnose`
 
 When a task halts, escalates, or costs more than expected, the post-mortem says what the review loop saw, not why
 the session went that way. Superpowers' `diagnosing-superpowers` reads the session's transcripts and reports what
@@ -213,7 +195,7 @@ happened, with a `path:line` citation for every finding. A Quorum version would 
 back and why, where the tokens went (alongside the dashboard's Spend). Read-only, and it never sends anything
 anywhere.
 
-## 15. Smaller follow-ups from this release
+## 14. Smaller follow-ups from this release
 
 - **Spend per round, kept.** The Spend section only covers agents since the last command, in this session. Keeping
   per-round totals in `state.md` would need the dashboard to write `.tasks/`, which it deliberately never does;
@@ -225,13 +207,14 @@ anywhere.
   the voter rescores a low-confidence finding after checking it. These make real model calls, so they weren't run
   as part of the change.
 
-## 16. Later
+## 15. Later
 
 - **The official marketplace.** `/quorum:review` exists now, so the first thing a new user tries works in any repo;
   submit once the worktrees release is out.
 - **Specs that outlive the task.** OpenSpec merges each change's requirements into lasting per-capability specs,
   and each later change edits them with a delta. `pr-draft` could merge `rd.md` into a `specs/` folder, and
-  `spec-and-eval` could read it first. Valuable, but a different shape of product; revisit after item 6.
+  `spec-and-eval` could read it first. Valuable, but a different shape of product; now that each requirement gets
+  a verdict with evidence, those verdicts are what such a spec would record.
 - **Other harnesses.** Superpowers runs in 15, spec-kit in 43, OpenSpec in 35, Compound Engineering in 14. Quorum's
   hooks and the dashboard are Claude Code features, so this means a reduced Quorum elsewhere (the laws,
   `/quorum:review`, and the voter): worth it only once the core is settled.

@@ -91,16 +91,25 @@ test result, the blockers, and the triage counts.
 
 ## 5. Stage 8 summary
 
-1. **Verification proof:** start `quorum:prover` on all of `eval.md` (as in `/quorum:build` step 4), save its reply
-   verbatim to `.tasks/<slug>/proof-final.md`, and show it. `quorum-state` refuses `READY` and `AWAITING-HUMAN`
-   without this file, at HEAD, with no failed check, so save it before setting the status. If anything fails, say so
-   and stop without changing the status.
+1. **Verification proof:** start `quorum:prover` with:
+
+   > Final proof. Task `<slug>`. Base commit `<quorum-state get base_sha>`. Run `bash .claude/hooks/verify-completion.sh`
+   > and every row in `.tasks/<slug>/eval.md`, then give each requirement in `.tasks/<slug>/rd.md` a verdict. Read
+   > `CLAUDE.md` first.
+
+   Save its reply verbatim to `.tasks/<slug>/proof-final.md`, and show it. `quorum-state` refuses `READY` and `AWAITING-HUMAN`
+   without this file, at HEAD, with no failed check and every requirement MET, so save it before setting the status. If a requirement's verdict is
+   PARTIAL, MISSING, or CONTRADICTS, it goes back to the review loop: push each to `pending_findings` as one line,
+   `[IMPORTANT] <its file:line, or .tasks/<slug>/rd.md> — Pattern Category: Unmet requirement — requirement <n>:
+   <the evidence>`, then `quorum-state set status IN_REVIEW`. The loop fixes it first and reviews the fix, under its
+   round cap. If
+   anything else fails, say so and stop without changing the status.
 2. **Risk tier**, the review rounds, and the blind-test runs.
 3. **Rollback plan:** the one step from `rd.md`.
 4. **Changes:** `git diff --stat <base_sha>..HEAD` and `git log --oneline <base_sha>..HEAD`.
 5. **Verdict:** "Waiting for your review." Name the files most worth a human's time and why. For HIGH, say an
    architectural sign-off is required.
-6. To consider separately: the triage's RELATED and DATA-GAP items with its follow-up drafts (offer to file
+6. To consider separately: the proof's **Unrequested** code, the triage's RELATED and DATA-GAP items with its follow-up drafts (offer to file
    them where the user tracks work, and file nothing without a yes), the accessibility pass's "Needs a human"
    list, and non-blocking review findings.
 

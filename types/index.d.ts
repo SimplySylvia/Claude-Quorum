@@ -17,8 +17,11 @@ export type Section = 'tasks' | 'requirements' | 'checks' | 'rounds' | 'reviews'
 // One reviewer of the current round: `findings` is null until its reply is saved.
 export type Reviewer = { role: string; findings: Findings | null }
 
-// The prover's latest report (proof-final.md, else proof-build.md).
-export type Proof = { file: string; rev: string; result: string; rows: { id: string; check: string; result: string }[] }
+// A requirement's verdict in the final proof, and the evidence for it.
+export type Verdict = { n: string; verdict: 'MET' | 'PARTIAL' | 'MISSING' | 'CONTRADICTS'; evidence: string }
+
+// The prover's latest report (proof-final.md, else proof-build.md); only a final proof has verdicts.
+export type Proof = { file: string; rev: string; result: string; rows: { id: string; check: string; result: string }[]; verdicts: Verdict[] }
 
 // One eval.md row (or the fast checks) and its result in the latest proof; null when not run yet.
 export type Check = { id: string; label: string; result: 'PASS' | 'FAIL' | 'SKIPPED' | null }

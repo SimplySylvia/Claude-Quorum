@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# Check a task's spec, plan, and final proof against each other, before an agent spends tokens on them.
+#
+#   quorum-validate [--task SLUG] spec    rd.md and eval.md: every requirement has a Task checks row, every row
+#                                         names a requirement and has a command and a pass condition; vague words
+#                                         in a requirement are warnings
+#   quorum-validate [--task SLUG] plan    plan.md: every step names the requirements it serves, each one in rd.md,
+#                                         and every requirement has a step
+#   quorum-validate [--task SLUG] proof   proof-final.md's ## Requirements table: a verdict for every requirement,
+#                                         each MET with its evidence (PARTIAL, MISSING, and CONTRADICTS fail)
+#
+# Prints one line per problem, "ERROR: ..." or "WARN: ...", and exits 1 if there's an ERROR. A requirement is a
+# numbered line under rd.md's "## Requirements"; an eval.md row covers requirement N when its # is N, a letter
+# after N ("4b"), or a list holding one of those ("4, 5"), the rule the dashboard uses. Without --task, the slug
+# comes from quorum-active-task. Bash 3.2 compatible.
+set -uo pipefail
+
+die() { echo "quorum-validate: $*" >&2; exit 2; }
+HERE=$(cd "$(dirname "$0")" && pwd)
+
+task=""
+if [ "${1:-}" = "--task" ]; then task=${2:-}; [ -n "$task" ] || die "--task needs a slug"; shift 2; fi
+what=${1:-}
+case "$what" in spec|plan|proof) ;; *) die "usage: quorum-validate [--task SLUG] spec|plan|proof" ;; esac
+ROOT=$("$HERE/quorum-active-task" --root)
+[ -n "$task" ] || task=$("$HERE/quorum-active-task") || exit 2
+printf '%s' "$task" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$' || die "invalid slug: $task"
+DIR="$ROOT/.tasks/$task"
+[ -f "$DIR/rd.md" ] || die "no rd.md for task $task"
+
+# The lines of a "## <heading>" section (up to the next # or ## heading).
+section() { awk -v h="## $2" '$0 == h { on = 1; next } on && /^#{1,2}[ \t]/ { exit } on { print }' "$1"; }
+# The numbers of rd.md's requirements, one per line, and "N<TAB>text".
+requirements() { section "$DIR/rd.md" Requirements | sed -n 's/^\([0-9][0-9]*\)\.[[:space:]]\{1,\}\([^[:space:]].*\)$/\1	\2/p'; }
+# A markdown table's rows as tab-separated trimmed cells, the separator row left out; the header row comes first.
+table() { awk '/^[ \t]*\|/ { l = $0; sub(/^[ \t]*\|/, "", l); sub(/\|[ \t]*$/, "", l); n = split(l, c, "|"); out = ""; sep = 1
+            for (i = 1; i <= n; i++) { v = c[i]; gsub(/^[ \t]+|[ \t]+$/, "", v); if (v !~ /^:?-+:?$/) sep = 0; out = out (i > 1 ? "\t" : "") v }
+            if (!sep) print out }'; }
+# covers ID N: an eval or proof row id ID names requirement N.
+covers() {
+  local id
+  for id in $(printf '%s' "$1" | tr ',' ' '); do
+    case "$id" in "$2"|"$2"[a-z]) return 0 ;; esac
+  done
+  return 1
+}
+
+errors=0
+error() { echo "ERROR: $*"; errors=$((errors + 1)); }
+warn() { echo "WARN: $*"; }
+
+reqs=$(requirements)
+nums=$(printf '%s\n' "$reqs" | cut -f1 | sed '/^$/d')
+[ -n "$nums" ] || error "rd.md has no numbered requirements under ## Requirements"
+dups=$(printf '%s\n' "$nums" | sort | uniq -d | tr '\n' ' ')
+[ -z "$dups" ] || error "rd.md numbers requirement ${dups% } more than once"
+
+case "$what" in
+  spec)
+    [ -f "$DIR/eval.md" ] || die "no eval.md for task $task"
+    rows=$(section "$DIR/eval.md" "Task checks" | table)
+    header=$(printf '%s\n' "$rows" | head -n 1)
+    body=$(printf '%s\n' "$rows" | tail -n +2 | awk -F '\t' '$1 != ""')
+    # The Command and Passes when columns, by header (older eval.md files have no Requirement column).
+    ccol=$(printf '%s\n' "$header" | awk -F '\t' '{ for (i = 1; i <= NF; i++) if (tolower($i) == "command") print i }')
+    pcol=$(printf '%s\n' "$header" | awk -F '\t' '{ for (i = 1; i <= NF; i++) if (tolower($i) ~ /^passes/) print i }')
+    [ -n "$body" ] || error "eval.md has no rows under ## Task checks"
+    [ -n "$ccol" ] && [ -n "$pcol" ] || error "eval.md's Task checks table needs Command and Passes when columns"
+    for n in $nums; do
+      found=0
+      while IFS="$(printf '\t')" read -r id _; do covers "$id" "$n" && { found=1; break; }; done <<EOF
+$body
+EOF
+      [ "$found" = 1 ] || error "requirement $n has no row under eval.md's Task checks"
+    done
+    while IFS= read -r row; do
+      [ -n "$row" ] || continue
+      id=$(printf '%s' "$row" | cut -f1)
+      named=0; for n in $nums; do covers "$id" "$n" && named=1; done
+      [ "$id" = fast ] || [ "$named" = 1 ] || error "eval.md row $id names no requirement in rd.md"
+      if [ -n "$ccol" ] && [ -n "$pcol" ]; then
+        cmd=$(printf '%s' "$row" | cut -f"$ccol" | tr -d '`[:space:]')
+        pass=$(printf '%s' "$row" | cut -f"$pcol" | tr -d '[:space:]')
+        [ -n "$cmd" ] || error "eval.md row $id has no command"
+        [ -n "$pass" ] || error "eval.md row $id doesn't say what passing looks like"
+      fi
+    done <<EOF
+$body
+EOF
+    # Vague words, outside `code`: a reviewer can't check them.
+    vague='fast|faster|quick|quickly|user-friendly|intuitive|robust|seamless|seamlessly|easy|easily|efficient|efficiently|appropriate|appropriately|properly|reasonable|as needed|if possible|etc|and/or|nice|clean|modern|flexible|scalable|performant|better'
+    while IFS="$(printf '\t')" read -r n text; do
+      [ -n "$n" ] || continue
+      # shellcheck disable=SC2016  # the backticks are Markdown code spans, not a command
+      words=$(printf '%s' "$text" | sed 's/`[^`]*`//g' | tr '[:upper:]' '[:lower:]' \
+        | grep -Eo "(^|[^a-z-])($vague)([^a-z-]|$)" | sed -E 's/^[^a-z]*//; s/[^a-z/]*$//' | sort -u | tr '\n' ',' | sed 's/,$//; s/,/, /g')
+      [ -z "$words" ] || warn "requirement $n says \"$words\": say what a check would measure instead"
+    done <<EOF
+$reqs
+EOF
+    ;;
+
+  plan)
+    [ -f "$DIR/plan.md" ] || die "no plan.md for task $task"
+    steps=$(section "$DIR/plan.md" Steps | grep -E '^[0-9]+\.[[:space:]]')
+    [ -n "$steps" ] || error "plan.md has no numbered steps under ## Steps"
+    served=""
+    while IFS= read -r step; do
+      [ -n "$step" ] || continue
+      s=${step%%.*}
+      list=$(printf '%s' "$step" | sed -n 's/.*[Rr]equirements\{0,1\}:[[:space:]]*\([0-9][0-9a-z, ]*\).*/\1/p')
+      if [ -z "$list" ]; then error "plan.md step $s names no requirements (\"requirements: 1, 2\")"; continue; fi
+      for r in $(printf '%s' "$list" | tr ',' ' '); do
+        r=${r%[a-z]}
+        printf '%s\n' "$nums" | grep -qx "$r" || error "plan.md step $s names requirement $r, which rd.md doesn't have"
+        served="$served $r"
+      done
+    done <<EOF
+$steps
+EOF
+    for n in $nums; do
+      case " $served " in *" $n "*) ;; *) error "requirement $n has no step in plan.md" ;; esac
+    done ;;
+
+  proof)
+    [ -f "$DIR/proof-final.md" ] || die "no proof-final.md for task $task"
+    rows=$(section "$DIR/proof-final.md" Requirements | table | tail -n +2 | awk -F '\t' '$1 != ""')
+    [ -n "$rows" ] || error "proof-final.md has no ## Requirements table with a verdict for each requirement"
+    for n in $nums; do
+      row=$(printf '%s\n' "$rows" | awk -F '\t' -v n="$n" '$1 == n || $1 == "R" n')
+      if [ -z "$row" ]; then error "proof-final.md gives requirement $n no verdict"; continue; fi
+      verdict=$(printf '%s' "$row" | cut -f2 | tr -d '*[:space:]' | tr '[:lower:]' '[:upper:]')
+      evidence=$(printf '%s' "$row" | cut -f3- | tr -d '[:space:]')
+      case "$verdict" in
+        MET) [ -n "$evidence" ] || error "requirement $n is MET with no evidence" ;;
+        PARTIAL|MISSING|CONTRADICTS) error "requirement $n is $verdict: $(printf '%s' "$row" | cut -f3-)" ;;
+        *) error "requirement $n's verdict \"$verdict\" isn't MET, PARTIAL, MISSING, or CONTRADICTS" ;;
+      esac
+    done ;;
+esac
+
+[ "$errors" -eq 0 ]

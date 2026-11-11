@@ -16,7 +16,7 @@ import {
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-10' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-11' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-3' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
 const reviews = atom({ plugin: 'quorum', key: 'reviews' } as const, [], { shape: 'reviews-1' })
@@ -798,7 +798,7 @@ export const register: Register = (on, options) => {
     // No proof file, but the round log says every check passed: mark them, muted, as reported rather than proven.
     const isReported = !t.proof && isReportedPass(t.checksNote)
     const REPORTED: readonly [string, string] = ['✓', 'subtle']
-    const requirements = (spec?.requirements ?? []).map(r => ({ ...r, ...requirementState(r.n, t.checks) }))
+    const requirements = (spec?.requirements ?? []).map(r => ({ ...r, ...requirementState(r.n, t.checks, t.proof?.verdicts) }))
     const met = requirements.filter(r => r.state === 'pass').length
 
     // The Now card's border says whose move it is: amber when the task waits on the person, red when it's stuck.
@@ -925,6 +925,8 @@ export const register: Register = (on, options) => {
                     <Text color={color}>{glyph} </Text>
                     <Text dimColor>{r.n}  </Text>
                     <Text>{r.title}</Text>
+                    {r.verdict && r.verdict.verdict !== 'MET' ? <Text color="error">  {r.verdict.verdict}</Text> : null}
+                    {r.verdict?.evidence ? <Text dimColor>  {r.verdict.evidence}</Text> : null}
                     {r.state === 'none' ? <Text color="warning">  no check in eval.md</Text> : null}
                   </Text>
                 )

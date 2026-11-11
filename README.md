@@ -289,6 +289,13 @@ confirm. The tier decides how many layers the task gets:
 - **Proof before done.** The Stop hook blocks finishing during a task until the repo's fast checks pass; after 3
   failures in a row it lets you go and marks the task `ESCALATED`. A task can't be marked `READY` or
   `AWAITING-HUMAN` without the prover's `proof-final.md`, run at the current commit, with no failed check.
+- **Every requirement gets a verdict.** The final proof marks each requirement in `rd.md` as MET, PARTIAL,
+  MISSING, or CONTRADICTS. MET needs evidence: the checks that pass, and the `file:line` that does the work, real
+  and wired in rather than a stub. Anything but MET goes back to the review loop. The proof also lists code no
+  requirement asked for. The dashboard's Requirements section shows each verdict, and the PR draft cites them.
+- **The spec and plan are linted first.** `quorum-validate` checks, without a model, that every requirement has
+  a check and every check a requirement, and that every plan step names the requirements it serves. It also
+  flags vague words. The reviewers start only after that passes.
 - **The checks can't be weakened mid-task.** While a task builds or is in review, a hook blocks edits to the task's
   own `rd.md` and `eval.md` (once its build has started), `verify-completion.sh`, CI workflows, and the usual test, lint, type-check, and format
   configs. It also blocks
@@ -400,7 +407,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `agents/` | `researcher`, `spec-reviewer`, `planner`, `builder`, `prover`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `verifier-voter`, `security-reviewer`, `blind-user`, `friction-triager`, `pr-writer` |
 | `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `protect-checks.sh`, `secret-guard.sh` (both read commands with `shell-words.sh`), `stop-verify.sh`, `record-pr.sh`, and `dashboard/`, the dashboard's hooks module |
 | `types/` | The type contract for the values the dashboard keeps in the session |
-| `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state`, `quorum-reviews`, `quorum-lessons`, `quorum-secrets`, `quorum-git` (on the Bash PATH while the plugin is enabled) |
+| `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state`, `quorum-reviews`, `quorum-lessons`, `quorum-secrets`, `quorum-validate`, `quorum-git` (on the Bash PATH while the plugin is enabled) |
 | `libexec/` | `git`, which `quorum-git` puts first on PATH when it runs a real git by full path, so git's own child processes (`git worktree add` starts some) reach it too |
 | `tests/` | bats tests for every hook and helper, `claude plugin test` tests for the dashboard, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
 | `evals/` | `claude plugin eval` suite: risk tiering, one case per agent, voter false-alarm drops, blind-mode source reads, a near-miss |

@@ -58,3 +58,26 @@ Working tree unchanged: yes
 
 Leave out `## Failures` when nothing failed. Evidence is a short quote from the real output, never a summary you
 wrote instead of running it.
+
+## Final proof: a verdict for each requirement
+When your prompt says **Final proof**, also read `.tasks/<slug>/rd.md` and the change (`git diff <base>..HEAD`, the
+base in your prompt), and give each numbered requirement one verdict, before `Working tree unchanged`:
+
+```
+## Requirements
+| Req | Verdict | Evidence |
+|---|---|---|
+| 1 | MET | rows 1, 1b pass; `app/report.py:41` export_csv() is called from main() at `app/report.py:58` |
+| 2 | PARTIAL | row 2 passes, but `app/report.py:44` quotes commas and not quotes inside a field |
+
+Unrequested: `app/report.py:70` a --tsv flag no requirement asks for
+```
+
+- **MET:** its rows pass, and the code that does it exists, is substantive (no stub, TODO, or hard-coded answer that
+  only satisfies the check), and is wired in: reached from where a user or caller starts. Cite each with `file:line`.
+- **PARTIAL:** some of it is met; say what isn't. **MISSING:** not there, or only a stub. **CONTRADICTS:** the code
+  does something the requirement rules out, even if a check passes.
+- **Unrequested:** code in the diff no requirement asks for, with `file:line`, or "none". It doesn't fail the proof.
+
+Every verdict but MET counts as a failure in your `Result:` line, and gets a `## Failures` entry saying what's
+missing. `quorum-state` won't mark the task done without a MET verdict, with evidence, for every requirement.

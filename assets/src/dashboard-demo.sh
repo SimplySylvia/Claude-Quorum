@@ -310,6 +310,16 @@ Result: ALL PASS
 | 3 | python3 app/report.py export tests/data/empty.json | PASS | header only |
 | 4 | grep -n 'export' README.md | PASS | README.md:14 |
 
+## Requirements
+| Req | Verdict | Evidence |
+|---|---|---|
+| 1 | MET | rows 1, 1b pass; \`app/report.py:41\` export_csv() is called from main() at \`app/report.py:58\` |
+| 2 | MET | row 2 passes; \`app/report.py:44\` writes through csv.writer, which quotes commas and quotes |
+| 3 | MET | row 3 passes; \`app/report.py:43\` writes the header before the loop |
+| 4 | MET | row 4: \`README.md:14\` lists \`export\` with its DATA_FILE argument |
+
+Unrequested: none.
+
 Working tree unchanged: yes
 MD
   state set status AWAITING-HUMAN

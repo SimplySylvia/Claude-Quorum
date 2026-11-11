@@ -147,17 +147,26 @@ Tell the user to pick one and run `/quorum:spec-and-eval --redesign <slug>`. The
 
 ### Stage 8 summary
 
-1. **Verification proof:** start `quorum:prover` on all of `eval.md` (as in `/quorum:build` step 4), save its reply
-   verbatim to `.tasks/<slug>/proof-final.md`, and show it. `quorum-state` refuses `READY` and `AWAITING-HUMAN`
-   without this file, at HEAD, with no failed check, so save it before setting the status. If anything fails, say so
-   and don't mark the task READY.
+1. **Verification proof:** start `quorum:prover` with:
+
+   > Final proof. Task `<slug>`. Base commit `<quorum-state get base_sha>`. Run `bash .claude/hooks/verify-completion.sh`
+   > and every row in `.tasks/<slug>/eval.md`, then give each requirement in `.tasks/<slug>/rd.md` a verdict. Read
+   > `CLAUDE.md` first.
+
+   Save its reply verbatim to `.tasks/<slug>/proof-final.md`, and show it. `quorum-state` refuses `READY` and `AWAITING-HUMAN`
+   without this file, at HEAD, with no failed check and every requirement MET, so save it before setting the status. If a requirement's verdict is
+   PARTIAL, MISSING, or CONTRADICTS, it goes back to the review loop: push each to `pending_findings` as one line,
+   `[IMPORTANT] <its file:line, or .tasks/<slug>/rd.md> — Pattern Category: Unmet requirement — requirement <n>:
+   <the evidence>`, then `quorum-state set status IN_REVIEW`. The loop fixes it first and reviews the fix, under its
+   round cap. If
+   anything else fails, say so and don't mark the task READY.
 2. **Risk tier**, the rounds it took, and whether it took the fast path (no plan round, one reviewer).
 3. **Rollback plan:** the one step from `rd.md`.
 4. **Changes:** `git diff --stat <base_sha>..HEAD` and `git log --oneline <base_sha>..HEAD`.
 5. **Verdict:** LOW: "Ready to merge." MEDIUM/HIGH (from `/quorum:blind-test`): "Waiting for your review", with
    the files most worth reading.
-6. Non-blocking findings (`[NIT]`, `[PRE-EXISTING]`) and any "Needs a human" items (accessibility, docs outside
-   the repo), to consider separately.
+6. The proof's **Unrequested** code, non-blocking findings (`[NIT]`, `[PRE-EXISTING]`), and any "Needs a human"
+   items (accessibility, docs outside the repo), to consider separately.
 
 After a LOW summary, suggest lessons (step 7), then `/quorum:pr-draft`.
 

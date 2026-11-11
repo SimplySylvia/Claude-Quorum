@@ -24,6 +24,9 @@ from the base to `HEAD`.
   `gh pr list --state merged --limit 5 --json body` if `gh` works) and follow their sections and tone.
 - **Only claim what's proven.** The test plan lists checks the proof file shows passing, with their results
   (for example "10/10 runs, retries off"). A check that wasn't run is listed as not run.
+- **What each requirement rests on.** `proof-final.md`'s `## Requirements` table gives each requirement its verdict
+  and evidence (`file:line` and the checks that show it). Use it for the description's list of what changed, and
+  mention any **Unrequested** code it names, so a reviewer can ask about it.
 - Link the ticket if `rd.md` names one. Name files and functions; don't paste code.
 - No data copied from the app's screens or test fixtures into the description.
 - No attribution lines ("Generated with", "Co-Authored-By", tool or model names). If the user wants one, they add it.

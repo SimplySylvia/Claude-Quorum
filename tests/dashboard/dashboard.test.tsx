@@ -251,6 +251,12 @@ describe('task helpers', () => {
     expect(requirementState('6', checks)).toEqual({ checks: 2, state: 'fail' })
     expect(requirementState('16', checks)).toEqual({ checks: 0, state: 'none' })
     expect(requirementState('4', joinChecks([{ id: '4', label: '' }], null))).toEqual({ checks: 1, state: 'open' })
+    // A final proof's verdict wins over the checks: a passing check doesn't make a PARTIAL requirement met.
+    const verdicts = parseProof('Proof: x at 1a2b3c4\n\n## Requirements\n| Req | Verdict | Evidence |\n|---|---|---|\n| 5 | **PARTIAL** | no quoting |\n| R6 | MET | `a.py:3` |\n| 7 | maybe | ? |\n', 'proof-final.md').verdicts
+    expect(verdicts).toEqual([{ n: '5', verdict: 'PARTIAL', evidence: 'no quoting' }, { n: '6', verdict: 'MET', evidence: 'a.py:3' }])
+    expect(requirementState('5', checks, verdicts).state).toBe('fail')
+    expect(requirementState('6', checks, verdicts).state).toBe('pass')
+    expect(requirementState('16', checks, verdicts).state).toBe('none')
   })
 
   test('reads the branch\'s PR from gh, and says what it means', () => {
@@ -903,6 +909,23 @@ test('the pane opens with what the task is: title, goal, requirements, and what 
   expect(await pane.find({ type: 'Text', text: /^2\/3 met$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^✗ 2  Commas are quoted$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^✓ 3  Docs: add export to README\.md\.$/ })).toBeDefined()
+  await pane.unmount()
+
+  // The final proof's verdicts decide, with their evidence, even where every check passed.
+  const FINAL = `${PROOF.replace('Result: 1 FAIL', 'Result: 1 FAIL').replace('| FAIL | 1 failed |', '| PASS | 1 passed |')}
+## Requirements
+| Req | Verdict | Evidence |
+|---|---|---|
+| 1 | MET | rows 1 pass; \`app/export.py:12\` is called from main() |
+| 2 | PARTIAL | quotes commas, not quotes inside a field |
+| 3 | MET | README.md:40 |
+`
+  files['.tasks/export-csv/proof-final.md'] = FINAL
+  await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/proof-final.md', content: FINAL })
+  pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ type: 'Text', text: /^2\/3 met$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✗ 2  Commas are quoted  PARTIAL  quotes commas, not quotes inside a field$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✓ 1  export writes a CSV of every customer\.  rows 1 pass; app\/export\.py:12 is called from main\(\)$/ })).toBeDefined()
   await pane.unmount()
 })
 

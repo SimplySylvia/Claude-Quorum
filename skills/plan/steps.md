@@ -37,7 +37,9 @@ Start `quorum:planner` with:
 > `.tasks/<slug>/rd.md`, `.tasks/<slug>/eval.md`, `.tasks/<slug>/research.md` if it exists, and
 > `.tasks/<slug>/mockup.html` if it exists. <the template, with TITLE, SLUG, and RISK filled in>
 
-Save its reply verbatim to `.tasks/<slug>/plan.md`.
+Save its reply verbatim to `.tasks/<slug>/plan.md`. Then `quorum-validate --task <slug> plan`: every step must name
+the requirements it serves, and every requirement must have a step. If it reports an `ERROR`, start the planner
+once more with those lines as findings to answer, and save its reply over `plan.md`, before the reviewers see it.
 
 ## 4. Review the plan
 

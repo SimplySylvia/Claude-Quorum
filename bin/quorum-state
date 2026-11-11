@@ -13,7 +13,8 @@
 #                                                    arguments (with \n read as a newline), else stdin
 #
 # Setting status READY or AWAITING-HUMAN needs a proof: .tasks/<slug>/proof-final.md from the prover, run at the
-# current HEAD, with no failed check ("Result: ALL PASS" or "<n> SKIPPED"). `pr` is the task's pull request URL.
+# current HEAD, with no failed check ("Result: ALL PASS" or "<n> SKIPPED"), and, when the task has an rd.md, a MET
+# verdict with evidence for each of its requirements (quorum-validate proof). `pr` is the task's pull request URL.
 # `reviewer_model` and `helper_model` are the models chosen for the task's agents (skills/pipeline-laws/models.md):
 # `inherit` or a value the Agent tool's `model` parameter accepts. `fast: true` marks a LOW task on the fast path
 # (/quorum:run --fast): no plan round, and one reviewer. `worktree` is the git worktree the task's code is in, when
@@ -146,6 +147,11 @@ require_proof() { # status
   [ -n "$code" ] && [ -d "$code" ] || code=$("$HERE/quorum-active-task" --code)
   if head=$(git -C "$code" rev-parse HEAD 2>/dev/null); then
     case "$head" in "$rev"*) ;; *) die "proof-final.md is for $rev, but HEAD is $(printf '%s' "$head" | cut -c1-12); run the prover again before $1" ;; esac
+  fi
+  if [ -f "$ROOT/.tasks/$task/rd.md" ]; then
+    local unmet
+    unmet=$("$HERE/quorum-validate" --task "$task" proof 2>&1) || die "can't set $1: not every requirement is met:
+$unmet"
   fi
 }
 

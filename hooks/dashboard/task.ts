@@ -2,7 +2,7 @@
 // the stage rail, count findings the way bin/quorum-findings does, and read the specs, proofs, and reports the skills
 // save in .tasks/<slug>/. No `$` here, so tests can call them directly.
 
-import type { Blind, Check, Findings, Frontmatter, KeptFinding, Proof, PullRequest, QuorumAgent, Requirement, Reviewer, Section, Snapshot, Spec, Spend, Stage } from '../../types'
+import type { Blind, Check, Findings, Frontmatter, KeptFinding, Proof, PullRequest, QuorumAgent, Requirement, Reviewer, Section, Snapshot, Spec, Spend, Stage, Verdict } from '../../types'
 
 export const STAGES = ['Spec', 'Plan', 'Build', 'Review', 'Blind test', 'PR'] as const
 
@@ -133,16 +133,21 @@ export function evalRows(evalMd: string): { id: string; label: string }[] {
     .filter(r => r.id !== '')
 }
 
-// The prover's report: "Proof: <slug> at <rev>", "Result: ...", and its | # | Check | Result | Evidence | table.
+// The prover's report: "Proof: <slug> at <rev>", "Result: ...", its | # | Check | Result | Evidence | table, and in
+// a final proof its | Req | Verdict | Evidence | table under "## Requirements".
 export function parseProof(text: string, file: string): Proof {
   const rows = tableRows(text.split('\n'))
     .map(cells => ({ id: cells[0] ?? '', check: cells[1] ?? '', result: (cells[2] ?? '').toUpperCase() }))
     .filter(r => r.id !== '' && /^(PASS|FAIL|SKIPPED)$/.test(r.result))
+  const verdicts = tableRows(section(text, 'Requirements'))
+    .map(cells => ({ n: (cells[0] ?? '').replace(/^R/, ''), verdict: (cells[1] ?? '').replace(/\*/g, '').toUpperCase(), evidence: plain(cells[2] ?? '') }))
+    .filter((v): v is Verdict => /^\d+$/.test(v.n) && /^(MET|PARTIAL|MISSING|CONTRADICTS)$/.test(v.verdict))
   return {
     file,
     rev: /^Proof:.* at (\S+)/m.exec(text)?.[1] ?? '',
     result: /^Result:\s*(.+)$/m.exec(text)?.[1]?.trim() ?? '',
     rows,
+    verdicts,
   }
 }
 
@@ -285,9 +290,12 @@ export function parseSpec(rd: string): Spec | null {
   }
 }
 
-// A requirement's checks: the eval.md rows whose # names it ("4", "4, 5", "4b"), and how they stand.
-export function requirementState(n: string, checks: Check[]): { checks: number; state: 'pass' | 'fail' | 'open' | 'none' } {
+// A requirement's checks: the eval.md rows whose # names it ("4", "4, 5", "4b"), and how they stand. A final
+// proof's verdict decides instead when there is one: MET passes, anything else fails, with its evidence.
+export function requirementState(n: string, checks: Check[], verdicts: Verdict[] = []): { checks: number; state: 'pass' | 'fail' | 'open' | 'none'; verdict?: Verdict } {
   const mine = checks.filter(c => c.id.split(/[,\s]+/).some(id => new RegExp(`^${n}[a-z]?$`).test(id)))
+  const verdict = verdicts.find(v => v.n === n)
+  if (verdict) return { checks: mine.length, state: verdict.verdict === 'MET' ? 'pass' : 'fail', verdict }
   if (mine.length === 0) return { checks: 0, state: 'none' }
   if (mine.some(c => c.result === 'FAIL')) return { checks: mine.length, state: 'fail' }
   return { checks: mine.length, state: mine.every(c => c.result === 'PASS') ? 'pass' : 'open' }
@@ -482,7 +490,7 @@ export const shortRange = (range: string) => range.replace(/\b([0-9a-f]{7})[0-9a
 
 // Which sections open by themselves: those holding a problem, so a fold never hides one.
 export function openByDefault(t: Snapshot): Record<Section, boolean> {
-  const requirements = (t.spec?.requirements ?? []).map(r => requirementState(r.n, t.checks).state)
+  const requirements = (t.spec?.requirements ?? []).map(r => requirementState(r.n, t.checks, t.proof?.verdicts).state)
   return {
     tasks: false,
     requirements: requirements.some(state => state === 'fail' || state === 'none'),

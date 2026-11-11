@@ -33,6 +33,23 @@ copy with `/plugin marketplace update`.
   `[PRE-EXISTING]` findings and ones citing `.tasks/`. The voter reads `in-scope.md`; `out-of-scope.md` lists each
   drop with its reason, and the report shows them.
 
+- **A verdict for every requirement.** The final proof gives each requirement in `rd.md` a verdict:
+  - **MET** needs evidence: its checks pass, and the `file:line` that does the work is substantive and wired in,
+    not a stub.
+  - **PARTIAL**, **MISSING**, and **CONTRADICTS** count as failures.
+
+  It also lists **Unrequested** code. `quorum-state` refuses `READY` and `AWAITING-HUMAN` until every requirement
+  is MET. An unmet one goes back to the review loop as a pending `[IMPORTANT]` finding ("Unmet requirement"),
+  under the round cap. The dashboard's Requirements section shows each verdict with its evidence, and the PR
+  writer uses them.
+- **`quorum-validate`, a lint for the spec, the plan, and the proof.**
+  - `spec`: every requirement has an `eval.md` row, and every row names a requirement, a command, and what passing
+    looks like; vague words are warnings.
+  - `plan`: every step names the requirements it serves, and every requirement has a step.
+  - `proof`: every requirement is MET with evidence.
+
+  `spec-and-eval` runs it before the spec reviewers, and `plan` before the plan reviewers.
+
 ### Fixed
 
 - **A LOW task without `--fast` gets its spec reviewers again.** The spec steps' fast-path rule didn't name its
