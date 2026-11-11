@@ -36,3 +36,56 @@ commit_flags() {
   done
   return 1
 }
+
+# write_targets CMD: the paths CMD writes, one per line: a > or >> redirect's target, the arguments of tee, cp, mv,
+# rm, truncate, ln, and install, and the files of sed -i and perl -i.
+write_targets() {
+  local stage prog inplace prev a target writers=" tee cp mv rm truncate ln install "
+  while IFS= read -r stage; do
+    set -f
+    # shellcheck disable=SC2086  # word-splitting the stage is the point
+    set -- $stage
+    set +f
+    while [ $# -gt 0 ]; do case "$1" in *=*|sudo|env|command|time|nohup) shift ;; *) break ;; esac; done
+    [ $# -gt 0 ] || continue
+    prog=${1##*/}; shift
+    inplace=0; case "$prog" in sed|perl) for a in "$@"; do case "$a" in -i|-i*|--in-place*|-pi*) inplace=1 ;; esac; done ;; esac
+    prev=""
+    for a in "$@"; do
+      target=""
+      case "$a" in
+        '>'|'>>'|'>|'|'1>'|'2>'|'&>') ;;
+        '>>'?*) target=${a#>>} ;;
+        '>'?*) target=${a#>} ;;
+        *) case "$prev" in '>'|'>>'|'>|'|'1>'|'2>'|'&>') target=$a ;; esac
+           if [ -z "$target" ] && { case "$writers" in *" $prog "*) true ;; *) false ;; esac || [ "$inplace" = 1 ]; }; then target=$a; fi ;;
+      esac
+      [ -z "$target" ] || printf '%s\n' "$target"
+      prev=$a
+    done
+  done <<EOF
+$(stages "$1")
+EOF
+}
+
+# git_subcommand STAGE: if STAGE runs git (git, quorum-git, or a path to git), print its subcommand; else exit 1.
+git_subcommand() {
+  local seen_git=0 want_arg=0
+  set -f
+  # shellcheck disable=SC2086  # word-splitting the stage is the point
+  set -- $1
+  set +f
+  while [ $# -gt 0 ]; do
+    if [ "$seen_git" = 0 ]; then
+      case "$1" in *=*|sudo|env|command|time|nohup) shift; continue ;; esac
+      case "${1##*/}" in git|quorum-git) seen_git=1; shift; continue ;; *) return 1 ;; esac
+    fi
+    if [ "$want_arg" = 1 ]; then want_arg=0; shift; continue; fi
+    case "$1" in
+      -C|-c|--git-dir|--work-tree|--namespace|--exec-path) want_arg=1; shift ;;
+      -*) shift ;;
+      *) printf '%s\n' "$1"; return 0 ;;
+    esac
+  done
+  return 1
+}

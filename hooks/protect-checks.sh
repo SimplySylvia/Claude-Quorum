@@ -144,31 +144,10 @@ case "$tool" in
     done <<EOF
 $(bare_stages "$cmd")
 EOF
-    writers=" tee cp mv rm truncate ln install "
-    while IFS= read -r stage; do
-      set -f
-      # shellcheck disable=SC2086  # word-splitting the stage is the point
-      set -- $stage
-      set +f
-      while [ $# -gt 0 ]; do case "$1" in *=*|sudo|env|command|time|nohup) shift ;; *) break ;; esac; done
-      [ $# -gt 0 ] || continue
-      prog=${1##*/}; shift
-      inplace=0; case "$prog" in sed|perl) for a in "$@"; do case "$a" in -i|-i*|--in-place*|-pi*) inplace=1 ;; esac; done ;; esac
-      prev=""
-      for a in "$@"; do
-        target=""
-        case "$a" in
-          '>'|'>>'|'>|'|'1>'|'2>'|'&>') ;;
-          '>>'?*) target=${a#>>} ;;
-          '>'?*) target=${a#>} ;;
-          *) case "$prev" in '>'|'>>'|'>|'|'1>'|'2>'|'&>') target=$a ;; esac
-             if [ -z "$target" ] && { case "$writers" in *" $prog "*) true ;; *) false ;; esac || [ "$inplace" = 1 ]; }; then target=$a; fi ;;
-        esac
-        if [ -n "$target" ] && rel=$(protected "$target"); then block "this command writes $rel, a protected check file."; fi
-        prev=$a
-      done
+    while IFS= read -r target; do
+      if [ -n "$target" ] && rel=$(protected "$target"); then block "this command writes $rel, a protected check file."; fi
     done <<EOF
-$(stages "$cmd")
+$(write_targets "$cmd")
 EOF
     ;;
 esac
