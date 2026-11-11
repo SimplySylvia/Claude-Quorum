@@ -86,11 +86,12 @@ Then, in the repo you want to protect:
 Or let one command take a task through every stage, stopping only where you must decide:
 
 ```
-/quorum:run Add a CSV export to the sales report   # spec → plan → build → review → blind test → PR draft
-/quorum:run --fast Fix the typo in the help text   # LOW only: spec → build → one reviewer → PR draft
-/quorum:run --worktree Add a CSV export             # build in its own git worktree; keep working here meanwhile
-/quorum:run --bug summary crashes on a missing file  # reproduce it first; done when it's proven fixed
-/quorum:run                                        # continue the active task from wherever it stopped
+/quorum:run Add a CSV export to the sales report          # spec → plan → build → review → blind test → PR draft
+/quorum:run --fast Fix the typo in the help text          # LOW only: spec → build → one reviewer → PR draft
+/quorum:run --worktree Add a CSV export                   # build in its own git worktree; keep working here meanwhile
+/quorum:run --bug summary crashes on a missing file       # reproduce it first; done when it's proven fixed
+/quorum:run --deep-research Add OAuth login to the API    # research the approach with several lensed researchers
+/quorum:run                                               # continue the active task from wherever it stopped
 ```
 
 See [Running the whole pipeline](#running-the-whole-pipeline).
@@ -105,6 +106,17 @@ To try Quorum's reviewers first, no setup needed, review a branch or pull reques
 ```
 
 See [Reviewing any diff](#reviewing-any-diff).
+
+To decide whether something is worth doing, and which way, before there's a task:
+
+```
+/quorum:research Is it worth caching the parsed sales data, and how?    # researchers in parallel, every claim checked
+/quorum:research --effort quick Which stdlib module should export CSV?  # 2 researchers, 1 round
+/quorum:spec-and-eval --from-research <slug> 1                          # start a task from one of its candidate tasks
+```
+
+It writes only `.tasks/research-<slug>/`: a report with viability, candidate tasks, assumptions to confirm, and
+remaining gaps, and never a task. See [Researching before you build](#researching-before-you-build).
 
 ## How it works
 
