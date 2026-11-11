@@ -16,6 +16,8 @@
 #   quorum-branch merged                  tasks whose worktree is still there though their work merged: SLUG<TAB>PATH.
 #                                         Merged means GitHub says the task's `pr` merged (gh), or else that its
 #                                         branch has commits and all of them are on the default branch
+#   quorum-branch is-merged SLUG          exit 0 if the task's work merged, by the same test, with or without a
+#                                         worktree (the map's task graph waits on it)
 #   quorum-branch range                   the diff range to review now: base_sha..HEAD before any builder round,
 #                                         then round_shas[-1]..HEAD (convergence Rule 2: new lines only)
 #   quorum-branch record                  push HEAD onto round_shas (call just before each builder run)
@@ -42,6 +44,24 @@ default_branch() {
     if git show-ref --verify --quiet "refs/heads/$b"; then printf '%s\n' "$b"; return; fi
   done
   git branch --show-current
+}
+
+# is_merged SLUG: GitHub says the task's `pr` merged (gh), or else its branch (the worktree's, or feat/ or fix/SLUG)
+# has commits and all of them are on the default branch. A squash merge shows only through gh.
+is_merged() {
+  local slug=$1 pr path branch base
+  pr=$("$HERE/quorum-state" --task "$slug" get pr 2>/dev/null) || return 1
+  if [ -n "$pr" ] && command -v gh >/dev/null 2>&1; then
+    [ "$(gh pr view "$pr" --json state -q .state 2>/dev/null)" = MERGED ]; return
+  fi
+  path=$("$HERE/quorum-state" --task "$slug" get worktree)
+  if [ -n "$path" ] && [ -d "$path" ]; then branch=$(git -C "$path" branch --show-current 2>/dev/null)
+  elif [ "$("$HERE/quorum-state" --task "$slug" get bug)" = true ]; then branch=fix/$slug
+  else branch=feat/$slug
+  fi
+  base=$("$HERE/quorum-state" --task "$slug" get base_sha)
+  [ -n "$branch" ] && [ -n "$base" ] && git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null \
+    && [ "$(git rev-parse "$branch")" != "$base" ] && git merge-base --is-ancestor "$branch" "$(default_branch)" 2>/dev/null
 }
 
 case "${1:-}" in
@@ -141,22 +161,15 @@ case "${1:-}" in
     echo "removed $path (the branch stays)" ;;
 
   merged)
-    def=$(default_branch)
     "$HERE/quorum-active-task" --list | while IFS="$(printf '\t')" read -r slug _ path; do
       [ -n "$path" ] && [ -d "$path" ] || continue
-      pr=$("$HERE/quorum-state" --task "$slug" get pr)
-      merged=0
-      if [ -n "$pr" ] && command -v gh >/dev/null 2>&1; then
-        [ "$(gh pr view "$pr" --json state -q .state 2>/dev/null)" = MERGED ] && merged=1
-      else
-        branch=$(git -C "$path" branch --show-current 2>/dev/null)
-        base=$("$HERE/quorum-state" --task "$slug" get base_sha)
-        if [ -n "$branch" ] && [ -n "$base" ] && [ "$(git rev-parse "$branch")" != "$base" ] \
-          && git merge-base --is-ancestor "$branch" "$def" 2>/dev/null; then merged=1; fi
-      fi
-      [ "$merged" = 1 ] && printf '%s\t%s\n' "$slug" "$path"
+      if is_merged "$slug"; then printf '%s\t%s\n' "$slug" "$path"; fi
     done
     exit 0 ;;
+
+  is-merged)
+    slug=${2:-}; [ -n "$slug" ] || die "is-merged needs a slug"
+    is_merged "$slug" ;;
 
   range)
     base=$("$HERE/quorum-state" get base_sha)
@@ -171,5 +184,5 @@ case "${1:-}" in
     "$HERE/quorum-state" push round_shas "$(git rev-parse HEAD)"
     git rev-parse HEAD ;;
 
-  *) die "usage: quorum-branch default | start SLUG [--fix] [--worktree] | remove SLUG | merged | range | record" ;;
+  *) die "usage: quorum-branch default | start SLUG [--fix] [--worktree] | remove SLUG | merged | is-merged SLUG | range | record" ;;
 esac
