@@ -1,0 +1,435 @@
+#!/usr/bin/env bash
+# Read and update a map: an effort too big for one task, charted as decision tickets before any task exists
+# (/quorum:map). A map plans and never builds; when every ticket is closed, it hands its tasks to
+# /quorum:spec-and-eval --from-map.
+#
+# A map lives in the main working tree's .tasks/map-<slug>/: map.md (Destination, Notes, Decisions so far, Not yet
+# specified, Out of scope), one file per ticket in tickets/NN-<name>.md, and, once it's cleared, tasks.md. A ticket
+# file is its title, three lines, then its question:
+#
+#   # <title>
+#
+#   Type: grilling | research | prototype | task
+#   Blocked by: none | NN, NN
+#   Status: open | claimed | resolved | out-of-scope
+#
+#   ## Question
+#
+# tasks.md lists the tasks the map hands off, one per line:
+#
+#   1. <a request for /quorum:spec-and-eval> · tier: MEDIUM · blocked by: none · decisions: 01, 03
+#
+#   quorum-map list                                  every map: SLUG<TAB>OPEN<TAB>RESOLVED<TAB>FRONTIER (counts)
+#   quorum-map --map SLUG init [TITLE]               create .tasks/map-SLUG/ with map.md from the template
+#   quorum-map --map SLUG new TYPE TITLE QUESTION    add an open ticket with no blockers; print its number. \n in
+#                                                    QUESTION reads as a newline
+#   quorum-map --map SLUG block NN BLOCKER...        NN waits for each BLOCKER; refuses a missing ticket or a cycle
+#   quorum-map --map SLUG tickets                    NN<TAB>TYPE<TAB>STATUS<TAB>BLOCKED_BY<TAB>TITLE, in order
+#   quorum-map --map SLUG frontier                   open tickets whose blockers are all closed, one per line
+#   quorum-map --map SLUG claim NN                   mark a frontier ticket claimed, before any work on it
+#   quorum-map --map SLUG release NN                 put a claimed ticket back on the frontier
+#   quorum-map --map SLUG resolve NN BY GIST [ANSWER]
+#                                                    close a claimed ticket: ANSWER (else stdin) under "## Answer",
+#                                                    "Answered by: BY" (user or agent), and "- [title](link): GIST"
+#                                                    in map.md's Decisions so far. Only the user answers a grilling
+#                                                    or prototype ticket
+#   quorum-map --map SLUG rule-out NN REASON         close a ticket as beyond the destination; list it under Out of scope
+#   quorum-map --map SLUG reopen NN REASON           reopen a resolved ticket: its answer becomes "## Earlier answer"
+#                                                    and its line leaves Decisions so far. Prints the resolved
+#                                                    tickets downstream of it, which may rest on the old answer
+#   quorum-map --map SLUG downstream NN              every ticket that waits on NN, directly or through others
+#   quorum-map --map SLUG cleared                    exit 0 when no ticket is open or claimed
+#   quorum-map --map SLUG check                      an ERROR line per problem in the map; exit 1 if there are any
+#   quorum-map --map SLUG decisions [N]              the Destination, Out of scope, and the decisions task N cites
+#                                                    (every decision without N): a task's decisions.md
+#   quorum-map --map SLUG tasks                      N<TAB>STATE<TAB>TASK<TAB>BLOCKED_BY<TAB>REQUEST for tasks.md,
+#                                                    STATE being merged, the started task's status, ready, or blocked
+#   quorum-map --map SLUG next-task                  the first ready task's number (exit 1 if none)
+#   quorum-map enter SESSION SLUG | leave SESSION    start or end a map session; hooks/map-guard.sh keeps a session
+#                                                    in one from changing the repo outside .tasks/
+#
+# A task counts as merged when quorum-branch is-merged says so; until then the tasks waiting on it stay blocked,
+# since a branch made from the default branch wouldn't have its code. Bash 3.2 compatible.
+set -euo pipefail
+
+die() { echo "quorum-map: $*" >&2; exit 2; }
+HERE=$(cd "$(dirname "$0")" && pwd)
+TEMPLATE="$HERE/../skills/map/templates/map.md"
+TYPES=" grilling research prototype task "
+TAB=$(printf '\t')
+
+valid_slug() { printf '%s' "$1" | grep -Eq '^[a-z0-9][a-z0-9.-]*$'; }
+valid_session() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_-]*$'; }
+MAIN=$("$HERE/quorum-active-task" --main)
+TASKS="$MAIN/.tasks"
+
+map=""
+if [ "${1:-}" = "--map" ]; then map=${2:-}; [ -n "$map" ] || die "--map needs a slug"; shift 2; fi
+cmd=${1:-}; [ $# -gt 0 ] && shift
+
+case "$cmd" in
+  list)
+    for dir in "$TASKS"/map-*/; do
+      [ -f "$dir/map.md" ] || continue
+      s=$(basename "$dir"); s=${s#map-}
+      t=$("$0" --map "$s" tickets)
+      open=$(printf '%s\n' "$t" | awk -F '\t' '$3 == "open" || $3 == "claimed"' | grep -c . || true)
+      done_=$(printf '%s\n' "$t" | awk -F '\t' '$3 == "resolved"' | grep -c . || true)
+      front=$("$0" --map "$s" frontier | grep -c . || true)
+      printf '%s\t%s\t%s\t%s\n' "$s" "$open" "$done_" "$front"
+    done
+    exit 0 ;;
+  enter)
+    session=${1:-}; s=${2:-}
+    valid_session "$session" || die "enter needs a session id"
+    valid_slug "$s" && [ -f "$TASKS/map-$s/map.md" ] || die "no map: .tasks/map-$s"
+    mkdir -p "$TASKS/.map-sessions"; printf '%s\n' "$s" > "$TASKS/.map-sessions/$session"
+    exit 0 ;;
+  leave)
+    session=${1:-}; valid_session "$session" || die "leave needs a session id"
+    rm -f "$TASKS/.map-sessions/$session"; exit 0 ;;
+  "") die "usage: quorum-map list | --map SLUG <command> | enter SESSION SLUG | leave SESSION" ;;
+esac
+
+[ -n "$map" ] || die "$cmd needs --map SLUG"
+valid_slug "$map" || die "invalid map slug: $map (lowercase letters, digits, . and -)"
+DIR="$TASKS/map-$map"
+MAP_MD="$DIR/map.md"
+
+if [ "$cmd" = init ]; then
+  [ ! -e "$DIR" ] || die "already exists: .tasks/map-$map"
+  [ -f "$TEMPLATE" ] || die "no template at $TEMPLATE"
+  mkdir -p "$DIR/tickets"
+  title=${1:-$map}
+  awk -v t="$title" '{ gsub(/\{\{TITLE\}\}/, t); print }' "$TEMPLATE" > "$MAP_MD"
+  printf '%s\n' ".tasks/map-$map/map.md"
+  exit 0
+fi
+[ -f "$MAP_MD" ] || die "no map: .tasks/map-$map (quorum-map --map $map init)"
+mkdir -p "$DIR/tickets"
+
+# ---------------------------------------------------------------- tickets
+num() { # normalize a ticket number to two digits
+  printf '%s' "$1" | grep -Eq '^[0-9]{1,3}$' || die "not a ticket number: $1"
+  printf '%02d' "$((10#$1))"
+}
+ticket_file() { # NN -> path; dies unless exactly one file
+  local n f found=""
+  n=$(num "$1")
+  for f in "$DIR/tickets/$n"-*.md; do [ -f "$f" ] || continue; [ -z "$found" ] || die "two files for ticket $n"; found=$f; done
+  [ -n "$found" ] || die "no ticket $n in .tasks/map-$map"
+  printf '%s\n' "$found"
+}
+# field FILE KEY: the value of the first "KEY:" line before the first "## " heading.
+field() { awk -v k="$2:" '/^## / { exit } index($0, k) == 1 { v = substr($0, length(k) + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }' "$1"; }
+title_of() { awk '/^# / { print substr($0, 3); exit }' "$1"; }
+# set_field FILE KEY VALUE: replace the header line, or add it after the last header line.
+set_field() {
+  local tmp; tmp=$(mktemp "$1.XXXXXX")
+  awk -v k="$2:" -v v="$3" '
+    !head_done && /^## / { if (!set) print k " " v; set = 1; head_done = 1 }
+    !head_done && index($0, k) == 1 { print k " " v; set = 1; next }
+    !head_done && !set && /^Status:/ { print; print k " " v; set = 1; next }
+    { print }
+    END { if (!set) print k " " v }
+  ' "$1" > "$tmp"
+  mv "$tmp" "$1"
+}
+blockers_of() {
+  field "$1" "Blocked by" | tr ',' ' ' | tr -s ' ' '\n' | { grep -E '^[0-9]+$' || true; } | while read -r b; do num "$b"; echo; done
+}
+
+# NN<TAB>TYPE<TAB>STATUS<TAB>BLOCKED_BY<TAB>TITLE
+list_tickets() {
+  local f n b
+  for f in "$DIR/tickets"/[0-9][0-9]-*.md; do
+    [ -f "$f" ] || continue
+    n=$(basename "$f"); n=${n%%-*}
+    b=$(blockers_of "$f" | paste -sd, - || true)
+    printf '%s\t%s\t%s\t%s\t%s\n' "$n" "$(field "$f" Type)" "$(field "$f" Status)" "${b:--}" "$(title_of "$f")"
+  done
+}
+
+frontier() {
+  list_tickets | awk -F '\t' '
+    { st[$1] = $3; bl[$1] = $4; order[++n] = $1 }
+    END {
+      for (i = 1; i <= n; i++) {
+        t = order[i]; if (st[t] != "open") continue
+        ok = 1
+        if (bl[t] != "-") { m = split(bl[t], b, ","); for (j = 1; j <= m; j++) if (st[b[j]] != "resolved" && st[b[j]] != "out-of-scope") ok = 0 }
+        if (ok) print t
+      }
+    }'
+}
+
+# Tickets that wait on $1, directly or not, in order.
+downstream() {
+  list_tickets | awk -F '\t' -v root="$1" '
+    { order[++n] = $1; bl[$1] = $4 }
+    END {
+      reach[root] = 1; changed = 1
+      while (changed) {
+        changed = 0
+        for (i = 1; i <= n; i++) {
+          t = order[i]; if (reach[t] || bl[t] == "-") continue
+          m = split(bl[t], b, ","); for (j = 1; j <= m; j++) if (reach[b[j]]) { reach[t] = 1; changed = 1; break }
+        }
+      }
+      for (i = 1; i <= n; i++) if (order[i] != root && reach[order[i]]) print order[i]
+    }'
+}
+
+# section_add HEADING LINE: append LINE to map.md's "## HEADING" section, after its last non-blank line.
+section_add() {
+  local tmp; tmp=$(mktemp "$MAP_MD.XXXXXX")
+  awk -v h="## $1" -v add="$2" '
+    { line[++n] = $0 }
+    END {
+      for (i = 1; i <= n; i++) if (line[i] == h) start = i
+      if (!start) exit 3
+      last = start
+      for (i = start + 1; i <= n && line[i] !~ /^## /; i++) if (line[i] !~ /^[ \t]*$/) last = i
+      for (i = 1; i <= n; i++) {
+        print line[i]
+        if (i == last) { if (last == start) print ""; print add }
+      }
+    }' "$MAP_MD" > "$tmp" || { rm -f "$tmp"; die "map.md has no \"## $1\" section"; }
+  mv "$tmp" "$MAP_MD"
+}
+# section_drop HEADING TEXT: drop the lines of "## HEADING" that contain TEXT.
+section_drop() {
+  local tmp; tmp=$(mktemp "$MAP_MD.XXXXXX")
+  awk -v h="## $1" -v t="$2" '$0 == h { on = 1; print; next } on && /^## / { on = 0 } on && index($0, t) { next } { print }' "$MAP_MD" > "$tmp"
+  mv "$tmp" "$MAP_MD"
+}
+link_of() { printf 'tickets/%s' "$(basename "$1")"; }
+text_arg() { if [ $# -gt 0 ] && [ -n "$1" ]; then printf '%b' "$1"; else cat; fi; }
+
+# ---------------------------------------------------------------- tasks.md
+# N<TAB>TIER<TAB>BLOCKED_BY<TAB>DECISIONS<TAB>REQUEST, from the numbered lines of tasks.md.
+task_lines() {
+  [ -f "$DIR/tasks.md" ] || return 0
+  awk '
+    /^[0-9]+\.[ \t]/ {
+      n = $0; sub(/\..*/, "", n); rest = $0; sub(/^[0-9]+\.[ \t]+/, "", rest)
+      k = split(rest, part, / · /); req = part[1]; tier = ""; bl = "-"; dec = "-"
+      for (i = 2; i <= k; i++) {
+        p = part[i]
+        if (p ~ /^tier:/) { sub(/^tier:[ \t]*/, "", p); tier = p }
+        else if (p ~ /^blocked by:/) { sub(/^blocked by:[ \t]*/, "", p); gsub(/[ \t]/, "", p); bl = (p == "none" || p == "") ? "-" : p }
+        else if (p ~ /^decisions:/) { sub(/^decisions:[ \t]*/, "", p); gsub(/[ \t]/, "", p); dec = (p == "none" || p == "") ? "-" : p }
+      }
+      printf "%s\t%s\t%s\t%s\t%s\n", n, tier, bl, dec, req
+    }' "$DIR/tasks.md"
+}
+# The task started from map task N, if any: its slug.
+task_for() {
+  local file s
+  for file in "$TASKS"/*/state.md; do
+    [ -f "$file" ] || continue
+    s=$(basename "$(dirname "$file")")
+    [ "$("$HERE/quorum-state" --task "$s" get map 2>/dev/null)" = "$map" ] || continue
+    [ "$("$HERE/quorum-state" --task "$s" get map_task 2>/dev/null)" = "$1" ] || continue
+    printf '%s\n' "$s"; return 0
+  done
+  return 1
+}
+# N<TAB>STATE<TAB>TASK<TAB>BLOCKED_BY<TAB>REQUEST
+task_states() {
+  local lines n bl req slug state merged=" " b ok
+  lines=$(task_lines)
+  [ -n "$lines" ] || return 0
+  # First pass: which tasks have merged.
+  while IFS="$TAB" read -r n _ _ _ _; do
+    if slug=$(task_for "$n") && "$HERE/quorum-branch" is-merged "$slug" >/dev/null 2>&1; then merged="$merged$n "; fi
+  done <<< "$lines"
+  while IFS="$TAB" read -r n _ bl _ req; do
+    slug=""; state=""
+    if slug=$(task_for "$n"); then
+      case "$merged" in *" $n "*) state=merged ;; *) state=$("$HERE/quorum-state" --task "$slug" get status 2>/dev/null || echo unknown) ;; esac
+    else
+      slug="-"; ok=1
+      if [ "$bl" != "-" ]; then
+        for b in $(printf '%s' "$bl" | tr ',' ' '); do case "$merged" in *" $b "*) ;; *) ok=0 ;; esac; done
+      fi
+      if [ "$ok" = 1 ]; then state=ready; else state=blocked; fi
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\n' "$n" "$state" "$slug" "$bl" "$req"
+  done <<< "$lines"
+}
+
+# The Destination, Out of scope, and the decisions task $1 cites (all of them without $1).
+print_decisions() {
+  want=""
+  if [ -n "${1:-}" ]; then
+    line=$(task_lines | awk -F '\t' -v n="$1" '$1 == n')
+    [ -n "$line" ] || die "tasks.md has no task $1"
+    want=$(printf '%s' "$line" | cut -f4)
+  fi
+  printf 'From map %s (.tasks/map-%s/)' "\`$map\`" "$map"
+  [ -z "${1:-}" ] || printf ', task %s: %s' "$1" "$(printf '%s' "$line" | cut -f5)"
+  printf '\n\n'
+  awk '$0 == "## Destination" || $0 == "## Out of scope" { on = 1; print; next } /^## / { on = 0 } on && !/^[ \t]*<!--/ && !c { print } /<!--/ && !/-->/ { c = 1 } /-->/ { c = 0 }' "$MAP_MD"
+  printf '\n## Decisions\n'
+  for t in $(list_tickets | awk -F '\t' '$3 == "resolved" { print $1 }'); do
+    if [ -n "$want" ] && [ "$want" != "-" ]; then
+      case ",$want," in *",$t,"*|*",$((10#$t)),"*) ;; *) continue ;; esac
+    elif [ -n "${1:-}" ]; then continue
+    fi
+    f=$(ticket_file "$t")
+    printf '\n### %s: %s\n\n' "$t" "$(title_of "$f")"
+    awk '$0 == "## Question" { on = 1; print "Question:"; next } $0 == "## Answer" { on = 1; print ""; print "Answer (" by "):"; next } /^## / { on = 0 } /^Answered by:/ { by = substr($0, 14) } on && !/^[ \t]*$/ { print }' "$f"
+  done
+}
+
+# An ERROR line per problem in the map. (A function, not inline in $( ): bash 3.2 misreads a case pattern's ) there.)
+check_map() {
+    for h in "Destination" "Notes" "Decisions so far" "Not yet specified" "Out of scope"; do
+      grep -qx "## $h" "$MAP_MD" || echo "ERROR map.md: no \"## $h\" section"
+    done
+    awk '$0 == "## Destination" { on = 1; next } /^## / { on = 0 } on && !/^[ \t]*$/ && !/^[ \t]*<!--/ && !c { found = 1 } /<!--/ && !/-->/ { c = 1 } /-->/ { c = 0 } END { if (!found) print "ERROR map.md: the Destination is empty" }' "$MAP_MD"
+    all=" $(list_tickets | cut -f1 | tr '\n' ' ') "
+    for f in "$DIR/tickets"/*.md; do
+      [ -f "$f" ] || continue
+      rel="tickets/$(basename "$f")"
+      case "$(basename "$f")" in [0-9][0-9]-*.md) ;; *) echo "ERROR $rel: not named NN-<name>.md"; continue ;; esac
+      n=$(basename "$f"); n=${n%%-*}
+      [ -n "$(title_of "$f")" ] || echo "ERROR $rel: no \"# <title>\" line"
+      type=$(field "$f" Type); st=$(field "$f" Status)
+      case "$TYPES" in *" $type "*) ;; *) echo "ERROR $rel: Type \"$type\" isn't one of$TYPES" ;; esac
+      case "$st" in open|claimed|resolved|out-of-scope) ;; *) echo "ERROR $rel: Status \"$st\" isn't open, claimed, resolved, or out-of-scope" ;; esac
+      awk '$0 == "## Question" { on = 1; next } /^## / { on = 0 } on && !/^[ \t]*$/ { found = 1 } END { exit !found }' "$f" || echo "ERROR $rel: no question under \"## Question\""
+      for b in $(blockers_of "$f"); do
+        case "$all" in *" $b "*) ;; *) echo "ERROR $rel: waits on ticket $b, which doesn't exist" ;; esac
+        if downstream "$n" | grep -qx "$b"; then echo "ERROR $rel: waits on ticket $b, which waits on it (a cycle)"; fi
+      done
+      if [ "$st" = resolved ]; then
+        grep -qx '## Answer' "$f" || echo "ERROR $rel: resolved, with no \"## Answer\""
+        by=$(field "$f" "Answered by")
+        case "$type:$by" in grilling:user|prototype:user|research:*|task:*) ;; *) echo "ERROR $rel: a $type ticket resolved with \"Answered by: ${by:-nobody}\"; only the user answers it" ;; esac
+        grep -qF "]($rel)" "$MAP_MD" || echo "ERROR $rel: resolved, but not in map.md's Decisions so far"
+      fi
+      if [ "$st" = out-of-scope ]; then
+        awk -v l="]($rel)" '$0 == "## Out of scope" { on = 1; next } /^## / { on = 0 } on && index($0, l) { found = 1 } END { exit !found }' "$MAP_MD" \
+          || echo "ERROR $rel: out of scope, but not in map.md's Out of scope"
+      fi
+    done
+    if [ -f "$DIR/tasks.md" ]; then
+      nums=" $(task_lines | cut -f1 | tr '\n' ' ') "
+      resolved=" $(list_tickets | awk -F '\t' '$3 == "resolved" { print $1 }' | tr '\n' ' ') "
+      [ "$nums" != "  " ] || echo "ERROR tasks.md: no numbered tasks"
+      while IFS="$TAB" read -r n tier bl dec req; do
+        [ -n "$n" ] || continue
+        case "$tier" in LOW|MEDIUM|HIGH) ;; *) echo "ERROR tasks.md: task $n has no \"tier: LOW|MEDIUM|HIGH\"" ;; esac
+        [ -n "$req" ] || echo "ERROR tasks.md: task $n has no request"
+        for b in $(printf '%s' "$bl" | tr ',' ' '); do
+          [ "$b" != "-" ] || continue
+          case "$nums" in *" $b "*) ;; *) echo "ERROR tasks.md: task $n waits on task $b, which doesn't exist" ;; esac
+          [ "$b" -lt "$n" ] 2>/dev/null || echo "ERROR tasks.md: task $n waits on task $b; list a task after the ones it waits on"
+        done
+        for d in $(printf '%s' "$dec" | tr ',' ' '); do
+          [ "$d" != "-" ] || continue
+          d2=$(printf '%02d' "$((10#$d))" 2>/dev/null || echo "$d")
+          case "$resolved" in *" $d2 "*) ;; *) echo "ERROR tasks.md: task $n cites decision $d, which isn't a resolved ticket" ;; esac
+        done
+      done <<< "$(task_lines)"
+    fi
+}
+
+# ---------------------------------------------------------------- commands
+case "$cmd" in
+  tickets) list_tickets ;;
+  frontier) frontier ;;
+  downstream) [ -n "${1:-}" ] || die "downstream needs a ticket number"; ticket_file "$1" >/dev/null; downstream "$(num "$1")" ;;
+  cleared)
+    ! list_tickets | awk -F '\t' '$3 == "open" || $3 == "claimed" { found = 1 } END { exit !found }' ;;
+
+  new)
+    type=${1:-}; title=${2:-}; question=${3:-}
+    case "$TYPES" in *" $type "*) ;; *) die "type must be one of:$TYPES" ;; esac
+    [ -n "$title" ] || die "new needs a title"
+    case "$title" in *"$TAB"*|*$'\n'*) die "a title may not contain tabs or newlines" ;; esac
+    [ -n "$question" ] || die "new needs the question"
+    last=$(list_tickets | tail -n 1 | cut -f1)
+    n=$(printf '%02d' $(( ${last:+10#$last} + 1 )))
+    name=$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]\{1,\}/-/g' -e 's/^-//' -e 's/-$//' | cut -c1-40 | sed 's/-$//')
+    file="$DIR/tickets/$n-${name:-ticket}.md"
+    { printf '# %s\n\nType: %s\nBlocked by: none\nStatus: open\n\n## Question\n\n' "$title" "$type"; printf '%b\n' "$question"; } > "$file"
+    printf '%s\n' "$n" ;;
+
+  block)
+    [ $# -ge 2 ] || die "block needs a ticket and at least one blocker"
+    f=$(ticket_file "$1"); n=$(num "$1"); shift
+    down=" $(downstream "$n" | tr '\n' ' ') "
+    cur=" $(blockers_of "$f" | tr '\n' ' ') "
+    for b in "$@"; do
+      bf=$(ticket_file "$b"); b=$(num "$b"); : "$bf"
+      [ "$b" != "$n" ] || die "ticket $n can't wait on itself"
+      case "$down" in *" $b "*) die "ticket $b already waits on $n: that would be a cycle" ;; esac
+      case "$cur" in *" $b "*) ;; *) cur="$cur$b " ;; esac
+    done
+    set_field "$f" "Blocked by" "$(printf '%s' "$cur" | tr -s ' ' '\n' | grep . | sort | paste -sd, - | sed 's/,/, /g')" ;;
+
+  claim)
+    f=$(ticket_file "${1:-}"); n=$(num "$1")
+    st=$(field "$f" Status)
+    [ "$st" = open ] || die "ticket $n is $st, not open"
+    frontier | grep -qx "$n" || die "ticket $n waits on a ticket that isn't closed: $(field "$f" "Blocked by")"
+    set_field "$f" Status claimed ;;
+
+  release)
+    f=$(ticket_file "${1:-}"); n=$(num "$1")
+    [ "$(field "$f" Status)" = claimed ] || die "ticket $n isn't claimed"
+    set_field "$f" Status open ;;
+
+  resolve)
+    [ $# -ge 3 ] || die "resolve needs a ticket, who answered (user or agent), and a one-line gist"
+    f=$(ticket_file "$1"); n=$(num "$1"); by=$2; gist=$3; shift 3
+    case "$by" in user|agent) ;; *) die "who answered must be user or agent" ;; esac
+    case "$gist" in *"$TAB"*|*$'\n'*) die "the gist is one line" ;; esac
+    [ "$(field "$f" Status)" = claimed ] || die "ticket $n isn't claimed: claim it before working on it"
+    type=$(field "$f" Type)
+    case "$type:$by" in
+      grilling:agent|prototype:agent) die "ticket $n is a $type ticket: only the user answers it. Ask them, and record their answer with BY user" ;;
+    esac
+    answer=$(text_arg "${1:-}")
+    [ -n "$answer" ] || die "resolve needs the answer, as an argument or on stdin"
+    { printf '\n## Answer\n\n%s\n' "$answer"; } >> "$f"
+    set_field "$f" Status resolved
+    set_field "$f" "Answered by" "$by"
+    section_add "Decisions so far" "- [$(title_of "$f")]($(link_of "$f")): $gist" ;;
+
+  rule-out)
+    [ $# -ge 2 ] || die "rule-out needs a ticket and the reason"
+    f=$(ticket_file "$1"); n=$(num "$1"); reason=$2
+    case "$(field "$f" Status)" in open|claimed) ;; *) die "ticket $n is $(field "$f" Status)" ;; esac
+    printf '\n## Out of scope\n\n%s\n' "$reason" >> "$f"
+    set_field "$f" Status out-of-scope
+    section_add "Out of scope" "- [$(title_of "$f")]($(link_of "$f")): $reason" ;;
+
+  reopen)
+    [ $# -ge 2 ] || die "reopen needs a ticket and the reason"
+    f=$(ticket_file "$1"); n=$(num "$1"); reason=$2
+    [ "$(field "$f" Status)" = resolved ] || die "ticket $n isn't resolved"
+    tmp=$(mktemp "$f.XXXXXX")
+    awk -v r="$reason" -v d="$(date +%Y-%m-%d)" '$0 == "## Answer" { print "## Earlier answer (reopened " d ": " r ")"; next } /^Answered by:/ { next } { print }' "$f" > "$tmp"
+    mv "$tmp" "$f"
+    set_field "$f" Status open
+    section_drop "Decisions so far" "]($(link_of "$f"))"
+    list_tickets | awk -F '\t' -v d=" $(downstream "$n" | tr '\n' ' ') " '$3 == "resolved" && index(d, " " $1 " ") { print $1 "\t" $5 }' ;;
+
+  decisions) print_decisions "$@" | cat -s ;;
+
+  tasks) task_states ;;
+  next-task)
+    out=$(task_states | awk -F '\t' '$2 == "ready" && !f { print $1; f = 1 }')
+    [ -n "$out" ] || exit 1
+    printf '%s\n' "$out" ;;
+
+  check)
+    errs=$(check_map)
+    [ -z "$errs" ] || { printf '%s\n' "$errs"; exit 1; } ;;
+
+  *) die "unknown command: $cmd" ;;
+esac

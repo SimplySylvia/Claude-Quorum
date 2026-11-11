@@ -33,6 +33,16 @@
         ]
       },
       {
+        "matcher": "Edit|Write|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/map-guard.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "Read|Grep|Bash|WebSearch|WebFetch",
         "hooks": [
           {
