@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Read and write the repo's Quorum settings in .claude/quorum.json, in the main working tree.
+#
+#   quorum-config get KEY           print KEY's value, or nothing when it isn't set
+#   quorum-config set KEY VALUE     record a model choice, so later tasks in this repo don't ask again
+#   quorum-config unset KEY         remove it
+#
+# set and unset take reviewer_model and helper_model (skills/pipeline-laws/models.md): `inherit` or a value the
+# Agent tool's `model` parameter accepts. The file's other keys (protected_paths, blind_block_dirs, ...) are the
+# user's to edit, and stay as they are. get reads any key. Bash 3.2 compatible.
+set -euo pipefail
+
+die() { echo "quorum-config: $*" >&2; exit 1; }
+HERE=$(cd "$(dirname "$0")" && pwd)
+command -v jq >/dev/null 2>&1 || die "needs jq"
+
+cmd=${1:-}; key=${2:-}
+[ -n "$cmd" ] && [ -n "$key" ] || die "usage: quorum-config get KEY | set KEY VALUE | unset KEY"
+FILE="$("$HERE/quorum-active-task" --main)/.claude/quorum.json"
+
+case "$cmd" in
+  get)
+    [ -f "$FILE" ] || exit 0
+    jq -r --arg k "$key" '.[$k] // empty | if type == "string" then . else tojson end' "$FILE" 2>/dev/null \
+      || die "can't read $FILE: is it valid JSON?" ;;
+  set|unset)
+    case "$key" in reviewer_model|helper_model) ;; *) die "set takes reviewer_model or helper_model, not $key" ;; esac
+    if [ "$cmd" = set ]; then
+      value=${3:-}
+      printf '%s' "$value" | grep -Eq '^[A-Za-z0-9][]A-Za-z0-9._:@/[-]*$' || die "$key must be inherit or a model name or ID, with no spaces"
+    fi
+    mkdir -p "$(dirname "$FILE")"
+    [ -f "$FILE" ] || printf '{}\n' > "$FILE"
+    tmp="$FILE.$$"
+    if [ "$cmd" = set ]; then jq --arg k "$key" --arg v "$value" '.[$k] = $v' "$FILE" > "$tmp"
+    else jq --arg k "$key" 'del(.[$k])' "$FILE" > "$tmp"; fi || { rm -f "$tmp"; die "can't update $FILE: is it valid JSON?"; }
+    mv "$tmp" "$FILE" ;;
+  *) die "usage: quorum-config get KEY | set KEY VALUE | unset KEY" ;;
+esac

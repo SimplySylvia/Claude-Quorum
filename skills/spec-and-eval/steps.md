@@ -39,15 +39,40 @@ If it lists any, ask the user which to remove (AskUserQuestion, one option per t
 `quorum-branch remove <slug>`; exit 3 means it has uncommitted changes: show them and leave it. Remove nothing
 without a yes.
 
-## 2. Name the task
+## 2. Understand the request
 
-Propose a short kebab-case slug (for example `csv-export-button`). It must match `[a-z0-9][a-z0-9.-]*` and not
-already exist under `.tasks/`. If the request is unclear, ask one round of clarifying questions now, not later.
+Read the request, then the code it touches. Ask only what would change what gets built:
 
-## 3. Classify the risk
+- **Why, first.** If the request doesn't say what problem it solves or who it's for, ask that, in one question,
+  before anything else, and wait. The answer shapes the requirements more than any process choice. With `--yes`,
+  infer it from the request and say what you assumed.
+- **What it should do**, where the request leaves a real choice open (for example an output format, or how to
+  treat untrusted input). Ask these in the same message as step 3's proposal, each with the option you recommend.
 
-Ask yourself: **"What happens to the user or system if this change breaks?"** Propose a tier with a one-line reason
-and let the user confirm or change it.
+## 3. Propose, then ask once
+
+Work out everything else yourself, and state it as a proposal the user can correct, in one message:
+
+- **Slug:** short kebab-case (for example `csv-export-button`), matching `[a-z0-9][a-z0-9.-]*`, not already under
+  `.tasks/`.
+- **Risk tier,** with a one-line reason. Ask yourself: **"What happens to the user or system if this change
+  breaks?"** (the rules are below).
+- **Research:** yes for MEDIUM and HIGH, no for LOW, unless `<arguments>` says `--research` or `--no-research`.
+- **Docs,** for a task that adds something people can use (step 5.2 says how to choose the places).
+- **The fast path,** for a LOW task without `--fast`: offer it as an option ("or take the fast path: a short spec,
+  no plan round, one reviewer"). Choosing it means the same as `--fast`.
+- **Models:** resolve both as in `<plugin root>/skills/pipeline-laws/models.md` (configured defaults:
+  `reviewer_model` = <reviewer_model>, `helper_model` = <helper_model>). Only a choice nothing resolved needs a
+  question; a repo remembers its last answers.
+
+Then ask **once**, with AskUserQuestion where it's offered (otherwise in the same message): one question to
+confirm or change the proposal, plus each open question from step 2 and each unresolved model choice, four at
+most in one call. Never ask the slug, tier, research, or docs one at a time.
+
+With `--yes`, accept the proposal without asking and say what you chose, except a **HIGH** tier, which always needs
+the user's yes: the confirm question names HIGH and its reason.
+
+**The tiers:**
 
 | Tier | Typical changes | Gets |
 |---|---|---|
@@ -62,8 +87,8 @@ migrating data is **HIGH**. When in doubt between two tiers, pick the higher one
 
 ## 4. Research the approach
 
-Do this for MEDIUM and HIGH tasks, and for LOW when `<arguments>` contains `--research`. Skip it when it contains
-`--no-research`, and on the fast path unless it contains `--research`.
+Do this when step 3's proposal, as the user confirmed it, includes research: by default for MEDIUM and HIGH, and for
+LOW only with `--research`. `--no-research` skips it, and so does the fast path unless `--research` is given.
 
 1. `quorum-state --task <slug> init <RISK> <STATUS>`, where STATUS is `DRAFT-AWAITING-VISUAL-SIGNOFF` for a UI
    change and `PLANNING` otherwise. Then `quorum-active-task --set <slug>`. On the fast path, STATUS is `BUILDING`,
@@ -81,13 +106,13 @@ Do this for MEDIUM and HIGH tasks, and for LOW when `<arguments>` contains `--re
 
 1. If you skipped step 4, run step 4.1 now.
 2. **Docs for a new feature.** If the task adds something people can use that didn't exist before (a command,
-   page, endpoint, config option, env var, integration, or workflow), ask the user whether this task should
-   create or update docs. Bug fixes, refactors, and test-only changes skip this question.
+   page, endpoint, config option, env var, integration, or workflow), the task creates or updates docs, as the
+   step 3 proposal said. Bug fixes, refactors, and test-only changes have none.
    - First look where the repo documents similar features (`README*`, `docs/`, runbooks, `.env.example`, API
      docs, `CHANGELOG*`, `CLAUDE.md`) and offer those places as the choices, each with what it would say in one
      line. Always include "No docs for this task".
-   - Ask once, together with any other open questions. With `--yes`, choose the places where the repo documents
-     similar features (none if it doesn't), and say what you chose.
+   - These are part of step 3's single question, not a separate one. With `--yes`, choose the places where the
+     repo documents similar features (none if it doesn't), and say what you chose.
    - Each doc chosen becomes a numbered requirement starting with **Docs:**, naming the file and what it covers,
      for example "**Docs:** add the `--since` flag to the Options table in `docs/cli.md`".
    - If the user says no docs, add a non-goal: "No new docs for this feature (declined at spec time)".
@@ -113,9 +138,8 @@ Do this for MEDIUM and HIGH tasks, and for LOW when `<arguments>` contains `--re
 
 ## 6. Review the spec
 
-1. **Models.** Resolve both of the task's model choices, reviewers and helpers, as in
-   `<plugin root>/skills/pipeline-laws/models.md` (configured defaults: `reviewer_model` = <reviewer_model>, `helper_model` = <helper_model>). Ask them together with
-   the questions from step 5 when you can, so the user is asked once. Every later command reuses them.
+1. **Models.** Step 3 resolved both; every later command reuses them. (A redesign that reaches this step without
+   them resolves them now, as step 3 says.)
 2. Start two `quorum:spec-reviewer`s **in one message, in parallel**, with `reviewer_model`, personas
    **Feasibility Critic** and **Spec Improver**. Each gets only:
 

@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: spec-remembers-models
+description: In a repo whose .claude/quorum.json remembers the model choices, /quorum:spec-and-eval uses them and doesn't ask about models.
+tags: [spec, questions, models]
+context:
+  scaffold_script: scaffold.sh

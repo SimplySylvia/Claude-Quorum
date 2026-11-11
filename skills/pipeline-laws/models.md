@@ -1,7 +1,8 @@
 # Choosing the models for a task's agents
 
 Models change often, so Quorum never names one. Each task records two choices in `state.md`, and the skills pass
-them to the agents they start:
+them to the agents they start. The repo remembers the last answers, so a new task only asks when nothing is
+remembered or configured:
 
 | Choice | `state.md` key | Agents |
 |---|---|---|
@@ -20,11 +21,13 @@ Do this once, before the skill starts its first agent from either group, for the
 
 1. **`$ARGUMENTS` contains `--models`:** ask (below), even if a choice is recorded.
 2. **`quorum-state get <key>` prints a value:** use it.
-3. **The configured default** (the skill gives it, from `reviewer_model` or `helper_model` in the plugin options) is
+3. **The repo remembers one:** `quorum-config get <key>` prints a value (from `.claude/quorum.json`, where an
+   earlier task's answer was saved). Use it and record it with `quorum-state set <key> <value>`.
+4. **The configured default** (the skill gives it, from `reviewer_model` or `helper_model` in the plugin options) is
    set, not `ask`, and doesn't read as a `${user_config…}` placeholder: use it and record it with
    `quorum-state set <key> <value>`.
-4. **Otherwise ask** (below). With `--yes` and nothing recorded or configured, use `inherit` without asking, record
-   it, and say so.
+5. **Otherwise ask** (below). With `--yes` and nothing recorded, remembered, or configured, use `inherit` without
+   asking, record it for the task, and say so.
 
 ## Ask
 
@@ -38,6 +41,8 @@ values your Agent tool's `model` parameter accepts right now, not from a list in
 
 Record each answer with `quorum-state set <key> <value>`, where the value is exactly what you'll pass as `model`, or
 `inherit` for the session's model. If the user types a model the Agent tool doesn't accept, say so and ask again.
+Then remember it for the repo, `quorum-config set <key> <value>`, so the next task doesn't ask, and say so in one
+line: "Remembered for this repo in `.claude/quorum.json`; `--models` asks again".
 
 ## Use them
 

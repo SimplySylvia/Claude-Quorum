@@ -171,9 +171,9 @@ decide:
 
 | It stops for | When |
 |---|---|
-| The slug, risk tier, and research choice | the spec (with `--yes`, it accepts its proposals, but still asks about a HIGH tier) |
-| The reviewer and helper models | the spec, unless the plugin options set them |
-| Docs for a new feature | the spec (with `--yes`, the places the repo documents similar features) |
+| Why the change is wanted | the spec, only when the request doesn't say |
+| One proposal: the slug, risk tier, research, docs for a new feature, and for LOW the fast path | the spec, asked once together with any open design questions (with `--yes`, it accepts the proposal, but still asks about a HIGH tier) |
+| The reviewer and helper models | the spec, in that same question, only the first time: the answers are remembered for the repo in `.claude/quorum.json` (`--models` asks again), unless the plugin options set them |
 | Mockup sign-off | UI tasks, before planning, always |
 | Plan approval | after plan review (with `--yes`, approved when nothing `[IMPORTANT]` survives, except for HIGH) |
 | A halt | the review loop or blind test runs out of rounds, or the Stop hook escalates |
@@ -319,16 +319,18 @@ confirm. The tier decides how many layers the task gets:
 
 ## Models
 
-Models change often, so Quorum doesn't name any. When a task starts, `/quorum:spec-and-eval` asks two questions,
-with the models Claude Code offers at that moment as the choices:
+Models change often, so Quorum doesn't name any. The first task in a repo asks two questions, with the models
+Claude Code offers at that moment as the choices:
 
 - **Reviewers:** the spec, plan, code, accessibility, and security reviewers and the voter. The recommended answer is
   your session's model, since these decide what gets fixed.
 - **Helpers:** the PR writer and the friction triager, which summarize and sort. The fastest model is recommended.
 
-The answers go in the task's `state.md`, and every later command uses them. Run any command that starts reviewers
-or helpers with `--models` to choose again, or set the `reviewer_model` and `helper_model` plugin options to
-`inherit` or a model name to skip the question. If a recorded model is retired, Quorum asks again.
+The answers go in the task's `state.md`, and every later command uses them. They're also remembered for the repo
+in `.claude/quorum.json` (`quorum-config`), so later tasks don't ask; commit the file to share the choice with your
+team. Run any command that starts reviewers or helpers with `--models` to choose again. To set a choice for every
+repo instead, set the `reviewer_model` and `helper_model` plugin options to `inherit` or a model name; a repo's
+remembered choice wins over them. If a recorded model is retired, Quorum asks again.
 
 ## What it sets up in your repo
 
@@ -407,7 +409,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `agents/` | `researcher`, `spec-reviewer`, `planner`, `builder`, `prover`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `verifier-voter`, `security-reviewer`, `blind-user`, `friction-triager`, `pr-writer` |
 | `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `protect-checks.sh`, `secret-guard.sh` (both read commands with `shell-words.sh`), `stop-verify.sh`, `record-pr.sh`, and `dashboard/`, the dashboard's hooks module |
 | `types/` | The type contract for the values the dashboard keeps in the session |
-| `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state`, `quorum-reviews`, `quorum-lessons`, `quorum-secrets`, `quorum-validate`, `quorum-git` (on the Bash PATH while the plugin is enabled) |
+| `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state`, `quorum-reviews`, `quorum-lessons`, `quorum-secrets`, `quorum-validate`, `quorum-config`, `quorum-git` (on the Bash PATH while the plugin is enabled) |
 | `libexec/` | `git`, which `quorum-git` puts first on PATH when it runs a real git by full path, so git's own child processes (`git worktree add` starts some) reach it too |
 | `tests/` | bats tests for every hook and helper, `claude plugin test` tests for the dashboard, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
 | `evals/` | `claude plugin eval` suite: risk tiering, one case per agent, voter false-alarm drops, blind-mode source reads, a near-miss |

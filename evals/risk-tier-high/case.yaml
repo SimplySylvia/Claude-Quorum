@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: risk-tier-high
-description: spec-and-eval picks the HIGH tier for this request and writes a valid task folder.
+description: spec-and-eval proposes HIGH for a change that deletes data, and asks the user to confirm the tier before writing anything, even with --yes.
 tags: [risk-tier]
 context:
   scaffold_script: scaffold.sh

@@ -42,6 +42,16 @@ copy with `/plugin marketplace update`.
   is MET. An unmet one goes back to the review loop as a pending `[IMPORTANT]` finding ("Unmet requirement"),
   under the round cap. The dashboard's Requirements section shows each verdict with its evidence, and the PR
   writer uses them.
+- **Fewer questions at the spec stage.** `spec-and-eval` asks why the change is wanted only when the request
+  doesn't say. It then states the slug, tier, research choice, docs, and (for LOW) the fast path as one proposal,
+  and asks once, together with any open design questions. It no longer asks about each one in turn. A HIGH tier
+  now needs your yes even with `--yes` in `/quorum:spec-and-eval` too, as it already did in `/quorum:run`. In the
+  `spec-asks-once` eval, the process questions went from three (slug and tier, docs, models) to one confirmation of
+  the proposal, with the models asked only the first time in a repo. The design questions beside it stay, since
+  their answers change what gets built.
+- **Model choices are remembered per repo.** Once answered, they're saved in `.claude/quorum.json` with the new
+  `quorum-config` helper, and later tasks don't ask. `--models` asks again, and a repo's remembered choice wins over
+  the plugin options.
 - **`quorum-validate`, a lint for the spec, the plan, and the proof.**
   - `spec`: every requirement has an `eval.md` row, and every row names a requirement, a command, and what passing
     looks like; vague words are warnings.

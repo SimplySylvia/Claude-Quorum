@@ -38,7 +38,7 @@ each run's workspace and bootstraps for Quorum.
 
 | Case | Checks |
 |---|---|
-| `risk-tier-low`, `-medium`, `-high` | `spec-and-eval` picks the right tier and writes runnable checks; the MEDIUM case also gets a `**Docs:**` requirement for its new command |
+| `risk-tier-low`, `-medium`, `-high` | `spec-and-eval` picks the right tier and writes runnable checks; the MEDIUM case also gets a `**Docs:**` requirement for its new command; for HIGH, even with `--yes`, it asks to confirm the tier and writes nothing first |
 | `researcher-finds-precedent` | `researcher` cites the repo's code, compares options, and cites the Python docs |
 | `spec-reviewer-feasibility` | The Feasibility Critic catches a spec citing a helper and a make target that don't exist |
 | `spec-improver-flags-vague` | The Spec Improver rewrites a vague requirement and asks for a docs decision |
@@ -60,6 +60,8 @@ each run's workspace and bootstraps for Quorum.
 | `run-fast-low` | `/quorum:run --fast --yes` takes a LOW task to `READY` with no spec reviewers, no plan round, and the Logic Hunter as the only reviewer, with a proof at HEAD and a drafted PR |
 | `run-worktree-fallback` | Evals offer no `EnterWorktree`, so `/quorum:run --worktree --yes` makes the task's worktree inside the sandbox, removes it, says why, and builds the LOW task in place to `READY` |
 | `run-worktree-second-task` | With one task in review in its own worktree, `/quorum:run` specs a new task in the main working tree and leaves the first task alone |
+| `spec-asks-once` | Given a request that says why, `spec-and-eval` proposes the slug, tier, research, and docs together and asks once, with only design questions beside it |
+| `spec-remembers-models` | With the model choices remembered in `.claude/quorum.json`, `spec-and-eval` doesn't ask about models |
 | `run-high-asks-tier` | Even with `--yes`, `/quorum:run` asks the user to confirm a HIGH tier and builds nothing before an answer |
 | `nearmiss-no-auto-review-loop` | An ordinary "look at my commit" request never starts a Quorum command |
 

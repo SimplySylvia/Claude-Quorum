@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: spec-asks-once
+description: Given a request that says what to build and why, /quorum:spec-and-eval proposes the slug, tier, research choice, docs, and models together and asks once, instead of one question at a time.
+tags: [spec, questions]
+context:
+  scaffold_script: scaffold.sh
