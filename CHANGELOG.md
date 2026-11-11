@@ -34,6 +34,12 @@ copy with `/plugin marketplace update`.
 
 ### Fixed
 
+- **A LOW task without `--fast` gets its spec reviewers again.** The spec steps' fast-path rule didn't name its
+  condition, and a `/quorum:run --yes` on a LOW task read it as its own and skipped both spec reviewers. The steps
+  now say a task is on the fast path only with `--fast`. `run-low-to-ready` checks that the reviewers ran, and
+  `run-fast-low` that none did.
+- **`quorum-state log` no longer hangs** when given its text as arguments. It read only stdin, which an agent's
+  shell keeps open. Arguments now take precedence, with `\n` read as a newline.
 - **When a round has nothing in scope to vote on**, the steps now say so: `survivors.md` gets the empty summary, and
   the voter isn't started.
 

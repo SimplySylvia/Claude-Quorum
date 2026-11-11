@@ -250,3 +250,15 @@ proof() {
   run "$BIN/quorum-state" --task demo set fast yes; [ "$status" -eq 1 ]
   [ "$(sed -n 3,4p .tasks/demo/state.md | tr '\n' ' ')" = "risk: LOW fast: true " ]
 }
+
+@test "log takes its text as arguments too, and never waits on stdin then" {
+  "$BIN/quorum-state" --task demo init LOW PLANNING
+  # stdin left open, as in an agent's shell: with arguments, log must not read it
+  run bash -c 'sleep 5 | "$1/quorum-state" --task demo log "## Spec (fast path)\n2 requirements"' _ "$BIN"
+  [ "$status" -eq 0 ]
+  grep -q '^## Spec (fast path)$' .tasks/demo/state.md
+  grep -q '^2 requirements$' .tasks/demo/state.md
+  printf '## Round 1\n' | "$BIN/quorum-state" --task demo log
+  grep -q '^## Round 1$' .tasks/demo/state.md
+  run "$BIN/quorum-state" --task demo log < /dev/null; [ "$status" -eq 1 ]
+}

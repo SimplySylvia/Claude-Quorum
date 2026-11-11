@@ -16,7 +16,8 @@ spec without asking, and say what you chose.
 short spec, skips the spec reviewers and the mockup, and goes straight to the build, with no plan round. The checks
 stay: `eval.md`, the Stop hook, the review, and the proof. Each step below says what changes on the fast path. It
 applies only to LOW: if the tier you settle in step 3 is MEDIUM or HIGH, say that the fast path is for LOW tasks
-only and that this one takes the full pipeline, and drop `--fast`.
+only and that this one takes the full pipeline, and drop `--fast`. **Without `--fast` there is no fast path:** a LOW
+task gets every step below, including the two spec reviewers, whatever else `<arguments>` holds (`--yes` included).
 
 Templates live in `<plugin root>/skills/spec-and-eval/templates/`. Use `quorum-state` and
 `quorum-active-task` (on your PATH) for all state; never hand-edit `state.md` frontmatter.
@@ -124,8 +125,9 @@ Do this for MEDIUM and HIGH tasks, and for LOW when `<arguments>` contains `--re
 5. Show the user both files, what the reviewers found and what you changed, and ask for corrections before going
    on. `quorum-state log` a short block: the two summary lines and what changed.
 
-On the fast path, do step 1 only: no spec reviewers. Show the user both files and ask for corrections (with
-`--yes`, go on and say so), then `quorum-state log` a block: `## Spec (fast path)` and the number of requirements.
+Only on the fast path (`--fast` in `<arguments>`, and a LOW tier), do step 1 only: no spec reviewers. Show the user
+both files and ask for corrections (with `--yes`, go on and say so), then `quorum-state log` a block:
+`## Spec (fast path)` and the number of requirements.
 
 ## 7. UI work: mockup gate
 

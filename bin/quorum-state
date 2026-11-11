@@ -9,7 +9,8 @@
 #   quorum-state [--task SLUG] push KEY VALUE        append to a list (round_shas, pending_findings, unlocked)
 #   quorum-state [--task SLUG] last KEY              last list item (exit 1 if the list is empty)
 #   quorum-state [--task SLUG] clear KEY             empty a list, or set a scalar to null
-#   quorum-state [--task SLUG] log < TEXT            append TEXT (stdin) to the body, the human-readable round log
+#   quorum-state [--task SLUG] log [TEXT...]         append TEXT to the body, the human-readable round log: the
+#                                                    arguments (with \n read as a newline), else stdin
 #
 # Setting status READY or AWAITING-HUMAN needs a proof: .tasks/<slug>/proof-final.md from the prover, run at the
 # current HEAD, with no failed check ("Result: ALL PASS" or "<n> SKIPPED"). `pr` is the task's pull request URL.
@@ -249,8 +250,9 @@ case "$cmd" in
 
   log)
     need_file
-    text=$(cat)
-    [ -n "$text" ] || die "log needs text on stdin"
+    # From the arguments when there are any: an agent's shell keeps stdin open, so waiting on it would hang.
+    if [ $# -gt 0 ]; then text=$(printf '%b' "$*"); else text=$(cat); fi
+    [ -n "$text" ] || die "log needs text, as arguments or on stdin"
     [ -z "$(tail -c 1 "$FILE")" ] || printf '\n' >> "$FILE"
     printf '\n%s\n' "$text" >> "$FILE" ;;
 
