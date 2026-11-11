@@ -100,10 +100,15 @@ placeholders for `/quorum:init-pipeline` to fill in). Call this `<RULES>` below.
    > and `CLAUDE.md` if it exists.
 
 2. Save each reply **verbatim** to `run-<N>/<file>` from the table, and all of them together to
-   `run-<N>/candidates.md`.
-3. **Vote.** Start `quorum:verifier-voter`, with `reviewer_model`:
+   `run-<N>/candidates.md`. A reply that's empty, has no `Summary:` line, or fails `quorum-findings check`
+   didn't happen: start that reviewer once more; if it fails again, stop, log `## Run <N> stopped` naming the
+   reviewer, set the status `INTERRUPTED`, and tell the user. A run never reports with a reviewer missing.
+3. **Scope, then vote.** In `run-<N>/`, `quorum-findings scope <range> candidates.md > in-scope.md 2> out-of-scope.md`
+   drops findings on lines the range doesn't change, each with its reason. If `in-scope.md` holds no findings,
+   `quorum-findings summary in-scope.md > survivors.md` and go to step 4: there's nothing to vote on. Otherwise
+   start `quorum:verifier-voter`, with `reviewer_model`:
 
-   > Standalone review. Candidate findings: `.tasks/<id>/run-<N>/candidates.md`. There's no `rd.md`: the change's
+   > Standalone review. Candidate findings: `.tasks/<id>/run-<N>/in-scope.md`. There's no `rd.md`: the change's
    > intent is in `.tasks/<id>/intent.md`. Read `<RULES>`, check each finding against the code, and vote.
 
    Save its reply verbatim to `run-<N>/votes.md`. Then, in `.tasks/<id>/run-<N>/`,
@@ -119,7 +124,8 @@ placeholders for `/quorum:init-pipeline` to fill in). Call this `<RULES>` below.
 - The `quorum-findings summary` line, then the kept findings: `[IMPORTANT]` first, then `[PRE-EXISTING]`, then
   `[NIT]`, each group from most to least confident.
 - Any `## Needs a human` items.
-- What the voter dropped, one line each with its reason, so the user can say a drop was wrong. If the user says a
+- What the voter dropped, and what `out-of-scope.md` dropped before it, one line each with its reason, so the user
+  can say a drop was wrong. If the user says a
   kept finding or a drop was wrong, suggest `/quorum:codify-lesson`, which can turn it into a rule for the next
   review.
 - Lessons, if there are any (only suggest them; never write a rule here): each line `quorum-lessons <id>` prints

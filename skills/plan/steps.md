@@ -89,8 +89,11 @@ the voter with `reviewer_model`; the planner runs on the session's model.
 
 ## 6. Approval
 
-Show the user `plan.md` and the non-blocking findings, and ask them to approve it (skip with `--yes`). On approval:
-`quorum-state set plan_approved <today, YYYY-MM-DD>`, then `quorum-state set status BUILDING`. If they want changes,
+Show the user `plan.md` and the non-blocking findings, and ask them to approve it (skip with `--yes`). If its
+`## Checks changes` names any file, show that list on its own and say that approving unlocks those files for the
+build, which otherwise can't touch the checks; `--yes` never approves a plan with Checks changes. On approval:
+`quorum-state push unlocked <path>` for each file there, `quorum-state set plan_approved <today, YYYY-MM-DD>`, then
+`quorum-state set status BUILDING`. If they want changes,
 pass them to the planner as findings and review once more.
 
 The next step is `/quorum:build`, which builds from this plan. The review loop later checks the code against it.

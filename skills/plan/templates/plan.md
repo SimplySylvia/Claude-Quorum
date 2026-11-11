@@ -24,6 +24,12 @@
 <!-- UI work only; otherwise "Not applicable (no UI change)". One line per new or changed element. -->
 - <!-- element: native element or role · label · keyboard · focus · how changes are announced -->
 
+## Checks changes
+<!-- Files the Stop hook's checks depend on that this change must edit: .claude/hooks/verify-completion.sh, CI
+     workflows, and test, lint, type-check, or format configs. While the task builds and is in review they're
+     locked; approving this plan unlocks the ones listed here. "None" if there are none (the usual case). -->
+- None
+
 ## Security
 <!-- MEDIUM/HIGH work that takes input, crosses a trust boundary, or touches auth or data; otherwise "Not applicable". -->
 - <!-- input or actor · what they may do · where the check happens -->

@@ -19,11 +19,21 @@
 #   quorum-findings cap N [FILE]            all findings, keeping only the N most confident [NIT]s (first wins ties)
 #   quorum-findings check [FILE]            exit 1 and list problems: an [IMPORTANT] without file:line or category,
 #                                           or a Confidence that isn't a whole number from 0 to 100
+#   quorum-findings scope RANGE [FILE]      the findings the voter should see (stdout), and those it needn't (stderr,
+#                                           one "DROP <finding head> — out of scope: <why>" line each): an
+#                                           [IMPORTANT] or [NIT] whose file the range doesn't change, whose line is
+#                                           more than 3 lines from a changed one, or whose line has a lint-ignore
+#                                           comment (noqa, eslint-disable, nolint, @ts-ignore, #[allow(, ...).
+#                                           [PRE-EXISTING] findings, and findings citing .tasks/ or no file:line,
+#                                           always stay. Run it from the working tree the range is in.
 #
 # Lines starting with anything else (for example "DROP" lines from the verifier-voter) are not findings.
 set -euo pipefail
 
 die() { echo "quorum-findings: $*" >&2; exit 1; }
+HERE=$(cd "$(dirname "$0")" && pwd)
+# Through quorum-git, so a sandbox that hides the real git behind Apple's launcher doesn't break this script.
+git() { "$HERE/quorum-git" "$@"; }
 cmd=${1:-}; shift || true
 
 # Normalize into records: TAG<TAB>header line<TAB>body (body lines joined with \037)
@@ -106,5 +116,49 @@ case "$cmd" in
       }')
     if [ -n "$bad" ]; then printf '%s\n' "$bad" >&2; exit 1; fi ;;
 
-  *) die "usage: quorum-findings summary|count TAG|important|categories|cap N|check [FILE]" ;;
+  scope)
+    range=${1:-}; shift || true
+    [ -n "$range" ] || die "scope needs a git range"
+    diff=$(git diff -U0 --no-color --no-ext-diff "$range") || die "can't diff $range"
+    # The changed lines, as PATH<TAB>FIRST<TAB>LAST per hunk of the new side; then the findings.
+    awk -F '\t' -v win=3 '
+      function lines_of(path,   l, n) {
+        if (path in loaded) return
+        loaded[path] = 1; n = 0
+        while ((getline l < path) > 0) text[path, ++n] = l
+        close(path)
+      }
+      function emit(r,   m, b, i) {
+        if (k++) print ""; print head[r]; m = split(body[r], b, "\037"); for (i = 1; i <= m; i++) if (b[i] != "") print b[i]
+      }
+      FNR == NR { nh++; hp[nh] = $1; hs[nh] = $2; he[nh] = $3; changed[$1] = 1; next }
+      {
+        r = FNR; tag[r] = $1; head[r] = $2; body[r] = $3; why = ""
+        if ($1 != "PRE-EXISTING" && match($2, /^\[[A-Z-]+\] [^ :]+:[0-9]+/)) {
+          loc = substr($2, index($2, "] ") + 2); path = loc; sub(/:.*/, "", path)
+          n = loc; sub(/^[^:]*:/, "", n); sub(/[^0-9].*$/, "", n); n += 0
+          if (path !~ /^\.tasks\//) {
+            if (!(path in changed)) why = "the range doesn'"'"'t change " path
+            else {
+              near = 0
+              for (h = 1; h <= nh; h++) if (hp[h] == path && n >= hs[h] - win && n <= he[h] + win) { near = 1; break }
+              if (!near) why = "line " n " is more than " win " lines from a changed line"
+              else {
+                lines_of(path)
+                if (text[path, n] ~ /(noqa|eslint-disable|nolint|@ts-ignore|@ts-expect-error|#\[allow\(|NOSONAR|pylint: *disable|rubocop: *disable|type: *ignore|nosec)/)
+                  why = "line " n " has a lint-ignore comment"
+              }
+            }
+          }
+        }
+        if (why == "") emit(r)
+        else print "DROP " $2 " — out of scope: " why > "/dev/stderr"
+      }
+    ' <(printf '%s\n' "$diff" | awk '
+          /^\+\+\+ / { f = substr($0, 5); sub(/^b\//, "", f); next }
+          /^@@ / { split($0, a, " "); split(substr(a[3], 2), b, ","); c = b[2] == "" ? 1 : b[2] + 0
+                   first = b[1] + 0; last = c == 0 ? first : first + c - 1; print f "\t" first "\t" last }') \
+      <(records "$(src "${1:-}")") ;;
+
+  *) die "usage: quorum-findings summary|count TAG|important|categories|cap N|check [FILE]|scope RANGE [FILE]" ;;
 esac

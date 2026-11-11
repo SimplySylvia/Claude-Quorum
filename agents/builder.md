@@ -39,6 +39,10 @@ unrelated changes. If you think a finding is wrong, say why in your report inste
   accessibility details it lists. Reviewers check the code against the plan. If something in the plan turns out to
   be wrong, do the right thing and add one line under its `## Deviations` saying what you did differently and why;
   an unexplained difference is a review finding.
+- **The checks are locked.** While the task builds or is in review, a hook blocks edits to the task's `rd.md` and
+  `eval.md`, `verify-completion.sh`, CI workflows, and test, lint, type-check, and format configs, and `git commit
+  --no-verify`, unless the plan's `## Checks changes` lists the file. If a check seems wrong, say so in your
+  report; never work around it.
 - Make the smallest change that meets the requirements. No debug output, dead code, or drive-by refactors.
 - Use local, temporary, or synthetic data only. Never touch production systems or real credentials.
 - Run `bash .claude/hooks/verify-completion.sh` and every command in `eval.md` that applies. Fix what fails.

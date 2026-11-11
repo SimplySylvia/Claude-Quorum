@@ -3,6 +3,40 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
+## Unreleased
+
+### Added
+
+- **The checks can't be weakened during a task.** A new hook, `protect-checks.sh`, applies while a task is
+  `BUILDING` or `IN_REVIEW`, to the builder and the main session alike. It blocks:
+  - edits to the task's own `rd.md` and `eval.md` (what the prover holds it to), `verify-completion.sh`,
+    `.claude/settings*.json`, CI configs, commit hooks, and the usual test, lint,
+    type-check, and format configs, whether by `Edit` or `Write` or by a Bash redirect, `tee`, `cp`, `mv`, `rm`, or
+    `sed -i`;
+  - `git commit --no-verify`, `-n`, and commits with `core.hooksPath` set.
+
+  A change the task needs goes in `plan.md`'s new **Checks changes** section. Approving the plan unlocks those files
+  (`unlocked` in `state.md`), and `--yes` never approves a plan that has any. Otherwise only the user can unlock a
+  file, by running `! quorum-state push unlocked <path>`; the hook blocks Claude from running it. The new
+  `protected_paths` option, or `protected_paths` in `.claude/quorum.json`, adds the repo's own.
+- **A secret guard, in every session.** `secret-guard.sh` blocks reading `.env` and other credential files, with
+  `Read`, `Grep`, or a reading command. It also blocks a `git commit` whose new lines hold an AWS, GitHub, Slack,
+  Stripe, Google, Anthropic, or OpenAI key, a private key, or a quoted password or token. It names the file, line,
+  and kind, never the value. `quorum: allow-secret` on a line passes a fake value; the `secret_guard` option turns
+  the guard off. The new `quorum-secrets` helper does the matching.
+- **Review rounds fail closed.** A reviewer whose reply is empty, has no `Summary:` line, or fails
+  `quorum-findings check` is started once more. If it fails again, the round stops without converging, and the next
+  run reviews that round again. `/quorum:review` marks the run `INTERRUPTED`.
+- **Findings outside the diff are dropped before the voter.** `quorum-findings scope RANGE` keeps a finding only if
+  its file changed and its line is within 3 lines of a changed one, and not on a lint-ignore comment. It always keeps
+  `[PRE-EXISTING]` findings and ones citing `.tasks/`. The voter reads `in-scope.md`; `out-of-scope.md` lists each
+  drop with its reason, and the report shows them.
+
+### Fixed
+
+- **When a round has nothing in scope to vote on**, the steps now say so: `survivors.md` gets the empty summary, and
+  the voter isn't started.
+
 ## 0.9.0 (2026-11-10)
 
 ### Added

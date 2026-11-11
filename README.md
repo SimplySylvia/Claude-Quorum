@@ -289,8 +289,23 @@ confirm. The tier decides how many layers the task gets:
 - **Proof before done.** The Stop hook blocks finishing during a task until the repo's fast checks pass; after 3
   failures in a row it lets you go and marks the task `ESCALATED`. A task can't be marked `READY` or
   `AWAITING-HUMAN` without the prover's `proof-final.md`, run at the current commit, with no failed check.
-- **Quiet outside a task.** The hooks do nothing unless a task is building, in review, or escalated, or a blind
-  test is running.
+- **The checks can't be weakened mid-task.** While a task builds or is in review, a hook blocks edits to the task's
+  own `rd.md` and `eval.md`, `verify-completion.sh`, CI workflows, and the usual test, lint, type-check, and format
+  configs. It also blocks
+  `git commit --no-verify` and commits with `core.hooksPath` set. It applies to the builder and the main session
+  alike. A change the task really needs goes in `plan.md`'s **Checks changes**, which you approve with the plan.
+  Otherwise only you can unlock a file, with `! quorum-state push unlocked <path>`. Add your own with the
+  `protected_paths` option or `.claude/quorum.json`.
+- **Secrets stay out.** In every session, a hook blocks reading `.env` and other credential files, and blocks a
+  commit whose new lines look like a key or token. It names the file, line, and kind, never the value. A fake value
+  in a test passes with `quorum: allow-secret` on its line. The `secret_guard` option turns it off.
+- **No silent reviewers.** A reviewer that returns nothing, or a reply without a summary, is rerun once. If it fails
+  again, the round stops instead of converging without it.
+- **Findings stay on the change.** Before the voter, `quorum-findings scope` drops findings on lines the diff
+  doesn't change, or on a line with a lint-ignore comment. It keeps `[PRE-EXISTING]` ones, and says why for each
+  drop.
+- **Quiet outside a task.** Apart from the secret guard, the hooks do nothing unless a task is building, in review,
+  or escalated, or a blind test is running.
 - **Hard caps.** At most 3 review rounds, then `HALTED` with a post-mortem and two redesign options.
 - **Asks before writing** to `CLAUDE.md`, `REVIEW.md`, or your global `~/.claude/CLAUDE.md`, with a diff first.
 - **Local data only.** Blind tests and `eval.md` checks use local, temporary, or synthetic data, never production.
@@ -366,6 +381,9 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `security_on_medium` | `false` | Also run the security pass for MEDIUM tasks |
 | `reviewer_model` | `ask` | Model for the spec, plan, code, and security reviewers and the voter: `ask`, `inherit`, or a model name |
 | `helper_model` | `ask` | Model for the PR writer and the friction triager: `ask`, `inherit`, or a model name |
+| `secret_guard` | `true` | Block reading credential files and committing lines that look like secrets |
+| `protected_paths` | (none) | More check files a task can't change while it builds or is in review, as comma-separated globs |
+| `worktrees` | `false` | Build each task in its own git worktree (see [More than one task at a time](#more-than-one-task-at-a-time)) |
 | `blind_block_dirs` | `src,app,lib,packages,Source,Content` | Folders the blind user can't read |
 | `blind_block_exts` | `ts,tsx,js,jsx,py,rs,go,cpp,h,java,kt,rb` | File types the blind user can't read |
 
@@ -380,9 +398,9 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `.claude-plugin/marketplace.json` | Marketplace manifest (lists this repo as its only plugin) |
 | `skills/` | `init-pipeline`, `spec-and-eval`, `plan`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `pr-draft`, `codify-lesson`, `review`, `run`, and the model-invocable `pipeline-laws`. Each stage `run` chains keeps its instructions in `steps.md`, which its `SKILL.md` and `run` both follow |
 | `agents/` | `researcher`, `spec-reviewer`, `planner`, `builder`, `prover`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `verifier-voter`, `security-reviewer`, `blind-user`, `friction-triager`, `pr-writer` |
-| `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `stop-verify.sh`, `record-pr.sh`, and `dashboard/`, the dashboard's hooks module |
+| `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `protect-checks.sh`, `secret-guard.sh` (both read commands with `shell-words.sh`), `stop-verify.sh`, `record-pr.sh`, and `dashboard/`, the dashboard's hooks module |
 | `types/` | The type contract for the values the dashboard keeps in the session |
-| `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state`, `quorum-reviews`, `quorum-lessons`, `quorum-git` (on the Bash PATH while the plugin is enabled) |
+| `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state`, `quorum-reviews`, `quorum-lessons`, `quorum-secrets`, `quorum-git` (on the Bash PATH while the plugin is enabled) |
 | `libexec/` | `git`, which `quorum-git` puts first on PATH when it runs a real git by full path, so git's own child processes (`git worktree add` starts some) reach it too |
 | `tests/` | bats tests for every hook and helper, `claude plugin test` tests for the dashboard, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
 | `evals/` | `claude plugin eval` suite: risk tiering, one case per agent, voter false-alarm drops, blind-mode source reads, a near-miss |
@@ -398,6 +416,10 @@ Tests, evals, trying a local build, redrawing the diagrams, and releasing are in
 ## Known limits
 
 - **Claude Code asks before writing `.claude/hooks/`**, so `init-pipeline` brings one approval prompt.
+- **The check and secret guards read commands, they don't sandbox them.** They catch the plain forms an agent uses
+  (`cat .env`, `sed -i` on a config, `--no-verify`), not a script written to hide what it does. They also don't
+  cover a test script inside `package.json` or `pyproject.toml`, which hold dependencies too. `Grep` over a whole
+  folder can still show lines from a `.env` in it.
 - **The blind guard is a safeguard, not a sandbox.** It blocks reading source, but running a script that reads
   source gets through, because running code is how a user runs the app.
 - **Agents add up.** A MEDIUM or HIGH round runs 4–6 reviewers, a voter, and a builder, for up to 3 rounds, after

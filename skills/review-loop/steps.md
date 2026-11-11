@@ -82,17 +82,26 @@ Let N = `quorum-state get round` + 1. Stop the loop if N > max_rounds (see step 
 
 4. Save each reviewer's reply **verbatim** to `round-<N>/<file>` from the table, and all of them together to
    `round-<N>/candidates.md`.
-5. **Vote.** Start `quorum:verifier-voter` with:
+   **Every reviewer must reply.** A reply that's empty, or has no `Summary:` line, or fails
+   `quorum-findings check <file>`, didn't happen: start that reviewer once more with the same prompt. If it fails
+   again, stop the loop without converging: `quorum-state set round <N - 1>` (so the next run reviews this round
+   again), `quorum-state log` a block `## Round <N> stopped` naming the reviewer and what came back, and tell the
+   user. A round never converges with a reviewer missing.
+5. **Scope, then vote.** In `round-<N>/`, `quorum-findings scope <RANGE> candidates.md > in-scope.md 2> out-of-scope.md`
+   drops the findings whose line the range doesn't change (or that sit on a lint-ignore comment), each with its
+   reason, before the voter spends time on them. If `in-scope.md` holds no findings, there's nothing to vote on:
+   `quorum-findings summary in-scope.md > survivors.md`, and go to step 6. Otherwise start `quorum:verifier-voter`
+   with:
 
-   > Task: `<slug>`. Candidate findings: `.tasks/<slug>/review/round-<N>/candidates.md`. Read `REVIEW.md` and
+   > Task: `<slug>`. Candidate findings: `.tasks/<slug>/review/round-<N>/in-scope.md`. Read `REVIEW.md` and
    > `.tasks/<slug>/rd.md`, check each finding against the code, and vote.
 
    Save its reply verbatim to `round-<N>/votes.md` (it keeps the `## Dropped` lines, which `/quorum:codify-lesson`
    reads). Then `quorum-findings cap <nit_cap> votes.md > survivors.md`: the kept findings, with only the most confident nits. Run
    `quorum-findings check survivors.md`; if it fails, ask the voter once to fix the format.
 6. **Log the round:** pipe a short block to `quorum-state log`:
-   `## Round <N> (<RANGE>)`, the `quorum-findings summary` line, the Pattern Categories, and the number of `DROP`
-   lines in `votes.md`.
+   `## Round <N> (<RANGE>)`, the `quorum-findings summary` line, the Pattern Categories, the number of `DROP`
+   lines in `votes.md`, and the number of lines in `out-of-scope.md`.
 7. **Route:**
    - `quorum-findings count IMPORTANT survivors.md` is 0 → `quorum-state set status CONVERGED`, go to step 6.
    - N = max_rounds → go to step 5 (HALTED).

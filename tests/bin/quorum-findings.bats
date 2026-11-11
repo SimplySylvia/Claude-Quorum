@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
 load ../helpers
+bats_require_minimum_version 1.5.0
 
 FX="$BATS_TEST_DIRNAME/../fixtures/findings"
 qf() { "$BIN/quorum-findings" "$@"; }
@@ -107,4 +108,50 @@ qf() { "$BIN/quorum-findings" "$@"; }
     [ "$status" -eq 0 ] || { echo "$a: $output"; return 1; }
     grep -q '^Confidence: [0-9]' "$BATS_TEST_TMPDIR/$a.md" || { echo "$a has no Confidence line"; return 1; }
   done
+}
+
+@test "scope: keeps findings on or near changed lines, and drops the rest, saying why" {
+  make_repo
+  mkdir app && seq 1 40 | sed 's/^/x = /' > app/report.py && cp app/report.py app/other.py
+  git add -A && git -c user.name=t -c user.email=t@example.com commit -qm base
+  base=$(git rev-parse HEAD)
+  sed -i.bak '20s/.*/y = parse(row)/; 30s/.*/z = 1  # noqa: E501/' app/report.py && rm app/report.py.bak
+  git -c user.name=t -c user.email=t@example.com commit -qam change
+  cat > candidates.md <<'MD'
+## logic.md
+Summary: 4 IMPORTANT, 1 NIT, 1 PRE-EXISTING
+
+[IMPORTANT] app/report.py:20 — Pattern Category: Unvalidated input
+Confidence: 90
+Mechanism: parse() trusts the row.
+
+[IMPORTANT] app/report.py:22 — Pattern Category: Near the change
+Confidence: 70
+
+[IMPORTANT] app/report.py:5 — Pattern Category: Far from the change
+Confidence: 80
+
+[IMPORTANT] app/other.py:3 — Pattern Category: Untouched file
+Confidence: 80
+
+[NIT] app/report.py:30 — long line
+[PRE-EXISTING] app/other.py:9 — old bug, worth a ticket
+[IMPORTANT] .tasks/demo/plan.md:4 — Pattern Category: Plan drift
+MD
+  run --separate-stderr "$BIN/quorum-findings" scope "$base..HEAD" candidates.md
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"app/report.py:20 — Pattern Category: Unvalidated input"* ]]
+  [[ "$output" == *"Mechanism: parse() trusts the row."* ]]
+  [[ "$output" == *"app/report.py:22"* ]]
+  [[ "$output" == *"[PRE-EXISTING] app/other.py:9"* ]]
+  [[ "$output" == *".tasks/demo/plan.md:4"* ]]
+  [[ "$output" != *"app/report.py:5 "* && "$output" != *"app/other.py:3"* && "$output" != *"app/report.py:30"* ]]
+  [[ "$stderr" == *"DROP [IMPORTANT] app/report.py:5 — Pattern Category: Far from the change — out of scope: line 5 is more than 3 lines from a changed line"* ]]
+  [[ "$stderr" == *"app/other.py:3"*"the range doesn't change app/other.py"* ]]
+  [[ "$stderr" == *"app/report.py:30"*"has a lint-ignore comment"* ]]
+  # the voter's input still counts and checks like a findings file
+  printf '%s\n' "$output" > scoped.md
+  [ "$("$BIN/quorum-findings" count IMPORTANT scoped.md)" = 3 ]
+  "$BIN/quorum-findings" check scoped.md
+  cleanup_repo
 }

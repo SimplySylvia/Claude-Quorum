@@ -6,7 +6,7 @@
 #   quorum-state [--task SLUG] get KEY               scalar value (empty for null), or list items one per line
 #   quorum-state [--task SLUG] set KEY VALUE         set a scalar (validated: status, risk, fast, counters, pr, models)
 #   quorum-state [--task SLUG] incr KEY              add 1 to a counter and print the new value
-#   quorum-state [--task SLUG] push KEY VALUE        append to a list (round_shas, pending_findings)
+#   quorum-state [--task SLUG] push KEY VALUE        append to a list (round_shas, pending_findings, unlocked)
 #   quorum-state [--task SLUG] last KEY              last list item (exit 1 if the list is empty)
 #   quorum-state [--task SLUG] clear KEY             empty a list, or set a scalar to null
 #   quorum-state [--task SLUG] log < TEXT            append TEXT (stdin) to the body, the human-readable round log
@@ -16,7 +16,9 @@
 # `reviewer_model` and `helper_model` are the models chosen for the task's agents (skills/pipeline-laws/models.md):
 # `inherit` or a value the Agent tool's `model` parameter accepts. `fast: true` marks a LOW task on the fast path
 # (/quorum:run --fast): no plan round, and one reviewer. `worktree` is the git worktree the task's code is in, when
-# quorum-branch start --worktree made one; its HEAD is the one the proof must match.
+# quorum-branch start --worktree made one; its HEAD is the one the proof must match. `unlocked` lists the protected
+# check files (hooks/protect-checks.sh) the user approved changing during the task: the plan's Checks changes, or
+# one the user unlocked themselves.
 # A standalone review (/quorum:review) keeps its state in .tasks/review-<id>/ with `kind: review`, the `range` it
 # reviewed, the `session` running it (a Claude Code session id), and status REVIEWING, FIXING (its builder is fixing
 # the kept findings), REVIEWED, or INTERRUPTED (a run that never finished; see quorum-reviews). No `kind` is a task.
@@ -30,8 +32,8 @@ die() { echo "quorum-state: $*" >&2; exit 1; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 # Through quorum-git, so a sandbox that hides the real git behind Apple's launcher doesn't break this script.
 git() { "$HERE/quorum-git" "$@"; }
-ORDER="slug kind range session risk fast status worktree round base_sha round_shas stop_blocks signoff plan_rounds plan_approved pending_findings blind_runs escalated_from reviewer_model helper_model pr"
-LISTS=" round_shas pending_findings "
+ORDER="slug kind range session risk fast status worktree round base_sha round_shas stop_blocks signoff plan_rounds plan_approved pending_findings unlocked blind_runs escalated_from reviewer_model helper_model pr"
+LISTS=" round_shas pending_findings unlocked "
 COUNTERS=" round stop_blocks plan_rounds blind_runs "
 STATUSES=" DRAFT-AWAITING-VISUAL-SIGNOFF PLANNING BUILDING IN_REVIEW CONVERGED BLIND-TEST READY AWAITING-HUMAN HALTED ESCALATED REVIEWING FIXING REVIEWED INTERRUPTED "
 RISKS=" LOW MEDIUM HIGH "

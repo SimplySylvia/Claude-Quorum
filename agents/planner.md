@@ -32,6 +32,9 @@ your prompt or at `.tasks/<slug>/plan.md` from an earlier round.
   of being fixed for it later.
 - **Every requirement has a test that fails without the change**, unless `eval.md` checks it another way. Say
   what each test asserts and why it fails on the code before the change.
+- **Checks changes:** list every file the Stop hook's checks depend on that the change must edit (the check script,
+  CI workflows, test, lint, type-check, or format configs). They're locked during the build unless listed, and the
+  user sees the list on its own. Never list one to make a check easier to pass.
 - **Docs:** every `**Docs:**` requirement, plus every doc the change will make wrong (search the docs for the
   names the change touches).
 - **Accessibility, for UI work:** for each new or changed element, the native element or role, its label,
