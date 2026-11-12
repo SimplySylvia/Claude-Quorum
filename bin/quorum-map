@@ -22,7 +22,7 @@
 #   quorum-map list                                  every map: SLUG<TAB>OPEN<TAB>RESOLVED<TAB>FRONTIER (counts)
 #   quorum-map --map SLUG init [TITLE]               create .tasks/map-SLUG/ with map.md from the template
 #   quorum-map --map SLUG new TYPE TITLE QUESTION    add an open ticket with no blockers; print its number. \n in
-#                                                    QUESTION reads as a newline
+#                                                    QUESTION reads as a newline. A map holds at most 99 tickets
 #   quorum-map --map SLUG block NN BLOCKER...        NN waits for each BLOCKER; refuses a missing ticket or a cycle
 #   quorum-map --map SLUG tickets                    NN<TAB>TYPE<TAB>STATUS<TAB>BLOCKED_BY<TAB>TITLE, in order
 #   quorum-map --map SLUG frontier                   open tickets whose blockers are all closed, one per line
@@ -352,6 +352,7 @@ case "$cmd" in
     case "$title" in *"$TAB"*|*$'\n'*) die "a title may not contain tabs or newlines" ;; esac
     [ -n "$question" ] || die "new needs the question"
     last=$(list_tickets | tail -n 1 | cut -f1)
+    [ "${last:-0}" != 99 ] || die "map $map has 99 tickets, the most a map holds: split the effort into two maps"
     n=$(printf '%02d' $(( ${last:+10#$last} + 1 )))
     name=$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]\{1,\}/-/g' -e 's/^-//' -e 's/-$//' | cut -c1-40 | sed 's/-$//')
     file="$DIR/tickets/$n-${name:-ticket}.md"

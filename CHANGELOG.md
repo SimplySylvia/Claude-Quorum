@@ -12,6 +12,11 @@ copy with `/plugin marketplace update`.
   `/quorum:run --bug --fast`, from the reproduction to `Bug: VERIFIED`. Each marks where Quorum stops for you and
   where a check sends work back.
 
+### Fixed
+
+- **A map stops at 99 tickets.** Tickets are numbered `01` to `99`, and a 100th wasn't listed, so the next one took
+  its number too. `quorum-map new` now refuses past 99.
+
 ## 0.11.0 (2026-11-11)
 
 ### Added

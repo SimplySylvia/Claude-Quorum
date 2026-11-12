@@ -147,3 +147,10 @@ MD
   [ "$(cat .tasks/.map-sessions/s1)" = billing ]
   "$BIN/quorum-map" leave s1; [ ! -e .tasks/.map-sessions/s1 ]
 }
+
+@test "new refuses a 100th ticket" {
+  printf '# Last\n\nType: grilling\nBlocked by: none\nStatus: open\n\n## Question\n\nq?\n' > .tasks/map-billing/tickets/99-last.md
+  run qm new grilling "One more" "q?"; [ "$status" -eq 2 ]
+  [[ "$output" == *"99 tickets"* ]]
+  [ "$(ls .tasks/map-billing/tickets | wc -l | tr -d ' ')" = 1 ]
+}

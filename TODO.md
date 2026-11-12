@@ -163,8 +163,6 @@ Deep research and `/quorum:research` shipped in 0.10.0. Still to do:
   until `quorum-map leave`. Clear markers whose session ended, or say so in `/quorum:map` with no arguments.
 - **Maps on the dashboard.** The pane shows tasks only; a map's frontier and its ready tasks would fit the **Other
   tasks** list.
-- **Ticket numbers.** Tickets are numbered `01` to `99`; a 100th breaks listing. Widen the numbers, or have
-  `quorum-map new` refuse past 99.
 - **A tracker.** Wayfinder keeps its map on GitHub or Linear issues, so the frontier shows in the tracker's UI. Quorum
   keeps it in `.tasks/`; mirroring tickets to a tracker would let a team see and claim them.
 - **The evals.** `map-*`, `spec-from-map`, and `retro-finds-lessons` are written but not yet run.
