@@ -60,19 +60,23 @@ A worktree per task shipped in 0.9.0. A real headless `/quorum:run --worktree` o
 ## 4. Proof that Quorum helps: a baseline and a public benchmark
 
 Superpowers tests each skill by first running an agent without it, and its release notes give the numbers ("found
-the conflict 8 of 8 times"). Quorum's evals can't say anything like that: `evals/run.sh` passes `--ablation none`,
-so no case runs without the plugin. `claude plugin eval`'s `with-without` mode runs a no-plugin arm and reports
-the score delta. Of the peers, only Superpowers and Compound Engineering measure against a baseline, so this is
-an edge worth having.
+the conflict 8 of 8 times"). `evals/run.sh` passes `--ablation none`, so a case runs only with the plugin unless it's
+given `--ablation with-without`, which adds a no-plugin arm and reports the score delta. Of the peers, only
+Superpowers and Compound Engineering measure against a baseline, so this is an edge worth having.
 
-- **A baseline for the cases where Quorum should make the difference:** `prover-catches-hollow-test`,
-  `reviewer-finds-bug`, `voter-drops-false-alarm`, `test-adequacy-hollow-test`, and a new one where the agent says
-  "done" with a failing check. Run them with `--ablation with-without` (twice the cost; keep `--ablation none` the
-  default in `run.sh`), and put the deltas in the CHANGELOG for each release that changes an agent.
-- **The public benchmark.** Run Quorum's review and Anthropic's `code-review` on the fixture apps with planted bugs
-  (the evals already plant some), and publish how many real bugs each finds, how many false alarms it raises, and
-  what it costs in tokens (the dashboard's Spend section now counts them). It's Quorum's own "proof before done"
-  applied to its claims, and the strongest argument a README can make.
+- **More baseline cases.** `baseline-done-with-failing-check` measures the Stop hook with `--ablation with-without`
+  (see CONTRIBUTING). The agent cases can't be baselines: they name a Quorum agent, which the no-plugin arm doesn't
+  have, and Quorum's commands are user-only, so a shared prompt never reaches the reviewers or the voter. More
+  baselines fit what fires unasked: the check lock (a session that weakens a test to pass), the secret guard, the
+  map guard. Rerun the baseline for each release that changes a hook, and put the delta in the CHANGELOG.
+- **SWE-bench Verified.** Plain Claude Code, `/quorum:run --yes --fast`, and `/quorum:run --yes` on the same model
+  and the same random subset (a 10-task pilot, then 50), scored by the hidden tests. Report the false-done rate
+  (success claimed while hidden tests fail) beside resolve rate, regressions (PASS_TO_PASS), and cost per solved task.
+- **The public benchmark.** Run Quorum's review and Anthropic's `code-review` on real bugs: bug-fix commits from
+  open-source repos, reverted, so the right answer is known (planted bugs are ours, so they're easy to argue with).
+  Publish how many real bugs each finds, how many false alarms it raises, and what it costs in tokens (the
+  dashboard's Spend section now counts them). It's Quorum's own "proof before done" applied to its claims, and the
+  strongest argument a README can make.
 
 ## 5. Large plans: what's left
 

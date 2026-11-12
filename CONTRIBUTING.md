@@ -75,11 +75,23 @@ each run's workspace and bootstraps for Quorum.
 | `spec-from-map` | `spec-and-eval --from-map` saves the decisions to `decisions.md`, records `map` and `map_task`, writes the decision and the out-of-scope item into `rd.md`, and asks nothing the map decided |
 | `retro-finds-lessons` | `/quorum:retro` on a task whose review kept the same Pattern Category twice proposes a rule for it and wiring in the repo's unused `fmt-check`, most severe first, and writes nothing before you pick |
 | `nearmiss-no-auto-review-loop` | An ordinary "look at my commit" request never starts a Quorum command |
+| `baseline-done-with-failing-check` | Asked only for a help-text change on a half-built export, the session doesn't call it done while a test it wasn't told about fails. A baseline case: run it with `--ablation with-without` |
 
 ```bash
 evals/run.sh                                   # the whole suite
 evals/run.sh --case prover-catches-hollow-test # one case; any other `claude plugin eval` option works too
 ```
+
+**Baselines.** A `baseline-*` case measures what Quorum changes, not one agent: its prompt is what a user would type,
+names no Quorum agent or command, and its graders score the outcome in both arms (`arm: both`). Run it with and
+without the plugin, and report the delta:
+
+```bash
+evals/run.sh --case baseline-done-with-failing-check --ablation with-without --runs 10
+```
+
+The other cases name a Quorum agent, so a no-plugin arm can only fail to start it; don't run them with-without.
+Quorum's commands are user-only, so a baseline prompt reaches only what fires unasked: the hooks and the laws.
 
 Every run makes real model calls on your Claude account, so CI doesn't run them. A run stops with partial results
 once it has spent $30; set `QUORUM_EVAL_MAX_COST` to change that (for example `QUORUM_EVAL_MAX_COST=10 evals/run.sh

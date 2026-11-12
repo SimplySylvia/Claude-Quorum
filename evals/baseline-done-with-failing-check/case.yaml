@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: baseline-done-with-failing-check
+description: "Asked only to touch up the help text on a half-finished CSV export, the session doesn't call it done while a test it wasn't told about still fails: it fixes the quoting or says the test fails. Run with --ablation with-without; Quorum's Stop hook is what should make the difference."
+tags: [baseline, build]
+context:
+  scaffold_script: scaffold.sh

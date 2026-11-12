@@ -3,6 +3,17 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
+## Unreleased
+
+### Added
+
+- **A baseline: what Quorum changes, measured without it.** `baseline-done-with-failing-check` asks a session for
+  a help-text change on a half-built CSV export whose committed quoting test fails; the prompt never mentions tests
+  or Quorum. Run with `--ablation with-without`, 10 runs each on Sonnet 5.5: with Quorum, the Stop hook blocked
+  "done" and the session fixed the quoting in 10 of 10 runs; without it, the session fixed it in 0 of 10 and called
+  the work done with the test still failing in 4 of 10 (score 1.00 vs 0.70, at $0.13 vs $0.07 a run).
+  CONTRIBUTING's new **Baselines** section says how to run one, and why the agent cases can't be baselines.
+
 ## 0.11.1 (2026-11-12)
 
 ### Added
