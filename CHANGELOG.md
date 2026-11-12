@@ -14,6 +14,10 @@ copy with `/plugin marketplace update`.
 
 ### Fixed
 
+- **A map session ends with its session.** A session closed or cleared partway through `/quorum:map` left its
+  `.tasks/.map-sessions/` marker behind, and the map guard kept blocking that session if it was resumed. A new
+  SessionEnd hook, `map-session-end.sh`, removes it. A crashed session can't run the hook, so `quorum-map sessions`
+  lists what's left, and `/quorum:map` with no arguments shows it and offers to end it.
 - **A map stops at 99 tickets.** Tickets are numbered `01` to `99`, and a 100th wasn't listed, so the next one took
   its number too. `quorum-map new` now refuses past 99.
 

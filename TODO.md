@@ -159,8 +159,6 @@ Deep research and `/quorum:research` shipped in 0.10.0. Still to do:
   to which questions are already sharp.
 - **What the map's agents cost.** A code question's facts researcher and the decision check add two agents per
   ticket, and the hand-off review two to four. Measure how often each changes a decision; drop the ones that don't.
-- **A cut-off map session.** Its `.tasks/.map-sessions/<id>` marker stays, and the guard keeps blocking that session
-  until `quorum-map leave`. Clear markers whose session ended, or say so in `/quorum:map` with no arguments.
 - **Maps on the dashboard.** The pane shows tasks only; a map's frontier and its ready tasks would fit the **Other
   tasks** list.
 - **A tracker.** Wayfinder keeps its map on GitHub or Linear issues, so the frontier shows in the tracker's UI. Quorum

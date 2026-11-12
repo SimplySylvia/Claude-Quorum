@@ -49,13 +49,16 @@ set: use its default.
 Work from the main working tree (`quorum-active-task --main`); read `CLAUDE.md` if there is one.
 
 - **No arguments:** show `quorum-map list` (slug, open, resolved, frontier), and ask which map to work on, or
-  what to chart.
+  what to chart. If `quorum-map sessions` lists a session other than `${CLAUDE_SESSION_ID}`, show it with its map
+  and when it started: a session ending removes its own, so one left over is either still open or crashed, and the
+  guard blocks building in it if it's resumed. Ask whether it's over; `quorum-map leave <session>` only with a yes.
 - **A map slug** (`.tasks/map-<slug>/` exists): [Work through the map](#work-through-the-map), on the ticket named
   after it if there is one. With `--revise`, [Revise a decision](#revise-a-decision).
 - **Anything else** is a new idea: [Chart the map](#chart-the-map).
 
 Whenever you start working on a map, run `quorum-map enter ${CLAUDE_SESSION_ID} <slug>`, and before you stop, always
-`quorum-map leave ${CLAUDE_SESSION_ID}`, even after a question or an error.
+`quorum-map leave ${CLAUDE_SESSION_ID}`, even after a question or an error. (If the session ends first, a hook
+leaves for it.)
 
 ## The map
 

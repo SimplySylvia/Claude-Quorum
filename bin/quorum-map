@@ -46,7 +46,10 @@
 #                                                    STATE being merged, the started task's status, ready, or blocked
 #   quorum-map --map SLUG next-task                  the first ready task's number (exit 1 if none)
 #   quorum-map enter SESSION SLUG | leave SESSION    start or end a map session; hooks/map-guard.sh keeps a session
-#                                                    in one from changing the repo outside .tasks/
+#                                                    in one from changing the repo outside .tasks/, and
+#                                                    hooks/map-session-end.sh ends it when the session ends
+#   quorum-map sessions                              SESSION<TAB>SLUG<TAB>STARTED (YYYY-MM-DD HH:MM) for each map
+#                                                    session; one left by a session that crashed stays until leave
 #
 # A task counts as merged when quorum-branch is-merged says so; until then the tasks waiting on it stay blocked,
 # since a branch made from the default branch wouldn't have its code. Bash 3.2 compatible.
@@ -88,7 +91,15 @@ case "$cmd" in
   leave)
     session=${1:-}; valid_session "$session" || die "leave needs a session id"
     rm -f "$TASKS/.map-sessions/$session"; exit 0 ;;
-  "") die "usage: quorum-map list | --map SLUG <command> | enter SESSION SLUG | leave SESSION" ;;
+  sessions)
+    for f in "$TASKS"/.map-sessions/*; do
+      [ -f "$f" ] || continue
+      # The marker's time: date -r FILE (GNU, and newer macOS), else BSD stat. GNU stat -f means something else.
+      started=$(date -r "$f" '+%Y-%m-%d %H:%M' 2>/dev/null || stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$f" 2>/dev/null || echo -)
+      printf '%s\t%s\t%s\n' "$(basename "$f")" "$(head -n 1 "$f" | tr -d '[:space:]')" "$started"
+    done
+    exit 0 ;;
+  "") die "usage: quorum-map list | sessions | --map SLUG <command> | enter SESSION SLUG | leave SESSION" ;;
 esac
 
 [ -n "$map" ] || die "$cmd needs --map SLUG"

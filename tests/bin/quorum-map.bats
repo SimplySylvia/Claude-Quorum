@@ -154,3 +154,12 @@ MD
   [[ "$output" == *"99 tickets"* ]]
   [ "$(ls .tasks/map-billing/tickets | wc -l | tr -d ' ')" = 1 ]
 }
+
+@test "sessions lists each map session with its map and when it started" {
+  [ -z "$("$BIN/quorum-map" sessions)" ]
+  "$BIN/quorum-map" enter s1 billing
+  run "$BIN/quorum-map" sessions; [ "$status" -eq 0 ]
+  [[ "$output" =~ ^s1$'\t'billing$'\t'[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}$ ]]
+  "$BIN/quorum-map" leave s1
+  [ -z "$("$BIN/quorum-map" sessions)" ]
+}
