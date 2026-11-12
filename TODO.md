@@ -36,8 +36,6 @@ The command itself shipped in 0.5.0. Still to do:
 The command shipped in 0.5.0, with each stage's instructions moved to `steps.md` so `run`
 and the stage commands share them. Still to do:
 
-- **Run its evals:** `run-high-asks-tier`, plus the existing stage cases, since every stage skill moved into
-  `steps.md` (`run-low-to-ready` passed on 2026-11-10).
 - **The dashboard during a run:** "autopilot · next stop: plan approval" in the band, and a toast at each stop, so a
   user can work elsewhere and come back when asked. The dashboard can't tell a run from single commands today.
 - **Context length.** A whole MEDIUM task is long for one conversation. Measure one with the Spend section and the
@@ -163,7 +161,6 @@ Deep research and `/quorum:research` shipped in 0.10.0. Still to do:
   tasks** list.
 - **A tracker.** Wayfinder keeps its map on GitHub or Linear issues, so the frontier shows in the tracker's UI. Quorum
   keeps it in `.tasks/`; mirroring tickets to a tracker would let a team see and claim them.
-- **The evals.** `map-*`, `spec-from-map`, and `retro-finds-lessons` are written but not yet run.
 
 ## 13. Later
 
