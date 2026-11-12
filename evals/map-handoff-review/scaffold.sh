@@ -3,6 +3,10 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 bash "$here/../_fixture/make.sh"
+# The reviewers' model is remembered, so the hand-off doesn't stop to ask for it (a map has no state.md).
+mkdir -p .claude
+printf '{"reviewer_model": "inherit", "helper_model": "inherit"}\n' > .claude/quorum.json
+git add .claude/quorum.json && git commit -qm "Remember Quorum's model choices"
 export CLAUDE_PROJECT_DIR="$PWD"
 qm() { "$here/../../bin/quorum-map" --map weekly "$@"; }
 qm init "Weekly regional reporting" >/dev/null

@@ -40,6 +40,14 @@ Result: 1 SKIPPED
 | 1 | `python3 app/report.py export data/sales.json` | PASS | header and 3 rows; "Acme, Inc." quoted |
 | 2 | 10,000-row export under a second | SKIPPED | no large data file in the repo |
 
+## Requirements
+| Req | Verdict | Evidence |
+|---|---|---|
+| 1 | MET | row 1 passes; `app/report.py` writes each row with `csv.writer`, reached from `main()`'s `export` branch |
+| 2 | MET | `app/report.py` streams rows from `load(path)` with no per-row work beyond `writerow`; row 2's timing check was SKIPPED, not run |
+
+Unrequested: none
+
 Working tree unchanged: yes
 MD
 # The proof names the commit it ran at; quorum-state checks it before AWAITING-HUMAN.
