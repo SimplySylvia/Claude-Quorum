@@ -148,7 +148,8 @@ When research only lays out options, the choice between them is a `grilling` tic
 5. **Resolve it by its type** (the `Type:` line, not the wording). Open the tickets it waits on, and any resolved
    ticket it relates to, as you need them.
    - `grilling`: if the question touches the code or a dependency (a library, an API, a service), first start one
-     `quorum:researcher` for the facts it rests on:
+     `quorum:researcher` for the facts it rests on, even when they look small enough to read yourself. Its facts
+     file is the record the answer cites and later tickets open, and it may find what a quick read misses:
 
      > Facts for a decision. Map `<slug>`, ticket <NN>: <the question>. The destination: <one line>. Read
      > `CLAUDE.md` first. Use public sources and the repo only; nothing private in a query.

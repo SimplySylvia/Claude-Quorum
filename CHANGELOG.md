@@ -20,6 +20,9 @@ copy with `/plugin marketplace update`.
   lists what's left, and `/quorum:map` with no arguments shows it and offers to end it.
 - **A map stops at 99 tickets.** Tickets are numbered `01` to `99`, and a 100th wasn't listed, so the next one took
   its number too. `quorum-map new` now refuses past 99.
+- **A map's code questions always get their facts.** Working a grilling ticket about the code, `/quorum:map` read
+  the code itself when the facts looked small and skipped the facts-only researcher, so the answer had no facts file
+  to cite. It now starts the researcher every time.
 
 ## 0.11.0 (2026-11-11)
 
