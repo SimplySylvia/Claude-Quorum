@@ -4,9 +4,10 @@
 
 # Quorum
 
-**A spec-to-pull-request pipeline for Claude Code that checks the work at every stage. The spec and the plan are
-reviewed before any code exists, fresh-context reviewers check the code against them, a blind user tries the result,
-and nothing counts as done without proof.**
+**Quorum checks Claude Code's work at every stage, with separate agents that have to agree. The spec and the plan
+are reviewed before any code exists, fresh-context reviewers check the code against them, a blind user tries the
+result, and nothing counts as done without proof. Take a task from spec to pull request, review any diff, or map an
+effort too big for one task.**
 
 <p>
   <a href="https://code.claude.com/docs/en/plugins-reference"><img src="https://img.shields.io/badge/Claude_Code-plugin-D97757?logo=claude&logoColor=white" alt="Claude Code plugin"></a>

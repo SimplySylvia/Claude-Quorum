@@ -16,6 +16,9 @@ copy with `/plugin marketplace update`.
 
 ### Changed
 
+- **A new headline.** The README and the plugin's descriptions now lead with what Quorum does (checks Claude
+  Code's work at every stage, with separate agents that have to agree) instead of calling it a pipeline, and name all
+  three ways in: a task, any diff, or a map.
 - **A shorter README, with guides for the details.** The README is down to what Quorum is, a quick start, the agent
   map, the commands, and the main guardrails. Everything else moved, unchanged, to `guides/`: how it works (both
   workflows, the stages, the review loop, risk tiers, models), running a task, research and maps, reviewing any
