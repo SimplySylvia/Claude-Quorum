@@ -107,7 +107,7 @@ const BAND = {
   plugin: 'quorum',
   component: 'AbovePrompt',
   requestId: 'band',
-  props: { bodyColumns: 140, hasSurvey: false, isWorking: false, maxRows: 6, scroll: { offset: 0, bodyRows: 6 }, view: {} },
+  props: { bodyColumns: 140, hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 6, scroll: { offset: 0, bodyRows: 6 }, view: {} },
 } as const
 
 const PANE = {
@@ -249,7 +249,7 @@ describe('task helpers', () => {
     expect(parseSpec('## Requirements\n1. **Fast checks pass:** run them.\n')?.requirements[0]?.title).toBe('Fast checks pass')
 
     const checks = joinChecks([{ id: '4, 5', label: '' }, { id: '6', label: '' }, { id: '6b', label: '' }], {
-      file: 'proof-final.md', rev: '', result: '', rows: [{ id: '4, 5', check: '', result: 'PASS' }, { id: '6', check: '', result: 'PASS' }, { id: '6b', check: '', result: 'FAIL' }],
+      file: 'proof-final.md', rev: '', result: '', rows: [{ id: '4, 5', check: '', result: 'PASS' }, { id: '6', check: '', result: 'PASS' }, { id: '6b', check: '', result: 'FAIL' }], verdicts: [],
     })
     expect(requirementState('5', checks)).toEqual({ checks: 1, state: 'pass' })
     expect(requirementState('6', checks)).toEqual({ checks: 2, state: 'fail' })
