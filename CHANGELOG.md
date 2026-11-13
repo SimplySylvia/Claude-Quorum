@@ -14,6 +14,13 @@ copy with `/plugin marketplace update`.
   the work done with the test still failing in 4 of 10 (score 1.00 vs 0.70, at $0.13 vs $0.07 a run).
   CONTRIBUTING's new **Baselines** section says how to run one, and why the agent cases can't be baselines.
 
+### Changed
+
+- **A shorter README, with guides for the details.** The README is down to what Quorum is, a quick start, the agent
+  map, the commands, and the main guardrails. Everything else moved, unchanged, to `guides/`: how it works (both
+  workflows, the stages, the review loop, risk tiers, models), running a task, research and maps, reviewing any
+  diff, learning from mistakes, the dashboard, guardrails and known limits, and the reference.
+
 ## 0.11.1 (2026-11-12)
 
 ### Added

@@ -113,7 +113,7 @@ claude plugin install quorum@quorum
 
 ## Diagrams
 
-Every diagram in the README is an SVG drawn by `assets/src/diagrams.py`, in a light and a dark version: the Swiss
+Every diagram in the README and `guides/` is an SVG drawn by `assets/src/diagrams.py`, in a light and a dark version: the Swiss
 cheese and stages animations, the agent map (with the `/quorum:review`, `/quorum:research`, and `/quorum:map` bands),
 the review loop, the risk-tier cards, where `/quorum:run` stops, the map flow from a problem to merged code, and
 the two workflow walkthroughs (a feature and a bug fix: what you type, and what runs).
@@ -125,7 +125,7 @@ lists in that script and run it:
 python3 assets/src/diagrams.py
 ```
 
-The animations are plain CSS keyframes, so they play in a README image and show their final frame, without
+The animations are plain CSS keyframes, so they play in a README or guide image and show their final frame, without
 motion, to viewers who ask for reduced motion.
 
 ## The dashboard demo
