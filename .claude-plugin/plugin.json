@@ -1,6 +1,6 @@
 {
   "name": "quorum",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "description": "Checks Claude Code's work at every stage, with separate agents that have to agree: specs and plans reviewed before any code, fresh-context code review with a verifier vote, a security pass, a blind user test with accessibility checks, and hooks that block \"done\" until the repo's checks pass. Takes a task from spec to pull request, reviews any diff, or maps an effort too big for one task, scales to each task's risk tier, and turns repeated mistakes into checks.",
   "author": { "name": "Sylvia Hart" },
   "license": "MIT",
