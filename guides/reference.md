@@ -23,7 +23,7 @@
 | `/quorum-dashboard` | Shows or hides the dashboard pane | |
 
 <details>
-<summary><b>Agents</b>: what each of the 14 sees and does</summary>
+<summary><b>Agents</b>: what each of the 15 sees and does</summary>
 
 | Agent | Sees | Job |
 |---|---|---|
@@ -77,7 +77,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `.claude-plugin/plugin.json` | Plugin manifest, including the `userConfig` options |
 | `.claude-plugin/marketplace.json` | Marketplace manifest (lists this repo as its only plugin) |
 | `skills/` | `init-pipeline`, `spec-and-eval`, `plan`, `build`, `simplify-diff`, `review-loop`, `blind-test`, `pr-draft`, `codify-lesson`, `retro`, `review`, `research`, `map`, `run`, and the model-invocable `pipeline-laws`, `debugging`, and `grilling`. Each stage `run` chains keeps its instructions in `steps.md`, which its `SKILL.md` and `run` both follow |
-| `agents/` | `researcher`, `spec-reviewer`, `planner`, `builder`, `prover`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `verifier-voter`, `security-reviewer`, `blind-user`, `friction-triager`, `pr-writer` |
+| `agents/` | `researcher`, `spec-reviewer`, `planner`, `builder`, `prover`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `verifier-voter`, `security-reviewer`, `blind-user`, `friction-triager`, `pr-writer`, `source-verifier` |
 | `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `protect-checks.sh`, `map-guard.sh`, `run-guard.sh`, `secret-guard.sh` (all three read commands with `shell-words.sh`), `stop-verify.sh`, `record-pr.sh`, `session-end.sh`, and `dashboard/`, the dashboard's hooks module |
 | `types/` | The type contract for the values the dashboard keeps in the session |
 | `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state`, `quorum-reviews`, `quorum-lessons`, `quorum-secrets`, `quorum-validate`, `quorum-config`, `quorum-plan`, `quorum-map`, `quorum-run`, `quorum-session`, `quorum-research-check`, `quorum-git` (on the Bash PATH while the plugin is enabled) |
