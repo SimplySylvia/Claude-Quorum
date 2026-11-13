@@ -7,7 +7,11 @@
 as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers already do.
 
 Turn the request in `<arguments>` into a task folder, `.tasks/<slug>/`, before any code is written. Work from the
-repo root (`quorum-active-task --root`). Don't write application code in this skill.
+repo root (`quorum-active-task --root`). Don't change application code in this skill, even when the fix is
+obvious. You read the code to understand the request and reproduce the problem; the fix you find goes into the spec
+(`rd.md`'s requirements, `eval.md`'s checks) for the builder, which writes it after the plan. A one-line fix still
+goes through the stages: they're what proves it. In a `/quorum:run` session, a hook blocks source edits until the
+build starts.
 
 `<arguments>` may also contain `--yes` (only when the user typed it): then accept your proposed slug, tier, and
 spec without asking, and say what you chose.
@@ -226,6 +230,7 @@ With `--bug`, or when the user accepts step 3's proposal to treat the request as
    code (a test, a CLI call, a request), run it, and quote what it prints next to what it should print. Use the
    `quorum:debugging` skill's first two steps. If you can't make it happen, say what you tried and ask for what's
    missing (the input, the steps, the environment), and stop: a fix for a bug nobody reproduced can't be proven.
+   Reproducing it isn't fixing it: when you find the cause, write it into `## The bug` (step 3), not into the code.
 2. In step 4.1, also `quorum-state --task <slug> set bug true`. The build then uses `fix/<slug>`.
 3. **`rd.md`** gets a `## The bug` section after the goal: what happens, what should happen, and the reproduction
    command with its output today. Requirement 1 is the fix, stated as what the reproduction shows afterwards, for

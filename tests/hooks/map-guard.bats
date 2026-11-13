@@ -4,7 +4,7 @@ load ../helpers
 # A repo with a map; the hook acts only for the session quorum-map enter named.
 setup() {
   make_repo
-  mkdir -p app
+  mkdir -p app && echo 'print(1)' > app/report.py
   "$BIN/quorum-map" --map billing init "Usage billing" >/dev/null
   "$BIN/quorum-map" enter s1 billing
   export CLAUDE_PROJECT_DIR="$WORK"
@@ -40,4 +40,13 @@ bash_cmd() { jq -n --arg s "${2:-s1}" --arg c "$1" '{session_id: $s, tool_name: 
   run bash_cmd 'git commit -m x' s2;        [ "$status" -eq 0 ]
   "$BIN/quorum-map" leave s1
   run edit app/report.py;                   [ "$status" -eq 0 ]
+}
+
+@test "a write a cd puts in the map's folder, or that names a variable, isn't blocked; a cd into the code still is" {
+  mkdir -p .tasks/map-billing/research
+  run bash_cmd 'cd .tasks/map-billing/research && cat > 01.md <<EOF2
+notes
+EOF2';                                                     [ "$status" -eq 0 ]
+  run bash_cmd 'echo x > $TMPDIR/scratch.txt';            [ "$status" -eq 0 ]
+  run bash_cmd 'cd app && echo x > report.py';            [ "$status" -eq 2 ]
 }

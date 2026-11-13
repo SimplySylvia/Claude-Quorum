@@ -67,6 +67,7 @@ each run's workspace and bootstraps for Quorum.
 | `source-verifier-catches-fake-citation` | `source-verifier` reopens the Python `csv` docs, supports a true claim, and rejects a planted false one |
 | `deep-research-quick-stays-small` | `/quorum:research --effort quick` starts at most 2 researchers, checks their claims, and still writes the full report |
 | `deep-research-standard` | `/quorum:research` splits a design question into lensed sub-questions, runs 3 researchers with tagged claims, checks them, and reports viability, candidate tasks, assumptions, and gaps, starting no task |
+| `run-stays-in-stages` | Asked to "just fix" an obvious one-line crash, `/quorum:run --fast --yes` still marks the run session, specs the task, has the builder write the fix, and reaches `READY` with a proof |
 | `run-high-asks-tier` | Even with `--yes`, `/quorum:run` asks the user to confirm a HIGH tier and builds nothing before an answer |
 | `map-small-idea-stops` | `/quorum:map` on a change that fits one task writes no map and points to `/quorum:spec-and-eval` or `/quorum:run` |
 | `map-charts-foggy-idea` | `/quorum:map` on a large effort names a destination, charts 2 to 8 typed tickets, checks the map, answers no ticket only the user can, and edits no code |

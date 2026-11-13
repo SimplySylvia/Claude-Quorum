@@ -6,7 +6,9 @@ setup() {
   make_repo
   mkdir -p .claude/hooks .github/workflows packages/web
   echo 'exit 0' > .claude/hooks/verify-completion.sh
+  echo '{"strict": true}' > tsconfig.json
   "$BIN/quorum-state" --task demo init MEDIUM BUILDING
+  echo '| 1 | 3 rows |' > .tasks/demo/eval.md
   "$BIN/quorum-active-task" --set demo
   export CLAUDE_PROJECT_DIR="$WORK"
 }

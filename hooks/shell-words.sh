@@ -3,13 +3,30 @@
 # a command can always hide what it does (a script, eval), so the hooks catch the plain forms an agent uses.
 # Bash 3.2 compatible.
 
+# The command without its heredoc bodies: the lines after `<<EOF` (or `<<'EOF'`, `<<-EOF`) up to the terminator are
+# data, such as a reviewer's notes quoting `> app.py`, not commands.
+no_heredocs() {
+  printf '%s\n' "$1" | awk '
+    skip != "" { t = $0; if (dash) sub(/^\t+/, "", t); if (t == skip) skip = ""; next }
+    { print
+      if (match($0, /<<-?[ \t]*["\047]?[A-Za-z_][A-Za-z0-9_]*["\047]?/)) {
+        d = substr($0, RSTART, RLENGTH); dash = (d ~ /^<<-/); sub(/^<<-?[ \t]*/, "", d); gsub(/["\047]/, "", d); skip = d
+      } }'
+}
+
 # The command's stages (split at |, ||, &&, ;, &), one per line, with quote characters removed but quoted text kept:
 # for finding the paths a stage names.
-stages() { printf '%s\n' "$1" | awk '{ gsub(/\|\||&&|[|;&]/, "\n"); print }' | tr -d "\"'"; }
+stages() { no_heredocs "$1" | awk '{ gsub(/\|\||&&|[|;&]/, "\n"); print }' | tr -d "\"'"; }
+
+# cd_dir COMMAND: the directory the command's first `cd` stage moves to, if it names a literal one; for resolving
+# the relative paths the stages after it write. Prints nothing for no cd, a bare `cd`, `cd -`, or a variable.
+cd_dir() {
+  stages "$1" | awk '$1 == "cd" && NF >= 2 && $2 != "-" && $2 !~ /\$/ { print $2; exit }'
+}
 
 # The same with quoted text emptied: for reading a stage's flags, so `-m "skip -n"` holds no -n.
 bare_stages() {
-  printf '%s\n' "$1" | sed -e 's/"[^"]*"/""/g' -e "s/'[^']*'/''/g" | awk '{ gsub(/\|\||&&|[|;&]/, "\n"); print }'
+  no_heredocs "$1" | sed -e 's/"[^"]*"/""/g' -e "s/'[^']*'/''/g" | awk '{ gsub(/\|\||&&|[|;&]/, "\n"); print }'
 }
 
 # commit_flags STAGE: if STAGE runs `git commit` (git, quorum-git, or a path to git, with any global options before
@@ -40,7 +57,8 @@ commit_flags() {
 # write_targets CMD: the paths CMD writes, one per line: a > or >> redirect's target, the arguments of tee, cp, mv,
 # rm, truncate, ln, and install, and the files of sed -i and perl -i.
 write_targets() {
-  local stage prog inplace prev a target writers=" tee cp mv rm truncate ln install "
+  local stage prog inplace prev a target writers=" tee cp mv rm truncate ln install " base
+  base=$(cd_dir "$1")
   while IFS= read -r stage; do
     set -f
     # shellcheck disable=SC2086  # word-splitting the stage is the point
@@ -58,7 +76,11 @@ write_targets() {
         '>>'?*) target=${a#>>} ;;
         '>'?*) target=${a#>} ;;
         *) case "$prev" in '>'|'>>'|'>|'|'1>'|'2>'|'&>') target=$a ;; esac
-           if [ -z "$target" ] && { case "$writers" in *" $prog "*) true ;; *) false ;; esac || [ "$inplace" = 1 ]; }; then target=$a; fi ;;
+           if [ -z "$target" ] && case "$writers" in *" $prog "*) true ;; *) false ;; esac; then target=$a; fi
+           # sed -i and perl -i edit files that exist: their other words are the script and its options.
+           if [ -z "$target" ] && [ "$inplace" = 1 ] && { [ -f "$a" ] || { [ -n "$base" ] && [ -f "$base/$a" ]; }; }; then
+             target=$a
+           fi ;;
       esac
       [ -z "$target" ] || printf '%s\n' "$target"
       prev=$a

@@ -24,6 +24,19 @@ copy with `/plugin marketplace update`.
   workflows, the stages, the review loop, risk tiers, models), running a task, research and maps, reviewing any
   diff, learning from mistakes, the dashboard, guardrails and known limits, and the reference.
 
+### Fixed
+
+- **`/quorum:run` no longer fixes things itself before the build.** Reading the code for the spec, the model would
+  see an obvious fix and make it, skipping the plan, the builder, the review, and the proof: in a 10-task SWE-bench
+  pilot it did so in half the full runs and most `--fast` ones. A new hook, `run-guard.sh`, now blocks a
+  `/quorum:run` session's main conversation from editing files outside `.tasks/` or committing until the task's
+  build starts (`quorum-run enter` and `leave` mark the session; Quorum's agents aren't
+  affected). The run skill and the spec steps say to write a found fix into the spec, and the new
+  `run-stays-in-stages` eval tempts the shortcut. The SessionEnd hook, now `session-end.sh`, ends run sessions too.
+- **The guards read Bash commands better.** The map guard and the checks lock no longer take a heredoc's text for
+  commands, a `$variable` or an option for a path, or a `sed -i` script's words for files; they resolve a write
+  against the command's `cd`, and let through a bare file name they can't place.
+
 ## 0.11.1 (2026-11-12)
 
 ### Added

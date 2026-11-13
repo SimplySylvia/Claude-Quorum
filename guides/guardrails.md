@@ -26,6 +26,9 @@
   `core.hooksPath` set. It applies to the builder and the main session alike. A change the task really needs goes
   in `plan.md`'s **Checks changes**, which you approve with the plan. Otherwise only you can unlock a file, with
   `! quorum-state push unlocked <path>`. Add your own with the `protected_paths` option or `.claude/quorum.json`.
+- **A run goes through its stages.** In a `/quorum:run` session, a hook blocks the main session from editing files
+  outside `.tasks/` or committing until the task's build starts, so a fix it finds while writing the spec goes into
+  the spec, and the builder makes it. Quorum's agents aren't affected, and it ends with the run or the session.
 - **Maps don't build.** In a `/quorum:map` session, a hook blocks edits to the repo outside `.tasks/`, Bash commands
   that write into it, commits and pushes, and starting a task's branch. It applies only to that session, and ends
   when the session does.
@@ -39,7 +42,7 @@
   drop.
 - **Hard caps.** At most 3 review rounds, then `HALTED` with a post-mortem and two redesign options.
 - **Quiet outside a task.** Apart from the secret guard, the hooks do nothing unless a task is building, in review,
-  or escalated, a blind test is running, or the session is working on a map.
+  or escalated, a blind test is running, or the session is running `/quorum:run` or working on a map.
 - **Asks before writing** to `CLAUDE.md`, `REVIEW.md`, or your global `~/.claude/CLAUDE.md`, with a diff first.
 - **Local data only.** Blind tests and `eval.md` checks use local, temporary, or synthetic data, never production.
 
@@ -50,6 +53,9 @@
   uses (`cat .env`, `sed -i` on a config, `--no-verify`), not a script written to hide what it does. They also don't
   cover a test script inside `package.json` or `pyproject.toml`, which hold dependencies too. `Grep` over a whole
   folder can still show lines from a `.env` in it.
+- **The run guard watches edits, not Bash.** It blocks the Edit and Write tools and commits before the build, but a
+  Bash write (`sed -i`, a redirect) can still change the code: a run's spec and plan write many files under
+  `.tasks/` from Bash, and reading those commands for their targets blocked real work.
 - **The blind guard is a safeguard, not a sandbox.** It blocks reading source, but running a script that reads
   source gets through, because running code is how a user runs the app.
 - **Agents add up.** A MEDIUM or HIGH round runs 4–6 reviewers, a voter, and a builder, for up to 3 rounds, after

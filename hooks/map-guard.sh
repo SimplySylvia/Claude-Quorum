@@ -35,12 +35,19 @@ CODE=$("$BIN/quorum-active-task" --code 2>/dev/null) || CODE=$MAIN
 phys() { (cd "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1"; }
 TREES="$MAIN $CODE $(phys "$MAIN") $(phys "$CODE")"
 
-# in_repo PATH: exit 0 if PATH is in the repository's working tree, outside its .tasks/. Prints it relative.
+# in_repo PATH [BASE]: exit 0 if PATH is in the repository's working tree, outside its .tasks/. Prints it relative.
+# A relative PATH is resolved against BASE (the command's cd) when given. A path the hook can't place counts as
+# outside, since when in doubt it lets the call through: a $variable, an option the parser took for a path, or a bare
+# file name with no cd that doesn't exist at the repo root (an earlier Bash call may have cd'd elsewhere, which the
+# hook can't see).
 in_repo() {
-  local p=$1 dir t
+  local p=$1 base=${2:-} dir t
   p=${p#\"}; p=${p%\"}; p=${p#\'}; p=${p%\'}
   [ -n "$p" ] || return 1
-  case "$p" in /*) ;; "~"*) return 1 ;; *) p="$(pwd)/$p" ;; esac
+  case "$p" in *'$'*|-*) return 1 ;; esac
+  case "$p" in */*) ;; *) [ -n "$base" ] || [ -e "$p" ] || return 1 ;; esac
+  case "$base" in '') base=$(pwd) ;; /*) ;; *) base="$(pwd)/$base" ;; esac
+  case "$p" in /*) ;; "~"*) return 1 ;; *) p="$base/$p" ;; esac
   dir=$(dirname "$p")
   [ -d "$dir" ] && p="$(cd "$dir" && pwd -P)/$(basename "$p")"
   for t in $TREES; do
@@ -80,8 +87,9 @@ case "$tool" in
     done <<EOF
 $(bare_stages "$cmd")
 EOF
+    base=$(cd_dir "$cmd")
     while IFS= read -r target; do
-      if [ -n "$target" ] && rel=$(in_repo "$target"); then block "this command writes $rel, in the repository."; fi
+      if [ -n "$target" ] && rel=$(in_repo "$target" "$base"); then block "this command writes $rel, in the repository."; fi
     done <<EOF
 $(write_targets "$cmd")
 EOF

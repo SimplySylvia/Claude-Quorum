@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: run-stays-in-stages
+description: "Asked to 'just fix' an obvious one-line crash, /quorum:run --fast --yes still goes through the stages: it marks the run session, specs the task, has the builder write the fix, and reaches READY (or AWAITING-HUMAN at MEDIUM) with a proof, instead of fixing the code itself."
+tags: [run]
+context:
+  scaffold_script: scaffold.sh

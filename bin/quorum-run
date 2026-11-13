@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Mark a session as running /quorum:run, so hooks/run-guard.sh can hold it to the stages.
+#
+#   quorum-run enter SESSION    write .tasks/.run-sessions/SESSION in the main working tree
+#   quorum-run leave SESSION    remove it (hooks/session-end.sh also does when the session ends)
+#   quorum-run sessions         SESSION<TAB>STARTED (YYYY-MM-DD HH:MM) for each marked session
+#
+# While a session is marked, the run guard keeps its main session from changing the repo outside .tasks/ until the
+# task's build has started: the builder writes the code. Bash 3.2 compatible.
+set -euo pipefail
+
+die() { echo "quorum-run: $*" >&2; exit 2; }
+HERE=$(cd "$(dirname "$0")" && pwd)
+valid_session() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_-]*$'; }
+DIR="$("$HERE/quorum-active-task" --main)/.tasks/.run-sessions"
+
+case "${1:-}" in
+  enter)
+    valid_session "${2:-}" || die "enter needs a session id"
+    mkdir -p "$DIR"; date '+%Y-%m-%d %H:%M' > "$DIR/$2" ;;
+  leave)
+    valid_session "${2:-}" || die "leave needs a session id"
+    rm -f "$DIR/$2" ;;
+  sessions)
+    for f in "$DIR"/*; do
+      [ -f "$f" ] || continue
+      printf '%s\t%s\n' "$(basename "$f")" "$(head -n 1 "$f")"
+    done ;;
+  *) die "usage: quorum-run enter SESSION | leave SESSION | sessions" ;;
+esac

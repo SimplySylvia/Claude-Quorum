@@ -57,6 +57,9 @@ run starts a new task; for a MEDIUM or HIGH task it's dropped.
 ## 1. Before the first stage
 
 - If `REVIEW.md` or `.claude/hooks/verify-completion.sh` is missing, suggest `/quorum:init-pipeline` and stop.
+- Run `quorum-run enter ${CLAUDE_SESSION_ID}`. Until the task's build starts, `hooks/run-guard.sh` blocks you from
+  editing files outside `.tasks/` or committing: the stages before the build read the code, and the builder writes
+  it. It doesn't watch Bash, so don't write the code from Bash either.
 - **A request and an active task** (`quorum-active-task` prints a slug whose status isn't `READY`,
   `AWAITING-HUMAN`, or `HALTED`): ask whether to continue that task or start the new one. Starting the new one
   leaves the old task's files as they are; it only stops being active (`quorum-active-task --clear`).
@@ -99,6 +102,11 @@ says stop, after the stage `--until` names, or after 12 stages in one run (then 
 
 ## 3. Rules while running
 
+- **Stay in the stages, however small the fix.** The request may read "just fix it", and the fix may be one line you
+  can already see. Don't make it: write it into the spec, and let the builder make it after the plan, with the
+  reviewers and the proof behind it. A run that fixes the code itself is a run without its checks. If the user
+  wants a quick change with no pipeline, say that's outside `/quorum:run`, and stop the run (below) so they can
+  make it themselves.
 - **Gates are the user's.** Every question a stage's steps ask (the slug, tier, and research choice; the models;
   docs; a grilling round; mockup sign-off; plan approval; checking out, posting, or filing anything), ask it and
   wait. Ask with
@@ -116,6 +124,10 @@ says stop, after the stage `--until` names, or after 12 stages in one run (then 
 - **Never** push, open or merge a PR, or change the default branch. The run ends with the PR drafted at the most.
 
 ## 4. When it stops
+
+Stopping for a gate's question isn't the end: the run goes on after the answer. When the run is over (the task's
+PR is drafted, it halted or escalated, `--until` was reached, the 12-stage cap, or the user ends the run), run
+`quorum-run leave ${CLAUDE_SESSION_ID}` before you stop.
 
 Say where the task is (status, round, risk), why it stopped (a gate's question, `--until`, the end, a halt, or a
 precondition), and the next step. At the end of a task (`pr.md` drafted):
