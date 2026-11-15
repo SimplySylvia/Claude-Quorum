@@ -41,13 +41,14 @@ TREES="$MAIN $CODE $(phys "$MAIN") $(phys "$CODE")"
 # file name with no cd that doesn't exist at the repo root (an earlier Bash call may have cd'd elsewhere, which the
 # hook can't see).
 in_repo() {
-  local p=$1 base=${2:-} dir t
+  local p=${1//\\//} base=${2:-} dir t
+  base=${base//\\//}  # on Windows a path may have backslashes, and C:/ is absolute
   p=${p#\"}; p=${p%\"}; p=${p#\'}; p=${p%\'}
   [ -n "$p" ] || return 1
   case "$p" in *'$'*|-*) return 1 ;; esac
   case "$p" in */*) ;; *) [ -n "$base" ] || [ -e "$p" ] || return 1 ;; esac
-  case "$base" in '') base=$(pwd) ;; /*) ;; *) base="$(pwd)/$base" ;; esac
-  case "$p" in /*) ;; "~"*) return 1 ;; *) p="$base/$p" ;; esac
+  case "$base" in '') base=$(pwd) ;; /*|[A-Za-z]:/*) ;; *) base="$(pwd)/$base" ;; esac
+  case "$p" in /*|[A-Za-z]:/*) ;; "~"*) return 1 ;; *) p="$base/$p" ;; esac
   dir=$(dirname "$p")
   [ -d "$dir" ] && p="$(cd "$dir" && pwd -P)/$(basename "$p")"
   for t in $TREES; do

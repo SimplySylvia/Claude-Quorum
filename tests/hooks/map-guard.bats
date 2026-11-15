@@ -23,6 +23,15 @@ bash_cmd() { jq -n --arg s "${2:-s1}" --arg c "$1" '{session_id: $s, tool_name: 
   run edit "$BATS_TEST_TMPDIR/notes.md" Write; [ "$status" -eq 0 ]
 }
 
+@test "a Windows path, with backslashes or a drive letter, is placed like any other" {
+  win() { printf '%s' "${1//\//\\}"; }
+  run edit "$(win "$WORK/app/report.py")";                     [ "$status" -eq 2 ]
+  run edit 'app\report.py';                                    [ "$status" -eq 2 ]
+  run edit "$(win "$WORK/.tasks/map-billing/map.md")" Write;   [ "$status" -eq 0 ]
+  run edit 'C:\Users\me\notes.md' Write;                       [ "$status" -eq 0 ]
+  run edit 'C:/Users/me/notes.md' Write;                       [ "$status" -eq 0 ]
+}
+
 @test "Bash writes into the repo, commits, and starting a build are blocked; reading and .tasks/ writes aren't" {
   run bash_cmd 'echo x > app/new.py';                [ "$status" -eq 2 ]
   run bash_cmd "sed -i '' s/a/b/ app/report.py";     [ "$status" -eq 2 ]

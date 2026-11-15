@@ -22,6 +22,15 @@ task() { mkdir -p ".tasks/$1"; "$BIN/quorum-state" --task "$1" init LOW "$2" >/d
   run edit "$BATS_TEST_TMPDIR/scratch.py" Write; [ "$status" -eq 0 ]
 }
 
+@test "a Windows path, with backslashes or a drive letter, is placed like any other" {
+  win() { printf '%s' "${1//\//\\}"; }
+  run edit "$(win "$WORK/app/report.py")";                     [ "$status" -eq 2 ]
+  run edit 'app\report.py';                                    [ "$status" -eq 2 ]
+  run edit "$(win "$WORK/.tasks/csv-export/rd.md")" Write;     [ "$status" -eq 0 ]
+  run edit 'C:\Users\me\scratch.py' Write;                     [ "$status" -eq 0 ]
+  run edit 'C:/Users/me/scratch.py' Write;                     [ "$status" -eq 0 ]
+}
+
 @test "commits are blocked before the build; Bash writes, reading, .tasks/, and branching aren't" {
   run bash_cmd 'git add -A && git commit -m fix';  [ "$status" -eq 2 ]
   [[ "$output" == *"git commit changes the code before the build"* ]]

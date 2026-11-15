@@ -23,6 +23,7 @@
 set -uo pipefail
 
 ROOT=${CLAUDE_PROJECT_DIR:-$(pwd)}
+ROOT=${ROOT//\\//}  # on Windows a path may have backslashes
 BIN="$(cd "$(dirname "$0")" && pwd)/../bin"
 input=$(cat)
 
@@ -52,7 +53,7 @@ block() {
 
 # is_source PATH: under a blocked dir, or with a blocked extension. Paths are taken relative to the repo root.
 is_source() {
-  local p=$1 d e
+  local p=${1//\\//} d e
   p=${p#\"}; p=${p%\"}; p=${p#\'}; p=${p%\'}
   case "$p" in "$CODE"/*) p=${p#"$CODE"/} ;; "$ROOT"/*) p=${p#"$ROOT"/} ;; esac
   while [ "${p#./}" != "$p" ]; do p=${p#./}; done
@@ -82,6 +83,7 @@ case "$tool" in
 
   Grep|Glob)
     path=$(printf '%s' "$input" | jq -r '.tool_input.path // empty')
+    path=${path//\\//}
     rel=${path#"$CODE"/}; rel=${rel#"$ROOT"/}
     if [ "$strict" -eq 0 ]; then case "$rel" in .tasks|.tasks/*) exit 0 ;; esac; fi
     block "$tool is disabled in blind mode" ;;

@@ -17,6 +17,13 @@ repeat() { printf "$1%.0s" $(seq "$2"); }
   done
 }
 
+@test "path: a Windows path with backslashes is read like one with slashes" {
+  for p in 'C:\Users\me\app\.env' 'C:\Users\me\.ssh\id_rsa' 'C:\Users\me\.aws\credentials' 'app\.env.local'; do
+    "$BIN/quorum-secrets" path "$p" || { echo "missed $p"; return 1; }
+  done
+  ! "$BIN/quorum-secrets" path 'C:\Users\me\app\.env.example'
+}
+
 @test "staged: each kind of secret on an added line, by file:line and kind only" {
   {
     echo "ok = 1"

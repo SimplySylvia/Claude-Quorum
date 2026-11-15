@@ -13,6 +13,10 @@ copy with `/plugin marketplace update`.
   fix closes a gap the other way: on Windows, an Edit or Write of a protected check file (verify-completion.sh, a
   CI config, the task's rd.md or eval.md) given with backslashes wasn't blocked during a build, and a pattern rule
   didn't apply to it.
+- **The other guards read Windows paths too.** With backslashes, the secret guard let a Read of `.env` or a private
+  key through, the blind-test hook let the blind user read a file in a blocked folder such as `app/` unless its
+  extension was blocked too, and the map and run guards let a write into the repo through or blocked one into
+  `.tasks/`. They now read backslashes as slashes, and the map and run guards take a `C:/` path as absolute.
 
 ## 0.11.2 (2026-11-13)
 

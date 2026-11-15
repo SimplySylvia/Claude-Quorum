@@ -46,9 +46,9 @@ TREES="$MAIN $CODE $(phys "$MAIN") $(phys "$CODE")"
 
 # in_repo PATH: exit 0 if PATH is in the repository's working tree, outside its .tasks/. Prints it relative.
 in_repo() {
-  local p=$1 dir t
+  local p=${1//\\//} dir t  # on Windows a path may have backslashes, and C:/ is absolute
   [ -n "$p" ] || return 1
-  case "$p" in /*) ;; "~"*) return 1 ;; *) p="$(pwd)/$p" ;; esac
+  case "$p" in /*|[A-Za-z]:/*) ;; "~"*) return 1 ;; *) p="$(pwd)/$p" ;; esac
   dir=$(dirname "$p")
   [ -d "$dir" ] && p="$(cd "$dir" && pwd -P)/$(basename "$p")"
   for t in $TREES; do

@@ -29,6 +29,14 @@ bash_cmd() { call Bash "$(jq -n --arg c "$1" '{command: $c}')" "${2-quorum:blind
   run call Read '{"file_path":"./app/report.py"}';        [ "$status" -eq 2 ]
 }
 
+@test "Windows paths with backslashes are normalized" {
+  win() { jq -n --arg p "${1//\//\\}" '{file_path: $p}'; }
+  run call Read "$(win "$WORK/app/data.json")";  [ "$status" -eq 2 ]
+  run call Read "$(win app/data.json)";          [ "$status" -eq 2 ]
+  run call Read "$(win "$WORK/README.md")";      [ "$status" -eq 0 ]
+  touch .tasks/.blind-mode-active
+  run call Grep "$(jq -n --arg p "${WORK//\//\\}\\.tasks\\demo" '{pattern: "x", path: $p}')" "";  [ "$status" -eq 0 ]
+}
 @test "blocked by extension outside the blocked folders" {
   echo x > tool.py
   run call Read '{"file_path":"tool.py"}'
