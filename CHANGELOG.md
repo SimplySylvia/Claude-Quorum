@@ -3,6 +3,17 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
+## Unreleased
+
+### Fixed
+
+- **Researchers can save their findings on Windows.** The checks lock let a researcher write only under the
+  research folders, but it matched forward slashes only, and on Windows the Write tool hands the hook an absolute
+  path with backslashes: every researcher's Write was blocked. The hook now reads backslashes as slashes. The same
+  fix closes a gap the other way: on Windows, an Edit or Write of a protected check file (verify-completion.sh, a
+  CI config, the task's rd.md or eval.md) given with backslashes wasn't blocked during a build, and a pattern rule
+  didn't apply to it.
+
 ## 0.11.2 (2026-11-13)
 
 ### Added

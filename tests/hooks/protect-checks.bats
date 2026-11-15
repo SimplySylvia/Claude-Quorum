@@ -28,6 +28,18 @@ bash_cmd() { jq -n --arg c "$1" '{hook_event_name: "PreToolUse", tool_name: "Bas
   run edit tests/test_report.py;                  [ "$status" -eq 0 ]
 }
 
+@test "a Windows path with backslashes is matched like one with slashes" {
+  win() { printf '%s' "${1//\//\\}"; }
+  run edit "$(win "$WORK/.claude/hooks/verify-completion.sh")";  [ "$status" -eq 2 ]
+  run edit "$(win "$WORK/.github/workflows/ci.yml")" Write;      [ "$status" -eq 2 ]
+  run edit 'packages\web\tsconfig.json';                         [ "$status" -eq 2 ]
+  run edit "$(win "$WORK/app/report.py")";                       [ "$status" -eq 0 ]
+  "$BIN/quorum-learned-rule" pattern add "app/*.py" "','\\.join\\(" "Use write_csv()." >/dev/null
+  write() { jq -n --arg p "$1" --arg c "$2" '{tool_name: "Write", tool_input: {file_path: $p, content: $c}}' | "$HOOKS/protect-checks.sh"; }
+  run write "$(win "$WORK/app/report.py")" "print(','.join(row))"
+  [ "$status" -eq 2 ]; [[ "$output" == *"Use write_csv()."* ]]
+}
+
 @test "only while BUILDING or IN_REVIEW: before the build and when ESCALATED, the checks can change" {
   "$BIN/quorum-state" --task demo set status IN_REVIEW
   run edit pytest.ini; [ "$status" -eq 2 ]
@@ -116,5 +128,10 @@ bash_cmd() { jq -n --arg c "$1" '{hook_event_name: "PreToolUse", tool_name: "Bas
   run rw app/report.py;                                  [ "$status" -eq 2 ]; [[ "$output" == *"writes only its findings"* ]]
   run rw .tasks/demo/rd.md;                              [ "$status" -eq 2 ]
   run rw .tasks/demo/research/../../../app/x.py;         [ "$status" -eq 2 ]
+  # On Windows, the Write tool hands the hook an absolute path with backslashes.
+  run rw "${WORK//\//\\}\\.tasks\\research-graphql\\research\\1-repo.md";  [ "$status" -eq 0 ]
+  run rw 'C:\Users\me\app\.tasks\demo\research\2-docs.md';       [ "$status" -eq 0 ]
+  run rw 'C:\Users\me\app\app\report.py';                          [ "$status" -eq 2 ]
+  run rw '.tasks\demo\research\..\..\..\app\x.py';                 [ "$status" -eq 2 ]
   run rw app/report.py quorum:builder;                   [ "$status" -eq 0 ]
 }

@@ -40,6 +40,7 @@ if [ -n "$cwd" ] && [ -d "$cwd" ]; then cd "$cwd" 2>/dev/null || exit 0; fi
 
 if [ "$(printf '%s' "$input" | jq -r '.agent_type // empty' 2>/dev/null)" = "quorum:researcher" ] && [ "$tool" = Write ]; then
   path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
+  path=${path//\\//}  # on Windows the tool gives an absolute path with backslashes
   case "$path" in
     *..*) ;;
     .tasks/research-*/*|*/.tasks/research-*/*|.tasks/*/research/*|*/.tasks/*/research/*) exit 0 ;;
@@ -82,9 +83,9 @@ glob_match() {
 
 # protected PATH: prints PATH relative to the code if it's protected and not unlocked.
 protected() {
-  local p=$1 g
+  local p=${1//\\//} g project=${CLAUDE_PROJECT_DIR:-/nonexistent}
   # an absolute path may name the working tree through a symlink (macOS /var is /private/var)
-  p=${p#"$CODE"/}; p=${p#"$(pwd -P)"/}; p=${p#"$(pwd)"/}; p=${p#"${CLAUDE_PROJECT_DIR:-/nonexistent}"/}
+  p=${p#"$CODE"/}; p=${p#"$(pwd -P)"/}; p=${p#"$(pwd)"/}; p=${p#"${project//\\//}"/}
   while [ "${p#./}" != "$p" ]; do p=${p#./}; done
   [ -n "$p" ] || return 1
   set -f
@@ -110,6 +111,7 @@ block() {
 case "$tool" in
   Edit|Write|NotebookEdit)
     path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
+    path=${path//\\//}
     if rel=$(protected "$path"); then block "$tool $rel is a protected check file."; fi
     MAIN=$("$BIN/quorum-active-task" --main 2>/dev/null) || MAIN=$CODE
     if [ -f "$MAIN/.claude/quorum.json" ] && jq -e '.pattern_rules | length > 0' "$MAIN/.claude/quorum.json" >/dev/null 2>&1; then
