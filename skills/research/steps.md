@@ -52,7 +52,9 @@ from the last (`1-repo.md`, `2-docs.md`, ...). Each gets only:
 > <For `counter`: "The leading option: <one line>.">
 
 Each writes its file and replies with a few lines. Keep those replies short in your own notes: the files hold the
-evidence.
+evidence. A reply isn't proof the file exists: check each one does (`ls <research dir>/research/`) before the
+claims are checked. For a missing file, start that researcher once more with the same prompt; if it's still missing,
+list it under **Remaining gaps** in the report, with the error it gave, and go on without that lens.
 
 ## 4. Check the claims, cheapest first
 

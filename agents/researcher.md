@@ -124,6 +124,7 @@ Write a repo quote as the line's text, plain or in backticks; for a claim that s
 (`app/report.py:8-10`) and join the pieces with ` / `. Every claim in Findings appears in Claims with its
 evidence. A page that only paraphrases is a lead, not a
 source: find the page that says it. Prefer primary sources (official docs, changelogs, the project's own repo) to
-blogs and aggregators. Then reply with 3 to 5 lines: the answer, the claims a decision rests on, what's still
-open, and the path you wrote.
+blogs and aggregators. Then Read the file back: a Write a hook blocked, or one that failed, leaves no file. Only
+when it reads back, reply with 3 to 5 lines: the answer, the claims a decision rests on, what's still open, and the
+path you wrote. If it doesn't, never say you wrote it: reply with the error the Write gave, and the findings.
 

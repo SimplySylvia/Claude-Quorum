@@ -17,6 +17,10 @@ copy with `/plugin marketplace update`.
   key through, the blind-test hook let the blind user read a file in a blocked folder such as `app/` unless its
   extension was blocked too, and the map and run guards let a write into the repo through or blocked one into
   `.tasks/`. They now read backslashes as slashes, and the map and run guards take a `C:/` path as absolute.
+- **A researcher's "written" is checked.** A researcher whose Write was blocked could still reply that it wrote
+  its file. It now reads the file back and reports the error if it isn't there, and deep research checks every
+  findings file exists before the claim check, runs a missing one's researcher once more, then lists it under
+  Remaining gaps.
 
 ## 0.11.2 (2026-11-13)
 
