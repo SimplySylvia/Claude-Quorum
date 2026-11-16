@@ -51,12 +51,13 @@ finding with no file sits under **other**, after the files.
 - **A press** on a folder or file folds or opens it, and the dashboard remembers the choice through later rounds.
   Folders start open, and so does a file with findings still to fix. A finding is one line, cut at the end; a press
   on it shows its full title, the verifier's confidence, and a **copy path** button that copies `path:line`.
-- **Fixed findings:** a finding an earlier round kept that a later round no longer keeps shows as `✓` under its
-  file, reading `round 1 → fixed by round 2`. A file with only fixed findings starts folded, unless the task is
-  HIGH. A finding counts as the same one when its file and category match, whatever its severity, so a finding
-  whose line moved, or whose severity changed, isn't shown as fixed; one that comes back in a later round is open
-  again. When the round on show keeps nothing, the tree shows only the `✓` rows. For a `/quorum:review`, a finding
-  is fixed only when a later run reviewed a different range end.
+- **Fixed findings:** an important finding an earlier round kept that a later round no longer keeps shows as `✓`
+  under its file, reading `round 1 → fixed by round 2`; a nit or pre-existing finding a later round no longer keeps
+  just leaves the tree. A file with only fixed findings starts folded, unless the task is HIGH. A finding counts as
+  the same one when its file and category match, whatever its severity, so a finding whose line moved, or whose
+  severity changed, isn't shown as fixed; one that comes back in a later round is open again. When the round on
+  show keeps nothing, the tree shows only the `✓` rows. For a `/quorum:review`, a finding is fixed only when a later
+  run reviewed a different range end.
 - **Dropped on dispute:** a finding the voter dropped after the builder disputed it shows dim, with no mark and no
   count, as `dropped on dispute in round 1`, as soon as the voter drops it. The voter row then reads, for example,
   `kept ✗1 n1 · 1 dropped on dispute → fix round`, so its counts and the tree's still add up.

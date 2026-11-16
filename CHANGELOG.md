@@ -14,9 +14,10 @@ copy with `/plugin marketplace update`.
   and the choice is kept across rounds; a press on a finding shows its full title, its confidence, and a
   **copy path** button. A finding with no location sits under **other** instead of being left out, and every
   finding shows, where nits used to be hidden once more than four findings were kept.
-- **Fixed and dropped findings in the tree.** A finding an earlier round kept that a later round no longer keeps
-  shows as `✓ round 1 → fixed by round 2`, folded unless the task is HIGH; for `/quorum:review`, only across runs
-  over a different range end. A finding the voter dropped on dispute shows dim as `dropped on dispute in round 1`.
+- **Fixed and dropped findings in the tree.** An important finding an earlier round kept that a later round no
+  longer keeps shows as `✓ round 1 → fixed by round 2`, folded unless the task is HIGH; for `/quorum:review`, only
+  across runs over a different range end. A finding the voter dropped on dispute shows dim as
+  `dropped on dispute in round 1`.
 - **`file_icons` option.** Set it to `nerd` for Nerd Font file type icons beside the tree's files and folders, in
   the terminal only. It's `off` by default.
 
