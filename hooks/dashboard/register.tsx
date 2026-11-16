@@ -10,9 +10,9 @@ import type { Check, Findings, FindingsView, Now, OtherTask, PullRequest, Quorum
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, SLICE_AT, stageOf, stages, tokenCount,
-  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural,
+  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext,
 } from './task'
-import { confidenceRow, roundKept, runEnds, trackFindings, treeHeader, treeRows } from './tree'
+import { confidenceRow, markText, markWords, roundKept, runEnds, trackFindings, treeHeader, treeRows } from './tree'
 import type { TreePart } from './tree'
 
 const PANE = 'quorum-dashboard'
@@ -381,10 +381,13 @@ function stageDetails(t: Snapshot, known: PullRequest | null): string {
 const prState = (p: PullRequest) =>
   p.state === 'MERGED' ? 'merged' : p.state === 'CLOSED' ? 'closed without merging' : p.state === 'OPEN' ? (p.isDraft ? 'draft, open' : 'open') : ''
 
-function findingsText(f: Findings): string {
-  if (f.important + f.nit + f.preExisting === 0) return 'clean'
-  return [`${f.important} IMPORTANT`, `${f.nit} NIT`, ...(f.preExisting ? [`${f.preExisting} pre-existing`] : [])].join(' · ')
-}
+// Counts in the findings tree's marks (`✗1 n1 p1`), or `clean`.
+const findingsText = (f: Findings) => markText(f) || 'clean'
+
+// A review round in the Review rounds summary: `r1 ✗1`, `r2 clean`, `r3 reviewing`; in words for a label.
+const roundText = (r: Round) => `r${r.n} ${r.findings === null ? 'reviewing' : r.findings.important > 0 ? `✗${r.findings.important}` : 'clean'}`
+const roundWords = (r: Round) => `round ${r.n}: ${r.findings === null ? (r.candidates === null ? 'reviewing' : 'voting')
+  : markWords({ important: r.findings.important, nit: 0, preExisting: 0 })}`
 
 // How many of the round's reviewers have replied, for the band and the pane.
 function reviewerProgress(now: Now): string {
@@ -414,15 +417,6 @@ function nowTitle(now: Now, maxRounds: number): string {
     case 'blind': return `Blind test, run ${now.blind.run}`
     case 'done': return 'Waiting for you'
   }
-}
-
-// What the voter's result means for the round.
-function verdict(now: Extract<Now, { kind: 'plan' | 'review' }>): [string, string] | null {
-  if (!now.survivors) return null
-  if (now.survivors.important === 0) return [now.kind === 'plan' ? 'Nothing IMPORTANT left: ready for your approval' : 'Nothing IMPORTANT left: the round converges', 'success']
-  const who = now.kind === 'plan' ? 'the planner revises' : 'the builder fixes them'
-  const n = now.survivors.important
-  return [`${n === 1 ? '1 IMPORTANT finding survives' : `${n} IMPORTANT findings survive`}: ${who}`, 'error']
 }
 
 // The stage rail, with the PR stage done once GitHub says the PR merged.
@@ -707,30 +701,53 @@ export const register: Register = (on, options) => {
       </Text>
     )
     const runningAs = (role: string) => crew.findLast(a => a.role === role && a.endedAt === null)
-    const findingsLine = (key: string, label: string, f: Findings, prefix = '') => (
-      <Text key={key} wrap="truncate-end">
-        <Text color={f.important > 0 ? 'error' : 'success'}>{f.important > 0 ? '✗' : '✓'} </Text>
-        <Text>{label.padEnd(22)}</Text>
-        {f.important + f.nit + f.preExisting === 0
-          ? <Text dimColor>{prefix}clean</Text>
-          : (
-            <Text>
-              {prefix ? <Text dimColor>{prefix}</Text> : null}
-              {f.important > 0 ? <Text color="error" bold>{f.important} IMPORTANT</Text> : null}
-              {f.important > 0 && f.nit + f.preExisting > 0 ? <Text dimColor> · </Text> : null}
-              {f.nit > 0 ? <Text dimColor>{f.nit} NIT</Text> : null}
-              {f.nit > 0 && f.preExisting > 0 ? <Text dimColor> · </Text> : null}
-              {f.preExisting > 0 ? <Text color="warning">{f.preExisting} pre-existing</Text> : null}
-            </Text>
-          )}
-      </Text>
+    // Counts in the tree's marks, each coloured as the tree colours it: `✗1 n1 p1`, or `none` when all are zero.
+    const marks = (f: Findings, none: string) => (
+      f.important + f.nit + f.preExisting === 0 ? <Text dimColor>{none}</Text> : (
+        <Text>
+          {f.important > 0 ? <Text color="error" bold>✗{f.important}</Text> : null}
+          {f.important > 0 && f.nit > 0 ? ' ' : null}
+          {f.nit > 0 ? <Text dimColor>n{f.nit}</Text> : null}
+          {f.important + f.nit > 0 && f.preExisting > 0 ? ' ' : null}
+          {f.preExisting > 0 ? <Text dimColor>p{f.preExisting}</Text> : null}
+        </Text>
+      )
     )
+    // A reply's glyph: ✓ only when clean, ✗ with an IMPORTANT finding, • for nits or pre-existing only.
+    const findingsLine = (key: string, label: string, f: Findings) => {
+      const [glyph, color] = f.important > 0 ? ['✗', 'error'] : f.nit + f.preExisting > 0 ? ['•', undefined] : ['✓', 'success']
+      return (
+        <Text key={key} wrap="truncate-end">
+          <Text color={color} dimColor={color === undefined}>{glyph} </Text>
+          <Text>{label.padEnd(22)}</Text>
+          {marks(f, 'clean')}
+        </Text>
+      )
+    }
+    const pending = (role: string, label: string) => {
+      const agent = runningAs(role)
+      return agent ? line(role, 'running', label, `running ${seconds(agent, clockNow)}`) : line(role, 'waiting', label, 'waiting')
+    }
     const reviewerLine = (r: Reviewer) => {
-      const agent = runningAs(r.role)
       const label = ROLE_LABEL[r.role] ?? r.role
-      if (r.findings) return findingsLine(r.role, label, r.findings, r.role === 'voter' ? 'kept ' : '')
-      if (agent) return line(r.role, 'running', label, `running ${seconds(agent, clockNow)}`)
-      return line(r.role, 'waiting', label, 'waiting')
+      return r.findings ? findingsLine(r.role, label, r.findings) : pending(r.role, label)
+    }
+    // The voter row, once the round's survivors.md exists: what it kept (after the nit cap), what the round's own
+    // disputes.md dropped, and the pipeline's next step, so the verdict sits on this row.
+    const voterLine = (kind: 'plan' | 'review' | 'standalone', survivors: Findings | null, round: number, of: number, status: string, dropped: number) => {
+      const label = ROLE_LABEL.voter ?? 'voter'
+      if (!survivors) return pending('voter', label)
+      const isBad = survivors.important > 0
+      return (
+        <Text key="voter" wrap="truncate-end">
+          <Text color={isBad ? 'error' : 'success'}>{isBad ? '✗' : '✓'} </Text>
+          <Text>{label.padEnd(22)}</Text>
+          <Text dimColor>kept </Text>
+          {marks(survivors, 'nothing')}
+          {dropped > 0 ? <Text dimColor> · {dropped} dropped on dispute</Text> : null}
+          <Text dimColor> → {voterNext(kind, survivors.important, round, of, status)}</Text>
+        </Text>
+      )
     }
     // A report that only some runs write: shown once it exists or its agent runs.
     const reportLine = (role: string, important: number | null, detail: (k: number) => string) => {
@@ -747,7 +764,8 @@ export const register: Register = (on, options) => {
       : { tasks: true, requirements: false, checks: false, rounds: false, reviews: true, spend: false, agents: false }
     const scope = t?.slug ?? ''
     const isOpen = (id: Section) => folds[`${scope}:${id}`] ?? defaults[id]
-    const fold = (id: Section, label: string, summary: [string, string], note: string, body: () => unknown) => {
+    // `name`: the toggle's label, when its on-screen summary isn't in words; its state goes last.
+    const fold = (id: Section, label: string, summary: [string, string], note: string, body: () => unknown, name?: string) => {
       const open = isOpen(id)
       return (
         <Box key={`section-${id}`} flexDirection="column">
@@ -755,6 +773,7 @@ export const register: Register = (on, options) => {
             key={`toggle-${id}`}
             plain
             hover={{ color: 'claude' }}
+            label={name === undefined ? undefined : `${name}${note ? `, ${note}` : ''}, ${open ? 'open' : 'folded'}`}
             onPress={() => void update($, sections, all => ({ ...all, [`${scope}:${id}`]: !open }))}
           >
             <Text dimColor>{open ? '▾ ' : '▸ '}</Text>
@@ -780,7 +799,13 @@ export const register: Register = (on, options) => {
               : r.survivors.important > 0 ? ['✗', 'error', findingsText(r.survivors)] : ['✓', 'success', findingsText(r.survivors)]
       return (
         <Box key={`past-${r.id}`} flexDirection="column">
-          <Button key={`past-toggle-${r.id}`} plain hover={{ color: 'claude' }} onPress={() => void update($, sections, all => ({ ...all, [`review:${r.id}`]: !isRowOpen }))}>
+          <Button
+            key={`past-toggle-${r.id}`}
+            plain
+            hover={{ color: 'claude' }}
+            label={[r.id, r.status === 'REVIEWED' && r.survivors ? markWords(r.survivors) : result, r.risk || 'no tier', plural(r.run, 'run'), ago(clockNow, r.changedAt), isRowOpen ? 'open' : 'folded'].join(', ')}
+            onPress={() => void update($, sections, all => ({ ...all, [`review:${r.id}`]: !isRowOpen }))}
+          >
             <Text color={color}>{glyph} </Text>
             <Text>{r.id}  </Text>
             <Text color={color === 'warning' ? 'warning' : undefined} dimColor={color !== 'warning'}>{result}</Text>
@@ -833,10 +858,10 @@ export const register: Register = (on, options) => {
             <Box flexDirection="column">
               <Text dimColor>reviewers {rv.reviewers.filter(r => r.findings !== null).length}/{rv.reviewers.length} replied</Text>
               {rv.reviewers.map(reviewerLine)}
-              {reviewerLine(rv.voter)}
+              {voterLine('standalone', rv.survivors, rv.run, 0, rv.status, 0)}
               {rv.status === 'FIXING'
                 ? line('builder', builder?.endedAt === null ? 'running' : builder ? 'done' : 'waiting', 'Builder',
-                  builder ? `fixing ${plural(important, 'IMPORTANT finding')} · ${seconds(builder, clockNow)}` : `fixes ${plural(important, 'IMPORTANT finding')}`)
+                  `fixes ✗${important}${builder ? ` · ${seconds(builder, clockNow)}` : ''}`)
                 : null}
               {findingsTree(rv.id, rv.tree, rv.risk === 'HIGH', treeWidth)}
             </Box>
@@ -899,8 +924,11 @@ export const register: Register = (on, options) => {
         : t.stopBlocks > 0 && isHookActive(t.status) ? `Stop hook blocked ${plural(t.stopBlocks, 'time')}`
           : t.pending > 0 ? `${plural(t.pending, 'finding')} pending`
             : (t.checks.find(c => c.result === 'FAIL') ? `✗ ${t.checks.find(c => c.result === 'FAIL')?.id} ${t.checks.find(c => c.result === 'FAIL')?.label}` : '')
-    const lastRound = t.rounds[t.rounds.length - 1]
-    const roundsSummary = t.rounds.map(r => `r${r.n} ${r.findings === null ? 'reviewing' : r.findings.important > 0 ? `${r.findings.important} IMPORTANT` : 'clean'}`).join(' · ')
+    // Review rounds: the plan rounds, then the code rounds, each group left out when it has none.
+    const roundGroups = ([['plan', t.planReviewRounds], ['code', t.rounds]] as const).filter(([, rs]) => rs.length > 0)
+    const lastRound = roundGroups.at(-1)?.[1].at(-1)
+    const roundsSummary = roundGroups.map(([g, rs]) => `${g} ${rs.map(roundText).join(' · ')}`).join('  ')
+    const roundsName = `Review rounds, ${roundGroups.map(([g, rs]) => `${g} ${rs.map(roundWords).join(', ')}`).join('; ')}`
     const running = others.filter(a => a.endedAt === null).length
 
     return (
@@ -951,12 +979,9 @@ export const register: Register = (on, options) => {
             <Box flexDirection="column">
               <Text dimColor>{reviewerProgress(n)} replied</Text>
               {n.reviewers.map(reviewerLine)}
-              {reviewerLine(n.voter)}
+              {/* While round N+1 reviews, the tree shows round N, whose drops aren't this round's. */}
+              {voterLine(n.kind, n.survivors, n.round, n.of || t.maxRounds, t.status, n.tree?.round === n.round ? n.tree.dropped : 0)}
               {findingsTree(t.slug, n.tree, t.risk === 'HIGH', treeWidth)}
-              {(() => {
-                const v = verdict(n)
-                return v ? <Text color={v[1]} wrap="truncate-end">{v[0]}</Text> : null
-              })()}
             </Box>
           )}
           {n.kind === 'build' && (
@@ -1048,23 +1073,21 @@ export const register: Register = (on, options) => {
             t.pending > 0 ? <Text key="pending" color="warning">{plural(t.pending, 'finding')} pending for the builder</Text> : null,
           ])}
 
-          {t.rounds.length > 0 && fold('rounds', 'Review rounds',
+          {roundGroups.length > 0 && fold('rounds', 'Review rounds',
             [roundsSummary, lastRound?.findings && lastRound.findings.important > 0 ? 'error' : 'text'],
             t.status === 'HALTED' ? 'HALTED: see the post-mortem' : '',
-            () => t.rounds.map(r => (
-              <Text key={`round-${r.n}`} wrap="truncate-end">
-                <Text dimColor>Round {r.n}  </Text>
+            () => roundGroups.flatMap(([g, rs]) => rs.map(r => (
+              <Text key={`${g === 'plan' ? 'plan-' : ''}round-${r.n}`} wrap="truncate-end">
+                <Text dimColor>{g} r{r.n}  </Text>
                 {r.findings === null
                   ? <Text dimColor>{r.candidates === null ? 'reviewing…' : `${r.candidates} candidates, voting…`}</Text>
-                  : (
-                    <Text>
-                      <Text color={r.findings.important > 0 ? 'error' : 'success'}>{r.findings.important} IMPORTANT</Text>
-                      <Text dimColor> · {r.findings.nit} NIT · {r.findings.preExisting} pre-existing</Text>
-                      {r.candidates !== null && <Text dimColor>  (voter kept {r.findings.important + r.findings.nit + r.findings.preExisting} of {r.candidates})</Text>}
-                    </Text>
-                  )}
+                  : marks(r.findings, 'clean')}
+                {r.findings !== null && r.candidates !== null
+                  ? <Text dimColor>  (voter kept {r.findings.important + r.findings.nit + r.findings.preExisting} of {r.candidates})</Text>
+                  : null}
               </Text>
-            )))}
+            ))),
+            roundsName)}
 
           {reviewsFold}
 

@@ -8,7 +8,7 @@ import {
   requirementState, roleOf,
   roundReviewers, slugFromHead, spendOf, stageOf, stages, tokenCount,
   keptFindings, countPlanSteps, normalizePath, modelMismatches, choiceLabel, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, latestRun, liveReview, shortRange,
-  plural,
+  plural, voterNext,
 } from '../../hooks/dashboard/task'
 import {
   cellWidth, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, iconsOn, markText, markWords, repoPath, roundKept, runEnds, splitLoc, trackFindings, treeHeader, treeRows,
@@ -388,7 +388,7 @@ test('this session\'s review with no task shows in the band and the pane: review
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /run 1$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /reviewers 1\/4 replied/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^✗ Logic & edge cases\s+1 IMPORTANT · 1 NIT$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✗ Logic & edge cases\s+✗1 n1$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^○ Verifier vote\s+waiting$/ })).toBeDefined()
   await pane.unmount()
 
@@ -408,8 +408,8 @@ test('this session\'s review with no task shows in the band and the pane: review
   expect(await band.find({ type: 'Text', text: /^builder fixing$/ })).toBeDefined()
   await band.unmount()
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /kept 1 IMPORTANT · 1 NIT/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^○ Builder\s+fixes 1 IMPORTANT finding$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✗ Verifier vote\s+kept ✗1 n1 → fix$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^○ Builder\s+fixes ✗1$/ })).toBeDefined()
   // The kept findings, as a tree under the builder: a row per file, and a row per finding that opens to a copy
   // button for its location.
   expect(await rowOf(pane, 'review-pr-12:tree:app/report.py')).toMatch(/^ {4}report\.py +✗1 {2}n1$/)
@@ -430,7 +430,7 @@ test('this session\'s review with no task shows in the band and the pane: review
   expect(await pane.find({ type: 'Text', text: /No active Quorum task/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^1 review · newest just now$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^review-pr-12 {2}$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^1 IMPORTANT · 1 NIT$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✗1 n1$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^ · MEDIUM · 1 run · just now$/ })).toBeDefined()
   expect(await pane.find({ type: 'Button', key: 'review-pr-12:tree:app/report.py' })).toBeUndefined()
   await pane.press({ key: 'past-toggle-review-pr-12' })
@@ -530,7 +530,7 @@ test('the band and pane show the active task, and Quorum keeps no status line', 
   expect(await pane.find({ type: 'Text', text: /2 plan review rounds, approved 2026-11-08/ })).toBeDefined()
   // Checks holds a problem (a pending finding), so it opens by itself; the rounds stay folded to their summary.
   expect(await pane.find({ type: 'Text', text: /1 finding pending/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^r1 1 IMPORTANT · r2 reviewing$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^code r1 ✗1 · r2 reviewing$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /voter kept 2 of 4/ })).toBeUndefined()
   await pane.press({ key: 'toggle-rounds' })
   expect(await pane.find({ type: 'Text', text: /voter kept 2 of 4/ })).toBeDefined()
@@ -890,7 +890,7 @@ test('the round\'s reviewers show waiting, running, then their findings', async 
   await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/review/round-2/logic.md', content: SURVIVORS })
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /reviewers 1\/4 replied/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^✗ Logic & edge cases\s+1 IMPORTANT · 1 NIT$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✗ Logic & edge cases\s+✗1 n1$/ })).toBeDefined()
   await pane.unmount()
 
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -905,8 +905,7 @@ test('the round\'s reviewers show waiting, running, then their findings', async 
   files['.tasks/export-csv/review/round-2/survivors.md'] = SURVIVORS
   await $.tool.call({ tool: 'Bash', command: 'quorum-findings cap 2 votes.md > .tasks/export-csv/review/round-2/survivors.md' })
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /kept 1 IMPORTANT · 1 NIT/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /1 IMPORTANT finding survives: the builder fixes them/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✗ Verifier vote\s+kept ✗1 n1 → fix round$/ })).toBeDefined()
   // Each kept finding, as a row under its file with its mark, line, and Pattern Category; opened, a copy button
   // for its location.
   expect((await pane.find({ type: 'Button', key: 'export-csv:tree:app/report.py' }))?.text).toMatch(/^ {4}report\.py +✗1 {2}n1$/)
@@ -1418,6 +1417,21 @@ async function reload($: Engine, files: Record<string, string>, next: Record<str
   await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/state.md', content: '' })
 }
 
+// Two plan rounds (round 1 kept an IMPORTANT, round 2 nothing) and two code rounds: round 1 kept SURVIVORS, and
+// round 2 is reviewing, with Logic's reply at 1 IMPORTANT and 1 NIT, Architecture's clean, and Patterns' a NIT.
+function inBothReviews(): Record<string, string> {
+  const files: Record<string, string> = {
+    ...repo('IN_REVIEW'),
+    '.tasks/export-csv/plan-review/round-1/survivors.md': survivorsMd(impAt('.tasks/export-csv/plan.md:14')),
+    '.tasks/export-csv/plan-review/round-2/survivors.md': NOTHING_KEPT,
+    '.tasks/export-csv/review/round-2/logic.md': SURVIVORS,
+    '.tasks/export-csv/review/round-2/architecture.md': NOTHING_KEPT,
+    '.tasks/export-csv/review/round-2/patterns.md': survivorsMd(nitAt('app/report.py:7')),
+  }
+  delete files['.tasks/export-csv/review/round-2/candidates.md']
+  return files
+}
+
 test('kept findings show as a tree of their files, from the project root, with single-child folders merged', async ($, on) => {
   const C = 'app/frontend/src/components'
   const survivors = survivorsMd(nitAt('README.md:1'), nitAt('src/export/csv.ts:8'), impAt(`${C}/Table.tsx:20`), nitAt(`${C}/Table.tsx:5`), nitAt(`${C}/Button.tsx:10`, 'Spacing'), nitAt(`${C}/Button.tsx:3`))
@@ -1627,6 +1641,8 @@ test('a finding dropped on dispute reads as dropped, not fixed', async ($, on) =
   expect(await rowOf(pane, `${TREE}lib/z.py`)).toMatch(/z\.py +n1$/)
   expect(droppedRows).toBe(1)
   expect(marks + droppedRows).toBe(important + nit + preExisting)
+  // The voter row says what it dropped, so its counts reconcile with the tree's.
+  expect(await pane.find({ type: 'Text', text: /^✗ Verifier vote\s+kept ✗1 n1 · 1 dropped on dispute → fix round$/ })).toBeDefined()
   await pane.unmount()
 })
 
@@ -1723,7 +1739,8 @@ test('no tree row is wider than the card, with or without icons', async ($, on) 
 })
 
 test('every tree row is a labelled button, and the copy button reads copy path', async ($, on) => {
-  world(on, inRounds([survivorsMd(impAt('app/x.py:3')), `${survivorsMd(nitAt('src/a.ts:1'), impAt('src/b.ts:2'))}`]))
+  const files = inRounds([survivorsMd(impAt('app/x.py:3')), `${survivorsMd(nitAt('src/a.ts:1'), impAt('src/b.ts:2'))}`])
+  world(on, files)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   const pane = await $.ui.mount(ON_TERMINAL)
   const buttons = (await pane.findAll({ type: 'Button' })).filter(b => b.key?.includes(':tree:'))
@@ -1746,6 +1763,25 @@ test('every tree row is a labelled button, and the copy button reads copy path',
   await pane.press({ key: `${TREE}src/` })
   expect(await label(`${TREE}src/`)).toBe('src/ folder, 2 files, 1 important, 1 nit, folded')
   await pane.unmount()
+
+  // The two toggles whose on-screen text is now marks keep their names in words, with their state last.
+  await reload($, files, inBothReviews())
+  let rounds = await $.ui.mount(ON_TERMINAL)
+  const name = 'Review rounds, plan round 1: 1 important, round 2: clean; code round 1: 1 important, round 2: reviewing'
+  expect((await rounds.find({ type: 'Button', key: 'toggle-rounds' }))?.props.label).toBe(`${name}, folded`)
+  await rounds.press({ key: 'toggle-rounds' })
+  expect((await rounds.find({ type: 'Button', key: 'toggle-rounds' }))?.props.label).toBe(`${name}, open`)
+  await rounds.unmount()
+
+  files['.tasks/review-pr-12/state.md'] = reviewState('REVIEWED')
+  files['.tasks/review-pr-12/run-1/survivors.md'] = SURVIVORS
+  await $.tool.call({ tool: 'Bash', command: 'quorum-state --task review-pr-12 set status REVIEWED' })
+  rounds = await $.ui.mount(ON_TERMINAL)
+  // Beside a task, Reviews starts folded.
+  await rounds.press({ key: 'toggle-reviews' })
+  const past = (await rounds.find({ type: 'Button', key: 'past-toggle-review-pr-12' }))?.props.label
+  expect(past).toMatch(/^review-pr-12, 1 important, 1 nit, MEDIUM, 1 run, .+, folded$/)
+  await rounds.unmount()
 })
 
 test('tree edge cases: no vote yet, a root file, an outside path, no location, many findings, unicode, an unknown file_icons value', async ($, on) => {
@@ -1767,6 +1803,7 @@ test('tree edge cases: no vote yet, a root file, an outside path, no location, m
   pane = await $.ui.mount(ON_TERMINAL)
   expect(await pane.find({ type: 'Text', text: /^the verifier kept these in round 1$/ })).toBeDefined()
   expect(await treeKeys(pane)).toContain(`${TREE}app/x.py:3#0`)
+  expect(await pane.find({ type: 'Text', text: /^plan r1 clean  code r1 ✗1 · r2 reviewing$/ })).toBeDefined()
   await pane.unmount()
 
   // A root file, a path outside the roots, no location, 12 findings on one file, and unicode names.
@@ -1883,4 +1920,96 @@ test('a /quorum:review card and a past review show their kept findings as the sa
   expect(await treeKeys(pane)).toEqual(live)
   expect(await rowOf(pane, `${scope}app/x.py`)).toMatch(/x\.py +✓1/)
   await pane.unmount()
+})
+
+// ---- One vocabulary on the rows around the tree
+
+test('reviewer, voter, builder, and round rows use the tree marks, and the verdict sits on the voter row', async ($, on) => {
+  const files = inBothReviews()
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  // Round 2 is reviewing: each reviewer's counts in marks, ✗ only with an IMPORTANT, ✓ only when clean.
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^✗ Logic & edge cases\s+✗1 n1$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✓ Architecture & drift\s+clean$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^• Patterns\s+n1$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^○ Verifier vote\s+waiting$/ })).toBeDefined()
+  // Review rounds groups the plan and code rounds; opened, a round reads its counts in marks.
+  expect(await pane.find({ type: 'Text', text: /^plan r1 ✗1 · r2 clean  code r1 ✗1 · r2 reviewing$/ })).toBeDefined()
+  await pane.press({ key: 'toggle-rounds' })
+  expect(await pane.find({ type: 'Text', text: /^plan r1  ✗1$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^plan r2  clean$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^code r1  ✗1 n1  \(voter kept 2 of 4\)$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✗1 n1$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^code r2  reviewing…$/ })).toBeDefined()
+  await pane.unmount()
+
+  // The vote is in: the voter row carries the verdict, and no separate verdict line renders.
+  files['.tasks/export-csv/review/round-2/votes.md'] = SURVIVORS
+  files['.tasks/export-csv/review/round-2/survivors.md'] = SURVIVORS
+  await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/review/round-2/survivors.md', content: SURVIVORS })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^✗ Verifier vote\s+kept ✗1 n1 → fix round$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /survives?\b/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^plan r1 ✗1 · r2 clean  code r1 ✗1 · r2 ✗1$/ })).toBeDefined()
+  await pane.unmount()
+
+  // A standalone review the builder fixes: its builder row in marks.
+  files['.tasks/review-pr-12/state.md'] = reviewState('FIXING')
+  files['.tasks/review-pr-12/run-1/survivors.md'] = survivorsMd(impAt('app/report.py:42'))
+  await $.tool.call({ tool: 'Bash', command: 'quorum-state --task review-pr-12 set status FIXING' })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^✗ Verifier vote\s+kept ✗1 → fix$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^○ Builder\s+fixes ✗1$/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test("the voter row's next step follows the pipeline: fix round, halts, converges, revise, your call, ready, fix, done", async ($, on) => {
+  // A REVIEWED review has no card, but its next step is still done.
+  expect(voterNext('standalone', 1, 1, 1, 'REVIEWED')).toBe('done')
+
+  const imp = survivorsMd(impAt('app/x.py:3'))
+  const nit = survivorsMd(nitAt('app/x.py:3'))
+  const files = inRounds([imp])
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const voter = async () => {
+    const pane = await $.ui.mount(ON_TERMINAL)
+    const text = (await pane.find({ type: 'Text', text: /^[✓✗] Verifier vote/ }))?.text
+    await pane.unmount()
+    return text
+  }
+
+  // Code review, of max_rounds 3.
+  expect(await voter()).toMatch(/^✗ Verifier vote\s+kept ✗1 → fix round$/)
+  await reload($, files, inRounds([imp, imp, imp]))
+  expect(await voter()).toMatch(/^✗ Verifier vote\s+kept ✗1 → halts$/)
+  await reload($, files, inRounds([nit]))
+  expect(await voter()).toMatch(/^✓ Verifier vote\s+kept n1 → converges$/)
+  await reload($, files, inRounds([NOTHING_KEPT]))
+  expect(await voter()).toMatch(/^✓ Verifier vote\s+kept nothing → converges$/)
+
+  // Plan review: revised once, then the person's call.
+  await reload($, files, inRounds([imp], { dir: 'plan-review' }))
+  expect(await voter()).toMatch(/^✗ Verifier vote\s+kept ✗1 → revise the plan$/)
+  await reload($, files, inRounds([imp, imp], { dir: 'plan-review' }))
+  expect(await voter()).toMatch(/^✗ Verifier vote\s+kept ✗1 → your call$/)
+  await reload($, files, inRounds([nit], { dir: 'plan-review' }))
+  expect(await voter()).toMatch(/^✓ Verifier vote\s+kept n1 → ready for you$/)
+
+  // The counts are survivors.md's, after the nit cap, not votes.md's.
+  const capped = inRounds([survivorsMd(nitAt('app/x.py:3'), nitAt('app/x.py:5'))])
+  capped['.tasks/export-csv/review/round-1/votes.md'] = survivorsMd(nitAt('app/x.py:3'), nitAt('app/x.py:5'), nitAt('app/x.py:7'))
+  await reload($, files, capped)
+  expect(await voter()).toMatch(/^✓ Verifier vote\s+kept n2 → converges$/)
+
+  // A standalone review: fix while FIXING, else done.
+  const id = 'review-abc1234'
+  for (const [status, next] of [['FIXING', 'fix'], ['REVIEWING', 'done']]) {
+    for (const k of Object.keys(files)) delete files[k]
+    Object.assign(files, inRuns(id, status, [{ end: 'b2b2b2b', survivors: imp }]))
+    await $.tool.call({ tool: 'Write', file_path: `/repo/.tasks/${id}/state.md`, content: '' })
+    expect(await voter()).toMatch(new RegExp(`^✗ Verifier vote\\s+kept ✗1 → ${next}$`))
+  }
 })
