@@ -12,7 +12,7 @@ import {
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, SLICE_AT, stageOf, stages, tokenCount,
   nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext,
 } from './task'
-import { confidenceRow, markText, markWords, roundKept, runEnds, trackFindings, treeHeader, treeRows } from './tree'
+import { confidenceRow, iconsOn, markText, markWords, roundKept, runEnds, trackFindings, treeHeader, treeRows } from './tree'
 import type { TreePart } from './tree'
 
 const PANE = 'quorum-dashboard'
@@ -474,6 +474,8 @@ function open($: EngineInterface, focus?: true) {
 
 export const register: Register = (on, options) => {
   const maxRounds = Number(options.max_rounds ?? 3) || 3
+  // File type icons in the findings tree: only `nerd`, and only on the terminal (iconsOn).
+  const fileIcons = options.file_icons
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: COMMAND, description: "Show or hide the Quorum task dashboard" })
@@ -666,7 +668,7 @@ export const register: Register = (on, options) => {
           {head.key.map((parts, i) => (
             <Box key={`${id}:tree-key-${i}`}><Text wrap="truncate-end">{partsOf(`${id}:tree-key-${i}`, parts)}</Text></Box>
           ))}
-          {treeRows(view, { scope: id, width, icons: false, isHigh, folds }).flatMap(row => {
+          {treeRows(view, { scope: id, width, icons: iconsOn(fileIcons, e.surface), isHigh, folds }).flatMap(row => {
             // A finding dropped on dispute is drawn dim throughout.
             const isDim = row.kind === 'finding' && row.parts.every(p => p.dim)
             const confidence = row.kind === 'finding' && row.isOpen ? confidenceRow(row, width) : []

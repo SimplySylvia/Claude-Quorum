@@ -1409,6 +1409,9 @@ const rowOf = async (pane: Drawn, key: string) => (await pane.find({ type: 'Butt
 const allRows = async (pane: Drawn) => (await treeButtons(pane)).map(b => b.text)
 // Width as the card draws it: code points, a Private Use Area icon as 2.
 const cols = (text: string) => [...text].reduce((n, c) => n + (/[\uE000-\uF8FF\u{F0000}-\u{FFFFD}]/u.test(c) ? 2 : 1), 0)
+// A Nerd Font icon (a Private Use Area code point), and a row with its icons and their spaces taken out.
+const PUA = /[\uE000-\uF8FF\u{F0000}-\u{FFFFD}]/u
+const bare = (text: string) => text.replace(/[\uE000-\uF8FF\u{F0000}-\u{FFFFD}] /gu, '')
 
 // Swaps the project's files for `next` and saves a task file, which re-reads the task.
 async function reload($: Engine, files: Record<string, string>, next: Record<string, string>) {
@@ -1712,7 +1715,29 @@ test("plan-review findings sit under the task's plan.md", async ($, on) => {
   await pane.unmount()
 })
 
-test('no tree row is wider than the card, with or without icons', async ($, on) => {
+test('with file_icons set to nerd, the terminal shows file type icons, and other surfaces and off show none', { options: { file_icons: 'nerd' } }, async ($, on) => {
+  world(on, inRounds([survivorsMd(impAt('src/a.ts:1'), nitAt('src/a.test.ts:2'), nitAt('README.md:3'))]))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount(ON_TERMINAL)
+  // Each icon is its own Text, in its file type's colour.
+  const icon = await pane.find({ type: 'Text', text: /^$/ })
+  expect(icon?.props.color).toBe('#519aba')
+  expect(await rowOf(pane, `${TREE}src/a.ts`)).toContain(' a.ts')
+  expect(await rowOf(pane, `${TREE}src/a.test.ts`)).toContain('\u{F0668} a.test.ts')
+  expect(await rowOf(pane, `${TREE}README.md`)).toContain('\u{F0219} README.md')
+  expect((await allRows(pane)).some(r => r.includes(''))).toBe(false)
+  await pane.unmount()
+  // Another surface draws no icon, even with nerd set.
+  pane = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await rowOf(pane, `${TREE}src/a.ts`)).toBeDefined()
+  for (const t of await pane.findAll({ type: 'Text' })) expect(t.text).not.toMatch(PUA)
+  for (const r of await allRows(pane)) expect(r).not.toMatch(PUA)
+  await pane.unmount()
+  expect(iconsOn('off', 'terminal')).toBe(false)
+  expect(iconsOn('yes', 'terminal')).toBe(false)
+})
+
+test('no tree row is wider than the card, with or without icons', { options: { file_icons: 'nerd' } }, async ($, on) => {
   const long = `${'n'.repeat(67)}.ts`
   const chain = 'first/alpha/bravo/charlie/delta/echo/foxtrot/golf/hotel/last'
   expect(long.length).toBe(70)
@@ -1722,20 +1747,27 @@ test('no tree row is wider than the card, with or without icons', async ($, on) 
   world(on, inRounds([survivorsMd(impAt('app/x.py:3')), r2]))
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   const key = `${TREE}${chain}/${long}:12#0`
-  const pane = await $.ui.mount(ON_TERMINAL)
-  expect(await rowOf(pane, key)).toEndWith('…')
-  await pane.press({ key })
-  // The rows, an open finding's further lines, the key's lines, and its confidence with the copy button.
-  const boxes = await pane.findAll({ type: 'Box' })
-  const lines = [...await allRows(pane), ...boxes.filter(b => /:more-\d+$|:tree-key-\d+$|:detail$/.test(b.key ?? '')).map(b => b.text)]
-  expect(boxes.find(b => b.key === `${key}:detail`)?.text).toMatch(/confidence 92 +copy path$/)
-  expect(lines.length).toBeGreaterThan(8)
-  for (const l of lines) expect(cols(l)).toBeLessThanOrEqual(46)
-  // All four marks: the key wraps onto a second line.
-  expect(boxes.filter(b => /:tree-key-\d+$/.test(b.key ?? '')).map(b => b.text)).toEqual(['key: ✗ important  ✓ fixed this run  n nit', '     p pre-existing'])
-  expect(await rowOf(pane, `${TREE}${chain}/`)).toMatch(/^▾ first\/…\/last\/ /)
-  expect(await rowOf(pane, `${TREE}${chain}/${long}`)).toMatch(/…n+\.ts +✗1/)
-  await pane.unmount()
+  // With nerd on the terminal (icons on), then on vscode (icons off). The open finding stays open across mounts.
+  for (const surface of ['terminal', 'vscode'] as const) {
+    const pane = await $.ui.mount({ ...PANE, surface })
+    if (!(await pane.find({ type: 'Box', key: `${key}:detail` }))) {
+      expect(await rowOf(pane, key)).toEndWith('…')
+      await pane.press({ key })
+    }
+    // The rows, an open finding's further lines, the key's lines, and its confidence with the copy button.
+    const boxes = await pane.findAll({ type: 'Box' })
+    const rows = await allRows(pane)
+    const lines = [...rows, ...boxes.filter(b => /:more-\d+$|:tree-key-\d+$|:detail$/.test(b.key ?? '')).map(b => b.text)]
+    expect(rows.some(r => PUA.test(r))).toBe(surface === 'terminal')
+    expect(boxes.find(b => b.key === `${key}:detail`)?.text).toMatch(/confidence 92 +copy path$/)
+    expect(lines.length).toBeGreaterThan(8)
+    for (const l of lines) expect(cols(l)).toBeLessThanOrEqual(46)
+    // All four marks: the key wraps onto a second line.
+    expect(boxes.filter(b => /:tree-key-\d+$/.test(b.key ?? '')).map(b => b.text)).toEqual(['key: ✗ important  ✓ fixed this run  n nit', '     p pre-existing'])
+    expect(bare(await rowOf(pane, `${TREE}${chain}/`) ?? '')).toMatch(/^▾ first\/…\/last\/ /)
+    expect(bare(await rowOf(pane, `${TREE}${chain}/${long}`) ?? '')).toMatch(/…n+\.ts +✗1/)
+    await pane.unmount()
+  }
 })
 
 test('every tree row is a labelled button, and the copy button reads copy path', async ($, on) => {
@@ -1784,7 +1816,7 @@ test('every tree row is a labelled button, and the copy button reads copy path',
   await rounds.unmount()
 })
 
-test('tree edge cases: no vote yet, a root file, an outside path, no location, many findings, unicode, an unknown file_icons value', async ($, on) => {
+test('tree edge cases: no vote yet, a root file, an outside path, no location, many findings, unicode, an unknown file_icons value', { options: { file_icons: 'yes' } }, async ($, on) => {
   // No round voted yet: no tree and no key, and the reviewer rows as before.
   const files = inRounds([null])
   world(on, files)
@@ -1827,7 +1859,10 @@ test('tree edge cases: no vote yet, a root file, an outside path, no location, m
   expect(await rowOf(pane, `${TREE}lib/many.py`)).toMatch(/many\.py +n12$/)
   expect(keys).toContain(`${TREE}docs/café/naïve.md`)
   const rows = await allRows(pane)
+  // An unknown file_icons value draws no icons.
+  for (const t of await pane.findAll({ type: 'Text' })) expect(t.text).not.toMatch(PUA)
   for (const r of rows) {
+    expect(r).not.toMatch(PUA)
     expect(cols(r)).toBeLessThanOrEqual(46)
     expect(r).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/)
   }
