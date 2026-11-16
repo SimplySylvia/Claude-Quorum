@@ -3,6 +3,32 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
+## Unreleased
+
+### Added
+
+- **The dashboard's kept findings show as a tree of their files.** On the Now card, the `/quorum:review` card,
+  and a finished review's row, the findings the verifier kept sit under their files, read from the project root,
+  with single-child folders merged and each folder's findings rolled up by mark (`✗` important, `n` nit, `p`
+  pre-existing) beside its file count. A key line names the marks shown. A press folds or opens a folder or file,
+  and the choice is kept across rounds; a press on a finding shows its full title, its confidence, and a
+  **copy path** button. A finding with no location sits under **other** instead of being left out, and every
+  finding shows, where nits used to be hidden once more than four findings were kept.
+- **Fixed and dropped findings in the tree.** A finding an earlier round kept that a later round no longer keeps
+  shows as `✓ round 1 → fixed by round 2`, folded unless the task is HIGH; for `/quorum:review`, only across runs
+  over a different range end. A finding the voter dropped on dispute shows dim as `dropped on dispute in round 1`.
+- **`file_icons` option.** Set it to `nerd` for Nerd Font file type icons beside the tree's files and folders, in
+  the terminal only. It's `off` by default.
+
+### Changed
+
+- **Reviewer, voter, builder, and round rows read in the tree's marks.** A reviewer row reads `✗1 n1`, the voter
+  row reads its verdict and the next step (`kept ✗1 n1 → fix round`, with `· 1 dropped on dispute` when the voter
+  dropped any), and the builder row reads `fixes ✗1`. The separate verdict line is gone. A finished review's row
+  reads its result in marks too, and its button keeps it in words.
+- **Review rounds show the plan's rounds beside the code's:** `plan r1 ✗1 · r2 clean  code r1 ✗1 · r2 reviewing`.
+  The section's button reads the rounds in words.
+
 ## 0.11.3 (2026-11-15)
 
 ### Fixed

@@ -16,7 +16,8 @@ claude plugin test .                          # the dashboard's tests in tests/d
 CI runs all four on every push and pull request: bats and shellcheck on Linux and on macOS (system bash 3.2).
 
 The dashboard (`hooks/dashboard/`) is a hooks module: TypeScript that runs inside Claude Code, with no Node or DOM.
-`task.ts` holds the pure parsing and stage logic; `register.tsx` hooks the events and draws. The values it keeps in
+`task.ts` holds the pure parsing and stage logic, and `tree.ts` the findings tree's pure model and layout;
+`register.tsx` hooks the events and draws. The values it keeps in
 the session are declared in `types/index.d.ts`. To try a change live, start `claude --plugin-dir .` from this repo;
 it reloads the module when you save.
 

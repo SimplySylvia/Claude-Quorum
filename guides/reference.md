@@ -64,6 +64,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `protected_paths` | (none) | More check files a task can't change while it builds or is in review, as comma-separated globs |
 | `mechanical_model` | (none: the session's model) | Model for the steps of a large plan that the plan marks mechanical; a mid-tier model at the least |
 | `worktrees` | `false` | Build each task in its own git worktree (see [More than one task at a time](running-a-task.md#more-than-one-task-at-a-time)) |
+| `file_icons` | `off` | Icons in the dashboard's findings tree: `off` or `nerd`; `nerd` needs a Nerd Font in the terminal |
 | `blind_block_dirs` | `src,app,lib,packages,Source,Content` | Folders the blind user can't read |
 | `blind_block_exts` | `ts,tsx,js,jsx,py,rs,go,cpp,h,java,kt,rb` | File types the blind user can't read |
 
