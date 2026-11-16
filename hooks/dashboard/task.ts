@@ -433,6 +433,17 @@ export function normalizePath(path: string): string {
 // Statuses a task has once its work is done, or stopped for a redesign.
 export const isFinished = (status: string) => status === 'READY' || status === 'AWAITING-HUMAN' || status === 'HALTED'
 
+// `1 file`, `4 files`.
+export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+// The voter row's next step, as the pipeline takes it: a code review fixes and re-reviews until `of` rounds, then
+// halts; a plan is revised once, then waits on the person; a standalone review fixes only once it is FIXING.
+export function voterNext(kind: 'plan' | 'review' | 'standalone', important: number, round: number, of: number, status: string): string {
+  if (kind === 'standalone') return status === 'FIXING' ? 'fix' : 'done'
+  if (kind === 'plan') return important === 0 ? 'ready for you' : round >= 2 ? 'your call' : 'revise the plan'
+  return important === 0 ? 'converges' : round >= of ? 'halts' : 'fix round'
+}
+
 // A token count in a few characters: 950, 12k, 1.4M.
 export function tokenCount(n: number): string {
   if (n < 1000) return String(n)
@@ -441,11 +452,12 @@ export function tokenCount(n: number): string {
 }
 
 // The findings a voter's survivors.md kept, in order: `[TAG] file:line — Pattern Category: X`, then an optional
-// `Confidence: N` line under it, as bin/quorum-findings reads them.
+// `Confidence: N` line under it, as bin/quorum-findings reads them. The `file:line` is optional: a finding without
+// one gets `loc: ''`, so the list's length matches countFindings.
 export function keptFindings(text: string): KeptFinding[] {
   const out: KeptFinding[] = []
   for (const line of text.split('\n')) {
-    const m = /^\[(IMPORTANT|NIT|PRE-EXISTING)\]\s+(\S+:\d+)\s*(?:[—-]+\s*)?(.*)$/.exec(line)
+    const m = /^\[(IMPORTANT|NIT|PRE-EXISTING)\]\s+(?:(\S+:\d+)\s*)?(?:[—-]+\s*)?(.*)$/.exec(line)
     if (m) {
       const rest = (m[3] ?? '').trim()
       out.push({ tag: m[1] as KeptFinding['tag'], loc: m[2] ?? '', title: /Pattern Category:\s*(.+)$/.exec(rest)?.[1]?.trim() ?? rest, confidence: null })

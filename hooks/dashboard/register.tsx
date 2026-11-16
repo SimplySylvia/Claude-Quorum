@@ -10,7 +10,7 @@ import type { Check, Findings, KeptFinding, Now, OtherTask, PullRequest, QuorumA
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, SLICE_AT, stageOf, stages, tokenCount,
-  keptFindings, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange,
+  keptFindings, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural,
 } from './task'
 
 const PANE = 'quorum-dashboard'
@@ -334,8 +334,6 @@ function stageDetails(t: Snapshot, known: PullRequest | null): string {
 const prState = (p: PullRequest) =>
   p.state === 'MERGED' ? 'merged' : p.state === 'CLOSED' ? 'closed without merging' : p.state === 'OPEN' ? (p.isDraft ? 'draft, open' : 'open') : ''
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
-
 function findingsText(f: Findings): string {
   if (f.important + f.nit + f.preExisting === 0) return 'clean'
   return [`${f.important} IMPORTANT`, `${f.nit} NIT`, ...(f.preExisting ? [`${f.preExisting} pre-existing`] : [])].join(' · ')
@@ -658,7 +656,7 @@ export const register: Register = (on, options) => {
         {badge(`${prefix}-badge-${i}`, f.tag === 'PRE-EXISTING' ? 'PRE' : f.tag, f.tag === 'IMPORTANT' ? 'error' : f.tag === 'NIT' ? 'subtle' : 'warning')}
         <Text dimColor wrap="truncate-end">{f.loc}</Text>
         <Box flexGrow={1} flexShrink={1}><Text wrap="truncate-end">{f.title}{f.confidence !== null ? ` (${f.confidence})` : ''}</Text></Box>
-        {copy(`copy-${prefix}-${i}`, f.loc)}
+        {f.loc ? copy(`copy-${prefix}-${i}`, f.loc) : null}
       </Box>
     )
 

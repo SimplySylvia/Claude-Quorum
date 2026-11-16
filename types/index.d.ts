@@ -8,8 +8,32 @@ export type Stage = { name: string; state: 'done' | 'active' | 'waiting' | 'stuc
 
 export type Round = { n: number; findings: Findings | null; candidates: number | null }
 
-// One finding the voter kept: its tag, `file:line`, Pattern Category (or the rest of its line), and confidence.
+// One finding the voter kept: its tag, `file:line` (or '' when its line has no location), Pattern Category (or the
+// rest of its line), and confidence.
 export type KeptFinding = { tag: 'IMPORTANT' | 'NIT' | 'PRE-EXISTING'; loc: string; title: string; confidence: number | null }
+
+// One review round's (or a standalone review's run's) kept findings, the raw `path:line` of each IMPORTANT finding
+// its disputes.md dropped, and the end of the range it reviewed (runs only; null when unknown).
+export type RoundKept = { n: number; kept: KeptFinding[]; drops: string[]; end: string | null }
+
+// A finding in the findings tree, tracked across rounds: `path` is repo-relative, or '' with no location. `open`:
+// the round on show keeps it (`round` is that round); `fixed`: an earlier round kept it as IMPORTANT (`round`, the
+// last that did) and the round on show doesn't (`fixedBy`, the first round after it was last kept); `dropped`: the
+// voter dropped it on dispute in `round`.
+export type TreeFinding = {
+  path: string
+  line: number | null
+  tag: KeptFinding['tag']
+  title: string
+  confidence: number | null
+  state: 'open' | 'fixed' | 'dropped'
+  round: number
+  fixedBy: number | null
+}
+
+// What the findings tree shows: the round (or run) on show, how many findings it kept, how many of those its own
+// disputes.md dropped, and every finding to draw.
+export type FindingsView = { unit: 'round' | 'run'; round: number; kept: number; dropped: number; findings: TreeFinding[] }
 
 // The pane's foldable sections. Each opens by itself while it holds a problem; a click overrides that.
 export type Section = 'tasks' | 'requirements' | 'checks' | 'rounds' | 'reviews' | 'spend' | 'agents'

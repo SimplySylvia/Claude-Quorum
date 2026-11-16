@@ -7,7 +7,13 @@ import {
   requirementState, roleOf,
   roundReviewers, slugFromHead, spendOf, stageOf, stages, tokenCount,
   keptFindings, countPlanSteps, normalizePath, modelMismatches, choiceLabel, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, latestRun, liveReview, shortRange,
+  plural,
 } from '../../hooks/dashboard/task'
+import {
+  cellWidth, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, iconsOn, markText, markWords, repoPath, roundKept, runEnds, splitLoc, trackFindings, treeHeader, treeRows,
+} from '../../hooks/dashboard/tree'
+import type { TreeRow } from '../../hooks/dashboard/tree'
+import type { FindingsView, TreeFinding } from '../../types'
 
 const state = (status: string, extra = '') => `---
 slug: export-csv
@@ -1130,4 +1136,228 @@ test('a reload marks agents the engine no longer runs as finished', async ($, on
   // The two builders, under Other agents, are drawn last.
   expect(marks.slice(-2).map(m => m.text)).toEqual(['✓ ', '● '])
   await pane.unmount()
+})
+
+describe('findings tree helpers', () => {
+  // A round's survivors.md, from `[TAG] loc — Pattern Category: title` lines.
+  const kept = (...lines: string[]) => `Summary: ${lines.length} kept\n\n${lines.map(l => `${l}\n`).join('')}`
+  const imp = (loc: string, title = 'Unescaped CSV fields') => `[IMPORTANT] ${loc} — Pattern Category: ${title}`
+  const nit = (loc: string, title = 'Naming') => `[NIT] ${loc} — Pattern Category: ${title}`
+  const pre = (loc: string, title = 'Old debt') => `[PRE-EXISTING] ${loc} — Pattern Category: ${title}`
+  const ELSEWHERE = nit('lib/z.py:5')
+  const rounds = (...texts: string[]) => texts.map((t, i) => roundKept(i + 1, t, '', null))
+  const runs = (ends: string[], ...texts: string[]) => texts.map((t, i) => roundKept(i + 1, t, '', ends[i] ?? null))
+  const states = (v: FindingsView | null) => (v?.findings ?? []).map(f => `${f.state} ${f.path}:${f.line} r${f.round}${f.fixedBy === null ? '' : `>${f.fixedBy}`}`)
+  // Width as the card draws it: code points, a Private Use Area icon as 2.
+  const width = (text: string) => [...text].reduce((n, c) => n + (/[\uE000-\uF8FF\u{F0000}-\u{FFFFD}]/u.test(c) ? 2 : 1), 0)
+  const rowText = (r: TreeRow) => r.parts.map(p => p.text).join('')
+  const finding = (path: string, line: number | null, tag: TreeFinding['tag'], title: string, extra: Partial<TreeFinding> = {}): TreeFinding =>
+    ({ path, line, tag, title, confidence: null, state: 'open', round: 1, fixedBy: null, ...extra })
+  const view = (findings: TreeFinding[], extra: Partial<FindingsView> = {}): FindingsView => ({ unit: 'round', round: 1, kept: findings.length, dropped: 0, findings, ...extra })
+  const opts = (extra: Partial<Parameters<typeof treeRows>[1]> = {}) => ({ scope: 's', width: 46, icons: false, isHigh: false, folds: {}, ...extra })
+
+  test('repoPath joins ./, roots at a boundary, longest first, and backslashes', () => {
+    const roots = ['/repo', '/repo/.claude/worktrees/export-csv', 'C:/repo']
+    for (const loc of ['./app/x.py', 'app/x.py', '/repo/app/x.py', '/repo/.claude/worktrees/export-csv/app/x.py', 'C:\\repo\\app\\x.py']) {
+      expect(repoPath(loc, roots)).toBe('app/x.py')
+    }
+    expect(repoPath('/repo2/app/x.py', roots)).toBe('/repo2/app/x.py')
+    // Longest first: /repo never eats the worktree's own prefix.
+    expect(repoPath('/repo/.claude/worktrees/s/app/x.py', ['/repo', '/repo/.claude/worktrees/s'])).toBe('app/x.py')
+    // A backslash root, a trailing slash, and an empty root.
+    expect(repoPath('D:\\work\\src\\a.ts', ['D:\\work\\', ''])).toBe('src/a.ts')
+    expect(splitLoc('C:/repo/app/x.py:13')).toEqual({ path: 'C:/repo/app/x.py', line: 13 })
+    expect(splitLoc('')).toEqual({ path: '', line: null })
+    expect(disputeDrops('DROP [IMPORTANT] ./app/x.py:3 — (b) handled\nDROP [NIT] a.py:1 — style\nKEEP [IMPORTANT] b.py:2 — real\n')).toEqual(['./app/x.py:3'])
+    const log = `---\nrange: a..f\n---\n## Run 1 (a..b, MEDIUM)\n## Run 2 (a..c, HIGH)\n`
+    expect(runEnds(log, 3, 'a..d')).toEqual({ 1: 'b', 2: 'c', 3: 'd' })
+    expect(runEnds(log, 2, 'a..d')).toEqual({ 1: 'b', 2: 'c' })
+  })
+
+  test('trackFindings pairs by path and category at any severity, nearest line first', () => {
+    expect(trackFindings([], [], 'round')).toBeNull()
+    // The line moved: still open, at its new line.
+    expect(states(trackFindings(rounds(kept(imp('app/x.py:3')), kept(imp('app/x.py:6'))), [], 'round'))).toEqual(['open app/x.py:6 r2'])
+    // The severity changed: open at the new severity, never fixed.
+    const nitNow = trackFindings(rounds(kept(imp('app/x.py:3')), kept(nit('app/x.py:3', 'unescaped  CSV Fields'))), [], 'round')
+    expect(states(nitNow)).toEqual(['open app/x.py:3 r2'])
+    expect(nitNow?.findings[0]?.tag).toBe('NIT')
+    // Two kept, one left: the kept one pairs with the nearest line, so :3 is the fixed one.
+    expect(states(trackFindings(rounds(kept(imp('app/x.py:3'), imp('app/x.py:9')), kept(imp('app/x.py:8'))), [], 'round')))
+      .toEqual(['fixed app/x.py:3 r1>2', 'open app/x.py:8 r2'])
+    // Another path, or another category, is another finding.
+    expect(states(trackFindings(rounds(kept(imp('app/x.py:3')), kept(imp('app/y.py:3'), imp('app/x.py:3', 'Other'))), [], 'round')))
+      .toEqual(['fixed app/x.py:3 r1>2', 'open app/x.py:3 r2', 'open app/y.py:3 r2'])
+  })
+
+  test('trackFindings decides fixed and dropped against the round on show', () => {
+    // Kept in rounds 1 and 3 but not 2: it came back, so it's open.
+    expect(states(trackFindings(rounds(kept(imp('app/x.py:3')), kept(ELSEWHERE), kept(imp('app/x.py:3'), ELSEWHERE)), [], 'round')))
+      .toEqual(['open app/x.py:3 r3', 'open lib/z.py:5 r3'])
+    // IMPORTANT in rounds 1 and 2, gone in 3.
+    expect(states(trackFindings(rounds(kept(imp('app/x.py:3')), kept(imp('app/x.py:3')), kept(ELSEWHERE)), [], 'round')))
+      .toEqual(['fixed app/x.py:3 r2>3', 'open lib/z.py:5 r3'])
+    // IMPORTANT in round 1, a NIT in round 2, gone in 3: the round is the last that kept it as IMPORTANT.
+    const demoted = trackFindings(rounds(kept(imp('app/x.py:3')), kept(nit('app/x.py:3', 'Unescaped CSV fields')), kept(ELSEWHERE)), [], 'round')
+    expect(states(demoted)).toEqual(['fixed app/x.py:3 r1>3', 'open lib/z.py:5 r3'])
+    expect(demoted?.findings[0]?.tag).toBe('IMPORTANT')
+    // Fixed by round 2, shown under round 3: fixedBy is the round after the last that kept it.
+    expect(states(trackFindings(rounds(kept(imp('app/x.py:3'), ELSEWHERE), kept(ELSEWHERE), kept(ELSEWHERE)), [], 'round')))
+      .toEqual(['fixed app/x.py:3 r1>2', 'open lib/z.py:5 r3'])
+    // A NIT that goes away is let go.
+    expect(states(trackFindings(rounds(kept(nit('app/x.py:3')), kept(ELSEWHERE)), [], 'round'))).toEqual(['open lib/z.py:5 r2'])
+    // The round on show kept nothing: only the fixed findings stay.
+    const none = trackFindings(rounds(kept(imp('app/x.py:3'), ELSEWHERE), 'Summary: 0 issues found. Ready to land.\n'), [], 'round')
+    expect(states(none)).toEqual(['fixed app/x.py:3 r1>2'])
+    expect(none?.kept).toBe(0)
+    expect(none?.round).toBe(2)
+
+    // Runs: a fix counts only across runs over a different range end.
+    expect(states(trackFindings(runs(['b', 'b', 'c'], kept(imp('app/x.py:3'), ELSEWHERE), kept(ELSEWHERE), kept(ELSEWHERE)), [], 'run')))
+      .toEqual(['fixed app/x.py:3 r1>3', 'open lib/z.py:5 r3'])
+    expect(states(trackFindings(runs(['b', 'c', 'c'], kept(imp('app/x.py:3'), ELSEWHERE), kept(ELSEWHERE), kept(ELSEWHERE)), [], 'run')))
+      .toEqual(['fixed app/x.py:3 r1>2', 'open lib/z.py:5 r3'])
+    expect(states(trackFindings(runs(['b', 'c', 'd'], kept(imp('app/x.py:3'), ELSEWHERE), kept(ELSEWHERE), kept(ELSEWHERE)), [], 'run')))
+      .toEqual(['fixed app/x.py:3 r1>2', 'open lib/z.py:5 r3'])
+    // Last kept by run 2, over the same end as run 3: the same code, so it's let go.
+    expect(states(trackFindings(runs(['b', 'c', 'c'], kept(imp('app/x.py:3'), ELSEWHERE), kept(imp('app/x.py:3'), ELSEWHERE), kept(ELSEWHERE)), [], 'run')))
+      .toEqual(['open lib/z.py:5 r3'])
+    // A short SHA and its full form are the same end.
+    expect(states(trackFindings(runs(['1a2b3c4', '1a2b3c4'.padEnd(40, '0')], kept(imp('app/x.py:3'), ELSEWHERE), kept(ELSEWHERE)), [], 'run')))
+      .toEqual(['open lib/z.py:5 r2'])
+    expect(trackFindings(runs(['b', 'c'], kept(imp('app/x.py:3')), kept(ELSEWHERE)), [], 'run')?.unit).toBe('run')
+
+    // A drop in an earlier round, written another way, joins its finding: dropped, not fixed.
+    const earlier = trackFindings([roundKept(1, kept(imp('app/x.py:3')), 'DROP [IMPORTANT] /repo/app/x.py:3 — (b) handled', null), roundKept(2, kept(ELSEWHERE), '', null)], ['/repo'], 'round')
+    expect(states(earlier)).toEqual(['dropped app/x.py:3 r1', 'open lib/z.py:5 r2'])
+    expect(earlier?.dropped).toBe(0)
+    // A drop in the round on show wins over open, and the view counts it.
+    const own = trackFindings([roundKept(1, kept(imp('app/x.py:3'), ELSEWHERE), 'DROP [IMPORTANT] ./app/x.py:3 — (b) handled\n', null)], ['/repo'], 'round')
+    expect(states(own)).toEqual(['dropped app/x.py:3 r1', 'open lib/z.py:5 r1'])
+    expect(own?.dropped).toBe(1)
+    expect(own?.kept).toBe(2)
+  })
+
+  test('treeRows merges single-child folders, splits where they branch, sorts, rolls up, and cuts to width', () => {
+    const v = view([
+      finding('z.ts', 1, 'PRE-EXISTING', 'Old debt'),
+      finding('a/b/d/y.ts', 2, 'NIT', 'Naming'),
+      finding('a/b/c/x.ts', 3, 'IMPORTANT', 'Unescaped CSV fields'),
+      finding('b.ts', 4, 'NIT', 'Spacing'),
+    ])
+    const rows = treeRows(v, opts())
+    expect(rows.filter(r => r.kind !== 'finding').map(r => r.key)).toEqual(['s:tree:a/b/', 's:tree:a/b/c/', 's:tree:a/b/c/x.ts', 's:tree:a/b/d/', 's:tree:a/b/d/y.ts', 's:tree:b.ts', 's:tree:z.ts'])
+    expect(rows.some(r => r.key === 's:tree:a/')).toBe(false)
+    // Files with open findings start open; findings start folded.
+    expect(rows.filter(r => r.kind === 'finding').map(r => r.key)).toEqual(['s:tree:a/b/c/x.ts:3#0', 's:tree:a/b/d/y.ts:2#0', 's:tree:b.ts:4#0', 's:tree:z.ts:1#0'])
+    const top = rows[0]
+    expect(top?.label).toBe('a/b/ folder, 2 files, 1 important, 1 nit, open')
+    // Every row is the card's width, with the counts in right-aligned mark columns.
+    expect(rowText(top as TreeRow)).toMatch(/^▾ a\/b\/ +2 files  ✗1  n1    $/)
+    expect(rowText(rows.find(r => r.key === 's:tree:z.ts') as TreeRow)).toMatch(/ {8}p1$/)
+    for (const r of rows.filter(r => r.kind !== 'finding')) expect(width(rowText(r))).toBe(46)
+    expect(rowText(rows.find(r => r.key === 's:tree:a/b/c/x.ts:3#0') as TreeRow)).toBe('        ✗ :3 Unescaped CSV fields')
+    expect(rows.find(r => r.key === 's:tree:a/b/c/x.ts:3#0')?.label).toBe('important at a/b/c/x.ts:3: Unescaped CSV fields, folded')
+
+    // A fold wins over the default; folding never moves a column.
+    const folded = treeRows(v, opts({ folds: { 's:tree:a/b/': false } }))
+    expect(folded.map(r => r.key)[0]).toBe('s:tree:a/b/')
+    expect(folded[0]?.label).toEndWith(', folded')
+    expect(folded.some(r => r.key.startsWith('s:tree:a/b/c'))).toBe(false)
+    expect(rowText(folded[0] as TreeRow)).toMatch(/^▸ a\/b\/ +2 files  ✗1  n1    $/)
+
+    // Fixed and dropped rows, a file whose only finding is fixed starting folded, and the `other` row last.
+    const marks = view([
+      finding('app/x.py', 3, 'IMPORTANT', 'Unescaped CSV fields', { state: 'fixed', round: 1, fixedBy: 2 }),
+      finding('app/y.py', 9, 'IMPORTANT', 'Wrong env var', { state: 'dropped' }),
+      finding('', null, 'NIT', 'Summary wording'),
+    ], { round: 2 })
+    const m = treeRows(marks, opts({ folds: { 's:tree:app/x.py:3#0': true } }))
+    expect(m.map(r => r.key)).toEqual(['s:tree:app/', 's:tree:app/x.py', 's:tree:app/y.py', 's:tree:app/y.py:9#0', 's:tree::other', 's:tree::other:#0'])
+    expect(m[1]?.label).toBe('app/x.py, 1 fixed, folded')
+    expect(rowText(m[1] as TreeRow)).toMatch(/^ {2}▸ x\.py +✓1 {4}$/)
+    expect(rowText(m[3] as TreeRow)).toBe('      · :9 dropped on dispute in round 1')
+    expect(m[3]?.parts.every(p => p.dim)).toBe(true)
+    expect(rowText(m[5] as TreeRow)).toBe('    n (no location) Summary wording')
+    expect(m[5]?.copy).toBeNull()
+    // On a HIGH task the fixed one's file opens.
+    const high = treeRows(marks, opts({ isHigh: true }))
+    expect(rowText(high.find(r => r.key === 's:tree:app/x.py:3#0') as TreeRow)).toBe('      ✓ :3 round 1 → fixed by round 2')
+
+    // Cuts: a 70-character name keeps its extension, a long chain its first and last folder, a long title ends in …
+    const long = `${'n'.repeat(67)}.ts`
+    const chain = `${['first', 'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta'].join('/')}/last`
+    const title = 'A very long Pattern Category that cannot possibly fit on a single row of the docked pane at all'
+    const cut = view([finding(`${chain}/${long}`, 12, 'IMPORTANT', title, { confidence: 92 }), finding(`${chain}/b.ts`, 1, 'NIT', 'x')])
+    for (const icons of [false, true]) {
+      const open = treeRows(cut, opts({ icons, folds: { [`s:tree:${chain}/${long}:12#0`]: true } }))
+      const f = open.find(r => r.kind === 'finding' && r.isOpen) as TreeRow
+      expect(f.copy).toBe(`${chain}/${long}:12`)
+      expect(f.confidence).toBe(92)
+      expect(f.more.length).toBeGreaterThan(0)
+      expect([rowText(f).trimStart().replace(/^✗ :12 /, ''), ...f.more.map(l => l.trim())].join(' ')).toBe(title)
+      const lines = [...open.map(rowText), ...f.more, confidenceRow(f, 46).map(p => p.text).join('')]
+      for (const l of lines) expect(width(l)).toBeLessThanOrEqual(46)
+      expect(confidenceRow(f, 46).map(p => p.text).join('')).toMatch(/confidence 92 +copy path$/)
+      const file = open.find(r => r.kind === 'file' && r.copy === null && r.key.endsWith(long)) as TreeRow
+      expect(rowText(file)).toMatch(/…n+\.ts +✗1 {4}$/)
+      expect(rowText(open[0] as TreeRow)).toMatch(/^▾ (\S+ )?first\/…\/last\/ /)
+      for (const r of open) expect(r.label).toMatch(/, (open|folded)$/)
+      const closed = treeRows(cut, opts({ icons })).find(r => r.kind === 'finding' && r.key.includes(long)) as TreeRow
+      expect(rowText(closed)).toEndWith('…')
+      expect(width(rowText(closed))).toBeLessThanOrEqual(46)
+    }
+    // Icons: the type's glyph and colour, the test tube for tests, and the open folder.
+    const iconRows = treeRows(view([finding('src/a.ts', 1, 'NIT', 'x'), finding('src/a.test.ts', 1, 'NIT', 'x'), finding('README.md', 1, 'NIT', 'x')]), opts({ icons: true }))
+    expect(iconRows[0]?.parts.find(p => p.text === '\uE5FE')?.color).toBe('#8b8b8b')
+    expect(iconRows.find(r => r.key === 's:tree:src/a.ts')?.parts.find(p => p.text === '\uE628')?.color).toBe('#519aba')
+    expect(iconRows.find(r => r.key === 's:tree:src/a.test.ts')?.parts.find(p => p.text === '\u{F0668}')?.color).toBe('#519aba')
+    expect(iconRows.find(r => r.key === 's:tree:README.md')?.parts.some(p => p.text === '\u{F0219}')).toBe(true)
+    expect(iconRows.some(r => r.parts.some(p => p.text.includes('\uE609')))).toBe(false)
+    expect(iconsOn('nerd', 'terminal')).toBe(true)
+    expect(iconsOn('nerd', 'vscode')).toBe(false)
+    expect(iconsOn('off', 'terminal')).toBe(false)
+    expect(iconsOn('yes', 'terminal')).toBe(false)
+    expect(cellWidth('a\uE628\u{F0668}')).toBe(5)
+    // A cut keeps whole characters.
+    expect(cutEnd('naïve😀😀😀', 7)).toBe('naïve😀…')
+    expect(cutMiddle(`${'😀'.repeat(20)}.md`, 10)).toBe('😀😀😀…😀😀😀.md')
+    expect(cutChain('a/b/c/d/', 6)).toBe('a/…/d/')
+  })
+
+  test('treeHeader wraps the key and keeps the header when nothing is kept', () => {
+    expect(treeHeader(null, 46)).toBeNull()
+    expect(treeHeader(view([], { kept: 0 }), 46)).toEqual({ header: 'the verifier kept nothing in round 1', key: [] })
+    const text = (k: { text: string }[][]) => k.map(l => l.map(p => p.text).join(''))
+    const two = treeHeader(view([finding('src/a.ts', 1, 'IMPORTANT', 'x'), finding('src/b.ts', 2, 'NIT', 'y')], { round: 3, unit: 'run' }), 46)
+    expect(two?.header).toBe('the verifier kept these in run 3')
+    expect(text(two?.key ?? [])).toEqual(['key: ✗ important  n nit'])
+    const all = treeHeader(view([
+      finding('a.ts', 1, 'IMPORTANT', 'x'), finding('b.ts', 1, 'IMPORTANT', 'x', { state: 'fixed', fixedBy: 2 }),
+      finding('c.ts', 1, 'NIT', 'x'), finding('d.ts', 1, 'PRE-EXISTING', 'x'),
+    ]), 46)
+    expect(text(all?.key ?? [])).toEqual(['key: ✗ important  ✓ fixed this run  n nit', '     p pre-existing'])
+    for (const l of text(all?.key ?? [])) expect(width(l)).toBeLessThanOrEqual(46)
+    // Nothing kept, but an earlier fix: the header says so, and the key names only ✓.
+    expect(treeHeader(view([finding('a.ts', 1, 'IMPORTANT', 'x', { state: 'fixed', fixedBy: 2 })], { kept: 0, round: 2 }), 46))
+      .toEqual({ header: 'the verifier kept nothing in round 2', key: [[{ text: 'key: ', dim: true }, { text: '✓', color: 'success' }, { text: ' fixed this run', dim: true }]] })
+  })
+
+  test('keptFindings keeps a finding with no location', () => {
+    expect(keptFindings('[NIT] Summary wording\n[IMPORTANT] app/x.py:3 — Pattern Category: Real\n')).toEqual([
+      { tag: 'NIT', loc: '', title: 'Summary wording', confidence: null },
+      { tag: 'IMPORTANT', loc: 'app/x.py:3', title: 'Real', confidence: null },
+    ])
+    expect(keptFindings('[NIT] Summary wording\n').length).toBe(countFindings('[NIT] Summary wording\n').nit)
+  })
+
+  test('markWords spells out the counts', () => {
+    expect(markWords({ important: 1, nit: 1, preExisting: 0 })).toBe('1 important, 1 nit')
+    expect(markWords({ important: 0, nit: 2, preExisting: 1 })).toBe('2 nits, 1 pre-existing')
+    expect(markWords({ important: 0, nit: 0, preExisting: 0 })).toBe('clean')
+    expect(markText({ important: 1, nit: 1, preExisting: 1 })).toBe('✗1 n1 p1')
+    expect(markText({ important: 0, nit: 3, preExisting: 0 })).toBe('n3')
+    expect(plural(1, 'file')).toBe('1 file')
+    expect(plural(4, 'file')).toBe('4 files')
+  })
 })
