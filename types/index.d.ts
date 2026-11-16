@@ -120,8 +120,8 @@ export type Snapshot = {
   checksNote: string
 }
 
-// A standalone review (/quorum:review), from .tasks/review-<id>/: its latest run's reviewers, voter, and kept
-// findings, as for a task's review round. The one this session is running gets the live card; the rest are history.
+// A standalone review (/quorum:review), from .tasks/review-<id>/: its latest run's reviewers and voter, as for a
+// task's review round, and the findings tree over its runs. The one this session is running gets the live card; the rest are history.
 export type Review = {
   id: string
   status: string
@@ -135,7 +135,7 @@ export type Review = {
   reviewers: Reviewer[]
   voter: Reviewer
   survivors: Findings | null
-  kept: KeptFinding[]
+  tree: FindingsView | null
 }
 
 // Another unfinished task in this repo, for the pane's list: its status and tier, and the git worktree its code is

@@ -409,9 +409,13 @@ test('this session\'s review with no task shows in the band and the pane: review
   await band.unmount()
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /kept 1 IMPORTANT · 1 NIT/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^app\/report\.py:42$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^○ Builder\s+fixes 1 IMPORTANT finding$/ })).toBeDefined()
-  await pane.press({ key: 'copy-review-kept-0' })
+  // The kept findings, as a tree under the builder: a row per file, and a row per finding that opens to a copy
+  // button for its location.
+  expect(await rowOf(pane, 'review-pr-12:tree:app/report.py')).toMatch(/^ {4}report\.py +✗1 {2}n1$/)
+  expect(await rowOf(pane, 'review-pr-12:tree:app/report.py:42#0')).toMatch(/✗ :42 Unescaped CSV fields$/)
+  await pane.press({ key: 'review-pr-12:tree:app/report.py:42#0' })
+  await pane.press({ key: 'review-pr-12:tree:app/report.py:42#0:copy' })
   expect(seen.copied).toEqual(['app/report.py:42'])
   await pane.unmount()
 
@@ -428,11 +432,12 @@ test('this session\'s review with no task shows in the band and the pane: review
   expect(await pane.find({ type: 'Text', text: /^review-pr-12 {2}$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^1 IMPORTANT · 1 NIT$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^ · MEDIUM · 1 run · just now$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^app\/report\.py:42$/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Button', key: 'review-pr-12:tree:app/report.py' })).toBeUndefined()
   await pane.press({ key: 'past-toggle-review-pr-12' })
   expect(await pane.find({ type: 'Text', text: /^1a2b3c4\.\.5d6e7f8$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^app\/report\.py:42$/ })).toBeDefined()
-  await pane.press({ key: 'copy-past-review-pr-12-0' })
+  expect(await rowOf(pane, 'review-pr-12:tree:app/report.py')).toMatch(/^ {4}report\.py +✗1 {2}n1$/)
+  // The finding is still open from the card: its fold choice is kept per review id.
+  await pane.press({ key: 'review-pr-12:tree:app/report.py:42#0:copy' })
   expect(seen.copied).toEqual(['app/report.py:42', 'app/report.py:42'])
   await pane.unmount()
 })
@@ -1790,5 +1795,92 @@ test('tree edge cases: no vote yet, a root file, an outside path, no location, m
     expect(r).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/)
   }
   expect(await rowOf(pane, `${TREE}docs/${astral}`)).toMatch(/😀…😀+\.md /u)
+  await pane.unmount()
+})
+
+// ---- The findings tree for standalone reviews
+
+// A standalone review this session runs, with no task: each run's survivors.md, and the range end its state.md log
+// line records (`## Run <N> (A..<end>, <tier>)`); the frontmatter's range is the latest run's.
+function inRuns(id: string, status: string, runs: { end: string; survivors: string }[], risk = 'MEDIUM'): Record<string, string> {
+  const files: Record<string, string> = {
+    '.git/HEAD': 'ref: refs/heads/main\n',
+    [`.tasks/${id}/state.md`]: `---\nslug: ${id}\nkind: review\nrange: 1a2b3c4..${runs.at(-1)?.end ?? ''}\nsession: sess-a\nrisk: ${risk}\nstatus: ${status}\nround: 0\n---\n${runs.map((r, i) => `## Run ${i + 1} (1a2b3c4..${r.end}, ${risk})\n`).join('')}`,
+  }
+  runs.forEach((r, i) => {
+    files[`.tasks/${id}/run-${i + 1}/logic.md`] = 'Summary: 0 issues found.\n'
+    files[`.tasks/${id}/run-${i + 1}/survivors.md`] = r.survivors
+  })
+  return files
+}
+
+test('a standalone review shows a fix only when a later run reviewed a different range end', async ($, on) => {
+  const id = 'review-abc1234'
+  const scope = `${id}:tree:`
+  const once = survivorsMd(impAt('app/x.py:3'))
+  const elsewhere = survivorsMd(nitAt('lib/z.py:5'))
+  const files = inRuns(id, 'REVIEWING', [{ end: 'b2b2b2b', survivors: once }, { end: 'b2b2b2b', survivors: elsewhere }])
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const swap = async (next: Record<string, string>) => {
+    for (const k of Object.keys(files)) delete files[k]
+    Object.assign(files, next)
+    await $.tool.call({ tool: 'Write', file_path: `/repo/.tasks/${id}/state.md`, content: '' })
+  }
+
+  // Two runs over the same end reviewed the same code: no ✓.
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^the verifier kept these in run 2$/ })).toBeDefined()
+  expect(await rowOf(pane, `${scope}lib/z.py`)).toMatch(/z\.py +n1$/)
+  expect(await pane.find({ type: 'Button', key: `${scope}app/x.py` })).toBeUndefined()
+  expect((await allRows(pane)).join('\n')).not.toContain('✓')
+  await pane.unmount()
+
+  // Run 2 over a different end: the finding only run 1 kept is fixed.
+  await swap(inRuns(id, 'REVIEWING', [{ end: 'b2b2b2b', survivors: once }, { end: 'c3c3c3c', survivors: elsewhere }]))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${scope}app/x.py`)).toMatch(/x\.py +✓1/)
+  await pane.press({ key: `${scope}app/x.py` })
+  expect(await rowOf(pane, `${scope}app/x.py:3#0`)).toMatch(/✓ :3 run 1 → fixed by run 2$/)
+  await pane.unmount()
+
+  // Ends B, B, C: the run over a new end shows the fix.
+  await swap(inRuns(id, 'REVIEWING', [{ end: 'b2b2b2b', survivors: once }, { end: 'b2b2b2b', survivors: elsewhere }, { end: 'c3c3c3c', survivors: elsewhere }]))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^the verifier kept these in run 3$/ })).toBeDefined()
+  expect(await rowOf(pane, `${scope}app/x.py`)).toMatch(/x\.py +✓1/)
+  // Still open from the press above: the fold choice is kept per review id.
+  expect(await rowOf(pane, `${scope}app/x.py:3#0`)).toMatch(/✓ :3 run 1 → fixed by run 3$/)
+  await pane.unmount()
+})
+
+test('a /quorum:review card and a past review show their kept findings as the same tree, with fixes from earlier runs', async ($, on) => {
+  const id = 'review-pr-12'
+  const scope = `${id}:tree:`
+  const runs = [
+    { end: 'b2b2b2b', survivors: survivorsMd(impAt('app/x.py:3'), nitAt('lib/z.py:5')) },
+    { end: 'c3c3c3c', survivors: survivorsMd(impAt('lib/z.py:9', 'Wrong env var'), nitAt('lib/z.py:5')) },
+  ]
+  const files = inRuns(id, 'REVIEWING', runs)
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  // The live card: the latest run's findings as a tree, and run 1's fix as ✓.
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^the verifier kept these in run 2$/ })).toBeDefined()
+  const live = await treeKeys(pane)
+  expect(live).toEqual([`${scope}app/`, `${scope}app/x.py`, `${scope}lib/`, `${scope}lib/z.py`, `${scope}lib/z.py:5#0`, `${scope}lib/z.py:9#0`])
+  expect(await rowOf(pane, `${scope}app/x.py`)).toMatch(/x\.py +✓1/)
+  expect(await rowOf(pane, `${scope}lib/z.py:9#0`)).toMatch(/✗ :9 Wrong env var$/)
+  await pane.unmount()
+
+  // Finished, it's history: its row opens to the same tree.
+  files[`.tasks/${id}/state.md`] = (files[`.tasks/${id}/state.md`] ?? '').replace(/^status: \w+$/m, 'status: REVIEWED')
+  await $.tool.call({ tool: 'Bash', command: `quorum-state --task ${id} set status REVIEWED` })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await treeKeys(pane)).toEqual([])
+  await pane.press({ key: `past-toggle-${id}` })
+  expect(await treeKeys(pane)).toEqual(live)
+  expect(await rowOf(pane, `${scope}app/x.py`)).toMatch(/x\.py +✓1/)
   await pane.unmount()
 })

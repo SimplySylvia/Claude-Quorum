@@ -6,13 +6,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Check, Findings, FindingsView, KeptFinding, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, Section, Snapshot, Stage } from '../../types'
+import type { Check, Findings, FindingsView, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, RoundKept, Section, Snapshot, Stage } from '../../types'
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, SLICE_AT, stageOf, stages, tokenCount,
-  keptFindings, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural,
+  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural,
 } from './task'
-import { confidenceRow, roundKept, trackFindings, treeHeader, treeRows } from './tree'
+import { confidenceRow, roundKept, runEnds, trackFindings, treeHeader, treeRows } from './tree'
 import type { TreePart } from './tree'
 
 const PANE = 'quorum-dashboard'
@@ -21,7 +21,7 @@ const COMMAND = 'quorum-dashboard'
 const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-14' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-3' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
-const reviews = atom({ plugin: 'quorum', key: 'reviews' } as const, [], { shape: 'reviews-1' })
+const reviews = atom({ plugin: 'quorum', key: 'reviews' } as const, [], { shape: 'reviews-2' })
 const otherTasks = atom({ plugin: 'quorum', key: 'others' } as const, [], { shape: 'others-1' })
 // Sections and findings-tree rows the person opened or closed in the pane, by `<slug>:<section>`, or
 // `<scope>:tree:<path>` for a tree row (`<scope>` is the task's slug or the review's id).
@@ -281,8 +281,9 @@ async function othersSnapshot($: EngineInterface, root: string, current: string)
 const REVIEWS_SHOWN = 6
 
 // The newest standalone reviews (skills/review keeps each in .tasks/review-<id>/), by when state.md last changed.
-// `session` is this session's id: a running review that records it is the live one.
-async function reviewsSnapshot($: EngineInterface, root: string, session: string): Promise<Review[]> {
+// `session` is this session's id: a running review that records it is the live one. `sessionRoot` is one of the
+// roots a finding's path is read against.
+async function reviewsSnapshot($: EngineInterface, root: string, session: string, sessionRoot: string): Promise<Review[]> {
   const tasks = `${root}/.tasks`
   const dirs = (await $.fs.list(tasks).catch(() => [])).filter(e => e.kind === 'dir' && isReviewId(e.name))
   const dated = await Promise.all(dirs.map(async e => ({
@@ -292,12 +293,22 @@ async function reviewsSnapshot($: EngineInterface, root: string, session: string
   const out: Review[] = []
   for (const { id, mtimeMs } of dated.filter(d => d.mtimeMs >= 0).sort((a, b) => b.mtimeMs - a.mtimeMs)) {
     if (out.length >= REVIEWS_SHOWN) break
-    const fm = parseFrontmatter((await readOr($, `${tasks}/${id}/state.md`)) ?? '')
+    const text = (await readOr($, `${tasks}/${id}/state.md`)) ?? ''
+    const fm = parseFrontmatter(text)
     if (scalar(fm, 'kind') !== 'review') continue
     const risk = scalar(fm, 'risk')
     const run = latestRun((await $.fs.list(`${tasks}/${id}`).catch(() => [])).filter(e => e.kind === 'dir').map(e => e.name))
     const files = run > 0 ? await readFiles($, `${tasks}/${id}/run-${run}`, REVIEW_FILES) : {}
     const survivors = files['survivors.md']
+    // Each run's kept findings, with the end of the range it reviewed; the latest run's come from `files`. A
+    // standalone review has no disputes.md.
+    const ends = runEnds(text, run, scalar(fm, 'range'))
+    const runs: RoundKept[] = []
+    for (let n = 1; n < run; n++) {
+      const kept = await readOr($, `${tasks}/${id}/run-${n}/survivors.md`)
+      if (kept !== null) runs.push(roundKept(n, kept, '', ends[n] ?? null))
+    }
+    if (survivors !== undefined) runs.push(roundKept(run, survivors, '', ends[run] ?? null))
     out.push({
       id,
       status: scalar(fm, 'status'),
@@ -309,7 +320,7 @@ async function reviewsSnapshot($: EngineInterface, root: string, session: string
       reviewers: roundReviewers('standalone', risk, files),
       voter: reviewer('voter', files['votes.md']),
       survivors: survivors === undefined ? null : countFindings(survivors),
-      kept: survivors === undefined ? [] : keptFindings(survivors),
+      tree: trackFindings(runs, [sessionRoot, root, scalar(fm, 'worktree')], 'run'),
     })
   }
   return out
@@ -428,8 +439,9 @@ async function refresh($: EngineInterface, maxRounds: number, forcePr = false): 
   const after = await snapshot($, maxRounds, before)
   await update($, task, () => after)
   const session = await $.session.id().catch(() => '')
-  const { tasksRoot } = await gitPaths($, await $.session.root())
-  const found = await reviewsSnapshot($, tasksRoot, session)
+  const sessionRoot = await $.session.root()
+  const { tasksRoot } = await gitPaths($, sessionRoot)
+  const found = await reviewsSnapshot($, tasksRoot, session, sessionRoot)
   await update($, reviews, () => found)
   const elsewhere = await othersSnapshot($, tasksRoot, after?.slug ?? '')
   await update($, otherTasks, () => elsewhere)
@@ -726,15 +738,6 @@ export const register: Register = (on, options) => {
       if (important !== null) return line(role, 'done', ROLE_LABEL[role] ?? role, detail(important), important > 0)
       return agent ? line(role, 'running', ROLE_LABEL[role] ?? role, `running ${seconds(agent, clockNow)}`) : null
     }
-    // `prefix` keeps the review card's keys apart from the Now card's.
-    const keptLine = (f: KeptFinding, i: number, prefix = 'kept') => (
-      <Box key={`${prefix}-${i}`} flexDirection="row" gap={1}>
-        {badge(`${prefix}-badge-${i}`, f.tag === 'PRE-EXISTING' ? 'PRE' : f.tag, f.tag === 'IMPORTANT' ? 'error' : f.tag === 'NIT' ? 'subtle' : 'warning')}
-        <Text dimColor wrap="truncate-end">{f.loc}</Text>
-        <Box flexGrow={1} flexShrink={1}><Text wrap="truncate-end">{f.title}{f.confidence !== null ? ` (${f.confidence})` : ''}</Text></Box>
-        {f.loc ? copy(`copy-${prefix}-${i}`, f.loc) : null}
-      </Box>
-    )
 
     // A section folds to one row; it opens by itself while it holds a problem, and a click overrides that. With no
     // task, only Reviews can show, and it opens by itself.
@@ -788,7 +791,7 @@ export const register: Register = (on, options) => {
               {r.range ? <Text dimColor wrap="truncate-end">{r.range}</Text> : null}
               {r.status === 'INTERRUPTED' ? <Text color="warning" wrap="truncate-end">Run {r.run} never finished; /quorum:review on the same target starts a new run</Text> : null}
               {isElsewhere(r) ? <Text color="warning" wrap="truncate-end">Another session runs it, or stopped mid-run; its next Quorum command marks it interrupted</Text> : null}
-              {r.kept.map((f, i) => keptLine(f, i, `past-${r.id}`))}
+              {findingsTree(r.id, r.tree, r.risk === 'HIGH', treeWidth)}
             </Box>
           ) : null}
         </Box>
@@ -831,11 +834,11 @@ export const register: Register = (on, options) => {
               <Text dimColor>reviewers {rv.reviewers.filter(r => r.findings !== null).length}/{rv.reviewers.length} replied</Text>
               {rv.reviewers.map(reviewerLine)}
               {reviewerLine(rv.voter)}
-              {rv.kept.filter(f => f.tag !== 'NIT' || rv.kept.length <= 4).map((f, i) => keptLine(f, i, 'review-kept'))}
               {rv.status === 'FIXING'
                 ? line('builder', builder?.endedAt === null ? 'running' : builder ? 'done' : 'waiting', 'Builder',
                   builder ? `fixing ${plural(important, 'IMPORTANT finding')} · ${seconds(builder, clockNow)}` : `fixes ${plural(important, 'IMPORTANT finding')}`)
                 : null}
+              {findingsTree(rv.id, rv.tree, rv.risk === 'HIGH', treeWidth)}
             </Box>
           )}
         </Box>
