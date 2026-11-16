@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
+import type { ElementQuery, Engine, FoundElement } from 'claude-code/testing'
 
 import {
   countFindings, countRequirements, evalRows, isReportedPass, isStaleProof, packedRef, joinChecks, nextStep, parseBlind, parseFrontmatter, parsePr,
@@ -901,11 +902,12 @@ test('the round\'s reviewers show waiting, running, then their findings', async 
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /kept 1 IMPORTANT · 1 NIT/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /1 IMPORTANT finding survives: the builder fixes them/ })).toBeDefined()
-  // Each kept finding, with its severity badge, file:line, Pattern Category, and a copy button for the location.
-  expect(await pane.find({ type: 'Text', text: /^ IMPORTANT $/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^app\/report\.py:42$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^Unescaped CSV fields$/ })).toBeDefined()
-  await pane.press({ key: 'copy-kept-0' })
+  // Each kept finding, as a row under its file with its mark, line, and Pattern Category; opened, a copy button
+  // for its location.
+  expect((await pane.find({ type: 'Button', key: 'export-csv:tree:app/report.py' }))?.text).toMatch(/^ {4}report\.py +✗1 {2}n1$/)
+  expect((await pane.find({ type: 'Button', key: 'export-csv:tree:app/report.py:42#0' }))?.text).toMatch(/✗ :42 Unescaped CSV fields$/)
+  await pane.press({ key: 'export-csv:tree:app/report.py:42#0' })
+  await pane.press({ key: 'export-csv:tree:app/report.py:42#0:copy' })
   expect(seen.copied).toEqual(['app/report.py:42'])
   await pane.unmount()
 })
@@ -1360,4 +1362,433 @@ describe('findings tree helpers', () => {
     expect(plural(1, 'file')).toBe('1 file')
     expect(plural(4, 'file')).toBe('4 files')
   })
+})
+
+// ---- The findings tree on the Now card
+
+// A survivors.md, from `[TAG] loc — Pattern Category: title` lines (a line may add `Confidence: N` after it).
+const survivorsMd = (...lines: string[]) => `Summary: ${lines.length} kept\n\n${lines.map(l => `${l}\n`).join('')}`
+const impAt = (loc: string, title = 'Unescaped CSV fields') => `[IMPORTANT] ${loc} — Pattern Category: ${title}`
+const nitAt = (loc: string, title = 'Naming') => `[NIT] ${loc} — Pattern Category: ${title}`
+const preAt = (loc: string, title = 'Old debt') => `[PRE-EXISTING] ${loc} — Pattern Category: ${title}`
+const NOTHING_KEPT = 'Summary: 0 issues found. Ready to land.\n'
+
+// A task whose review rounds kept these survivors.md texts, in order; null is a round still reviewing (its first
+// reviewer replied, its vote isn't in). `dir: 'plan-review'` makes them plan review rounds, during planning.
+type TreeFixture = { risk?: string; status?: string; dir?: 'review' | 'plan-review'; disputes?: Record<number, string>; extra?: string }
+function inRounds(rounds: (string | null)[], o: TreeFixture = {}): Record<string, string> {
+  const dir = o.dir ?? 'review'
+  const status = o.status ?? (dir === 'plan-review' ? 'PLANNING' : 'IN_REVIEW')
+  const files: Record<string, string> = {
+    '.git/HEAD': 'ref: refs/heads/feat/export-csv\n',
+    '.tasks/export-csv/state.md': state(status, o.extra ?? '')
+      .replace(/^risk: \w+$/m, `risk: ${o.risk ?? 'MEDIUM'}`)
+      .replace(/^round: \d+$/m, `round: ${dir === 'review' ? rounds.length : 0}`)
+      .replace(/^plan_rounds: \d+$/m, `plan_rounds: ${dir === 'plan-review' ? rounds.length : 0}`),
+    '.tasks/export-csv/rd.md': RD,
+  }
+  rounds.forEach((text, i) => {
+    files[`.tasks/export-csv/${dir}/round-${i + 1}/logic.md`] = 'Summary: 0 issues found.\n'
+    if (text !== null) files[`.tasks/export-csv/${dir}/round-${i + 1}/survivors.md`] = text
+  })
+  for (const [n, text] of Object.entries(o.disputes ?? {})) files[`.tasks/export-csv/${dir}/round-${n}/disputes.md`] = text
+  return files
+}
+
+type Drawn = { find: (q: ElementQuery) => Promise<FoundElement | undefined>; findAll: (q: ElementQuery) => Promise<FoundElement[]> }
+const ON_TERMINAL = { ...PANE, surface: 'terminal' } as const
+const TREE = 'export-csv:tree:'
+// The tree's rows (folders, files, `other`, and findings): each is a Button, whose text is the row as drawn.
+const treeButtons = async (pane: Drawn) => (await pane.findAll({ type: 'Button' })).filter(b => b.key?.includes(':tree:') && !b.key.endsWith(':copy'))
+const treeKeys = async (pane: Drawn) => (await treeButtons(pane)).map(b => b.key ?? '')
+const rowOf = async (pane: Drawn, key: string) => (await pane.find({ type: 'Button', key }))?.text
+const allRows = async (pane: Drawn) => (await treeButtons(pane)).map(b => b.text)
+// Width as the card draws it: code points, a Private Use Area icon as 2.
+const cols = (text: string) => [...text].reduce((n, c) => n + (/[\uE000-\uF8FF\u{F0000}-\u{FFFFD}]/u.test(c) ? 2 : 1), 0)
+
+// Swaps the project's files for `next` and saves a task file, which re-reads the task.
+async function reload($: Engine, files: Record<string, string>, next: Record<string, string>) {
+  for (const k of Object.keys(files)) delete files[k]
+  Object.assign(files, next)
+  await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/state.md', content: '' })
+}
+
+test('kept findings show as a tree of their files, from the project root, with single-child folders merged', async ($, on) => {
+  const C = 'app/frontend/src/components'
+  const survivors = survivorsMd(nitAt('README.md:1'), nitAt('src/export/csv.ts:8'), impAt(`${C}/Table.tsx:20`), nitAt(`${C}/Table.tsx:5`), nitAt(`${C}/Button.tsx:10`, 'Spacing'), nitAt(`${C}/Button.tsx:3`))
+  world(on, inRounds([survivors]))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount(ON_TERMINAL)
+  expect(await treeKeys(pane)).toEqual([
+    `${TREE}${C}/`, `${TREE}${C}/Button.tsx`, `${TREE}${C}/Button.tsx:3#0`, `${TREE}${C}/Button.tsx:10#0`,
+    `${TREE}${C}/Table.tsx`, `${TREE}${C}/Table.tsx:5#0`, `${TREE}${C}/Table.tsx:20#0`,
+    `${TREE}src/export/`, `${TREE}src/export/csv.ts`, `${TREE}src/export/csv.ts:8#0`,
+    `${TREE}README.md`, `${TREE}README.md:1#0`,
+  ])
+  for (const partial of ['app/', 'app/frontend/', 'app/frontend/src/', 'src/']) expect(await pane.find({ type: 'Button', key: `${TREE}${partial}` })).toBeUndefined()
+  expect(await rowOf(pane, `${TREE}${C}/`)).toBe('▾ app/frontend/src/components/ 2 files  ✗1  n3')
+  // Every kept finding, the 5 NITs included.
+  const findings = (await treeKeys(pane)).filter(k => /#\d+$/.test(k))
+  expect(findings.length).toBe(6)
+  const { important, nit, preExisting } = countFindings(survivors)
+  expect(findings.length).toBe(important + nit + preExisting)
+  await pane.unmount()
+})
+
+test("a finding's path is read repo-relative, so ./, the roots, and the task's worktree join the same file", async ($, on) => {
+  const survivors = survivorsMd(impAt('./app/x.py:3'), nitAt('app/x.py:5', 'b'), preAt('/repo/app/x.py:9', 'c'),
+    nitAt('/repo/.claude/worktrees/export-csv/app/x.py:11', 'd'), nitAt('C:\\repo\\app\\x.py:13', 'e'), nitAt('/repo2/app/x.py:1', 'f'))
+  // The session runs in the task's linked worktree, whose main working tree, where .tasks/ is, is /repo. The test
+  // engine reads a `C:/` path against its own folder, so the Windows root is state.md's `worktree`, the one root
+  // the dashboard never reads through.
+  const task = inRounds([survivors], { extra: 'worktree: C:/repo\n' })
+  const files: Record<string, string> = {
+    '.git': 'gitdir: /repo/.git/worktrees/export-csv\n',
+    '/repo/.git/worktrees/export-csv/HEAD': 'ref: refs/heads/feat/export-csv\n',
+    '/repo/.git/worktrees/export-csv/commondir': '../..\n',
+  }
+  for (const [k, v] of Object.entries(task)) if (k.startsWith('.tasks/')) files[`/repo/${k}`] = v
+  world(on, files, '/repo/.claude/worktrees/export-csv')
+  await $.session.start({ cwd: '/repo/.claude/worktrees/export-csv', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount(ON_TERMINAL)
+  const keys = await treeKeys(pane)
+  expect(keys.filter(k => k.startsWith(`${TREE}app/x.py:`))).toHaveLength(5)
+  expect(keys).toContain(`${TREE}app/x.py`)
+  expect(keys).toContain(`${TREE}/repo2/app/x.py`)
+  expect(keys.filter(k => k.startsWith(`${TREE}/repo2/app/x.py:`))).toHaveLength(1)
+  await pane.unmount()
+})
+
+test('while the next round reviews, the tree keeps the last voted round and says which', async ($, on) => {
+  const files: Record<string, string> = repo('IN_REVIEW')
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^the verifier kept these in round 1$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^○ Verifier vote\s+waiting$/ })).toBeDefined()
+  expect(await treeKeys(pane)).toContain(`${TREE}app/report.py:42#0`)
+  await pane.unmount()
+
+  files['.tasks/export-csv/review/round-1/survivors.md'] = NOTHING_KEPT
+  await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/review/round-1/survivors.md', content: NOTHING_KEPT })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^the verifier kept nothing in round 1$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^key:/ })).toBeUndefined()
+  expect(await treeKeys(pane)).toEqual([])
+  await pane.unmount()
+})
+
+test('a folder rolls up its findings by mark beside its file count, and the key names only the marks shown', async ($, on) => {
+  const files = inRounds([survivorsMd(impAt('src/a.ts:1'), nitAt('src/b.ts:2'))])
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}src/`)).toMatch(/ 2 files {2}✗1 {2}n1$/)
+  expect(await rowOf(pane, `${TREE}src/a.ts`)).toMatch(/ ✗1 {4}$/)
+  expect(await pane.find({ type: 'Text', text: /^key: ✗ important {2}n nit$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^key:.*(✓|p pre)/ })).toBeUndefined()
+  await pane.unmount()
+
+  // Right-aligned: a two-digit count widens its column for every row.
+  const tenNits = Array.from({ length: 10 }, (_, i) => nitAt(`src/a.ts:${i + 2}`, `Naming ${i}`))
+  await reload($, files, inRounds([survivorsMd(impAt('src/a.ts:1'), ...tenNits, nitAt('src/b.ts:1'))]))
+  pane = await $.ui.mount(ON_TERMINAL)
+  const folder = await rowOf(pane, `${TREE}src/`) ?? ''
+  const a = await rowOf(pane, `${TREE}src/a.ts`) ?? ''
+  const b = await rowOf(pane, `${TREE}src/b.ts`) ?? ''
+  expect(folder).toMatch(/ 2 files {2}✗1 {2}n11$/)
+  expect(a).toMatch(/ ✗1 {2}n10$/)
+  expect(b).toMatch(/b\.ts +n1$/)
+  expect(b).toMatch(/ {5}n1$/)
+  expect(new Set([cols(folder), cols(a), cols(b)]).size).toBe(1)
+  await pane.unmount()
+})
+
+test('a finding fixed since an earlier round shows ✓ under its file, folded unless the task is HIGH', async ($, on) => {
+  const r1 = survivorsMd(impAt('app/x.py:3'))
+  const elsewhere = survivorsMd(nitAt('lib/z.py:5'))
+  const files = inRounds([r1, elsewhere])
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const fixedRow = `${TREE}app/x.py:3#0`
+  // MEDIUM: the folder is open, and the file shows ✓1, folded.
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}app/`)).toMatch(/^▾ app\//)
+  expect(await rowOf(pane, `${TREE}app/x.py`)).toMatch(/^ {2}▸ x\.py +✓1 {4}$/)
+  expect((await treeKeys(pane)).filter(k => k.startsWith(`${TREE}app/x.py:`))).toEqual([])
+  await pane.unmount()
+
+  // HIGH: the fixed row shows without a press.
+  await reload($, files, inRounds([r1, elsewhere], { risk: 'HIGH' }))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, fixedRow)).toMatch(/✓ :3 round 1 → fixed by round 2$/)
+  await pane.unmount()
+
+  // Kept in rounds 1 and 2, gone in round 3.
+  await reload($, files, inRounds([r1, r1, elsewhere], { risk: 'HIGH' }))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, fixedRow)).toMatch(/✓ :3 round 2 → fixed by round 3$/)
+  await pane.unmount()
+
+  // IMPORTANT in round 1, a NIT in round 2, gone in round 3: the round is the last that kept it as IMPORTANT.
+  await reload($, files, inRounds([r1, survivorsMd(nitAt('app/x.py:3', 'Unescaped CSV fields')), elsewhere], { risk: 'HIGH' }))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, fixedRow)).toMatch(/✓ :3 round 1 → fixed by round 3$/)
+  await pane.unmount()
+
+  // Fixed by round 2, shown under round 3.
+  await reload($, files, inRounds([survivorsMd(impAt('app/x.py:3'), nitAt('lib/z.py:5')), elsewhere, elsewhere], { risk: 'HIGH' }))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^the verifier kept these in round 3$/ })).toBeDefined()
+  expect(await rowOf(pane, fixedRow)).toMatch(/✓ :3 round 1 → fixed by round 2$/)
+  await pane.unmount()
+
+  // Round 2 kept nothing: the fix still shows, and the key names only ✓.
+  await reload($, files, inRounds([r1, NOTHING_KEPT]))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^the verifier kept nothing in round 2$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^key: ✓ fixed this run$/ })).toBeDefined()
+  expect(await rowOf(pane, `${TREE}app/x.py`)).toMatch(/x\.py +✓1$/)
+  // On MEDIUM a press opens the file to its fixed row.
+  expect(await rowOf(pane, fixedRow)).toBeUndefined()
+  await pane.press({ key: `${TREE}app/x.py` })
+  expect(await rowOf(pane, fixedRow)).toMatch(/✓ :3 round 1 → fixed by round 2$/)
+  await pane.unmount()
+})
+
+test('a finding whose line moved, or whose severity changed, is not shown as fixed', async ($, on) => {
+  const files = inRounds([survivorsMd(impAt('app/x.py:3')), survivorsMd(impAt('app/x.py:6'))])
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const noFix = async (pane: Drawn) => expect((await allRows(pane)).some(t => t.includes('✓'))).toBe(false)
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}app/x.py`)).toMatch(/x\.py +✗1 *$/)
+  expect(await rowOf(pane, `${TREE}app/x.py:6#0`)).toMatch(/✗ :6 Unescaped CSV fields$/)
+  await noFix(pane)
+  await pane.unmount()
+
+  await reload($, files, inRounds([survivorsMd(impAt('app/x.py:3')), survivorsMd(nitAt('app/x.py:3', 'Unescaped CSV fields'))]))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}app/x.py`)).toMatch(/x\.py +n1 *$/)
+  await noFix(pane)
+  await pane.unmount()
+
+  // Two kept, one left: the one kept pairs with the nearest line, so :3 is the fixed one.
+  await reload($, files, inRounds([survivorsMd(impAt('app/x.py:3'), impAt('app/x.py:9')), survivorsMd(impAt('app/x.py:8'))]))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}app/x.py`)).toMatch(/x\.py +✗1 {2}✓1$/)
+  expect(await rowOf(pane, `${TREE}app/x.py:3#0`)).toMatch(/✓ :3 round 1 → fixed by round 2$/)
+  expect(await rowOf(pane, `${TREE}app/x.py:8#0`)).toMatch(/✗ :8 /)
+  await pane.unmount()
+
+  // Kept in round 1, gone in round 2, back in round 3: open again.
+  await reload($, files, inRounds([survivorsMd(impAt('app/x.py:3')), survivorsMd(nitAt('lib/z.py:5')), survivorsMd(impAt('app/x.py:3'))]))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}app/x.py`)).toMatch(/x\.py +✗1$/)
+  await noFix(pane)
+  await pane.unmount()
+})
+
+test('a finding dropped on dispute reads as dropped, not fixed', async ($, on) => {
+  const drop = { 1: 'DROP [IMPORTANT] ./app/x.py:3 — (b) handled by the caller\n' }
+  // Dropped in round 1, written another way than the survivors.md line; round 2 keeps a finding elsewhere.
+  const files = inRounds([survivorsMd(impAt('app/x.py:3')), survivorsMd(nitAt('lib/z.py:5'))], { disputes: drop })
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount(ON_TERMINAL)
+  const dropped = await pane.find({ type: 'Button', key: `${TREE}app/x.py:3#0` })
+  expect(dropped?.text).toBe('      · :3 dropped on dispute in round 1')
+  // Dim throughout: the row's Text, and every part of it.
+  const row = dropped?.children[0] as { props: { dimColor?: boolean }; children: { props?: { dimColor?: boolean } }[] }
+  expect(row.props.dimColor).toBe(true)
+  expect(row.children.every(c => c.props?.dimColor === true)).toBe(true)
+  expect((await allRows(pane)).some(t => t.includes('✓'))).toBe(false)
+  await pane.unmount()
+
+  // Dropped in the round on show, while the builder fixes the rest: dim at once, and out of the counts.
+  const survivors = survivorsMd(impAt('app/x.py:3'), nitAt('lib/z.py:5'))
+  await reload($, files, inRounds([survivors], { disputes: drop, status: 'FIXING' }))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}app/x.py:3#0`)).toBe('      · :3 dropped on dispute in round 1')
+  const rows = await allRows(pane)
+  expect(rows.some(t => t.includes('✗'))).toBe(false)
+  expect(await pane.find({ type: 'Text', text: /^key: n nit$/ })).toBeDefined()
+  // The files' mark totals plus the dropped rows are what the voter kept.
+  const fileKeys = (await treeKeys(pane)).filter(k => !k.endsWith('/') && !/#\d+$/.test(k))
+  let marks = 0
+  for (const k of fileKeys) for (const m of (await rowOf(pane, k) ?? '').matchAll(/ [✗np](\d+)/g)) marks += Number(m[1])
+  const droppedRows = rows.filter(t => t.includes('dropped on dispute')).length
+  const { important, nit, preExisting } = countFindings(survivors)
+  expect(await rowOf(pane, `${TREE}lib/z.py`)).toMatch(/z\.py +n1$/)
+  expect(droppedRows).toBe(1)
+  expect(marks + droppedRows).toBe(important + nit + preExisting)
+  await pane.unmount()
+})
+
+test('a finding is one line, cut at the end; a press shows it in full with a copy path button', async ($, on) => {
+  const title = Array.from({ length: 22 }, (_, i) => `quoting${i}`).join(' ')
+  expect(title.length).toBeGreaterThanOrEqual(120)
+  const seen = world(on, inRounds([`${survivorsMd(impAt('app/x.py:22', title))}Confidence: 92\n`]))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const key = `${TREE}app/x.py:22#0`
+  const pane = await $.ui.mount(ON_TERMINAL)
+  const cut = await rowOf(pane, key) ?? ''
+  expect(cut).toEndWith('…')
+  expect(cols(cut)).toBeLessThanOrEqual(46)
+  expect(await pane.find({ type: 'Button', key: `${key}:copy` })).toBeUndefined()
+
+  await pane.press({ key })
+  const first = /^\s*✗ :22 (.*)$/.exec(await rowOf(pane, key) ?? '')?.[1] ?? ''
+  const more = (await pane.findAll({ type: 'Box' })).filter(b => b.key?.startsWith(`${key}:more-`)).map(b => b.text.trim())
+  expect(more.length).toBeGreaterThan(0)
+  expect([first, ...more].join(' ')).toBe(title)
+  expect((await pane.find({ type: 'Box', key: `${key}:detail` }))?.text).toMatch(/^ +confidence 92 {2}copy path$/)
+  const copyButton = await pane.find({ type: 'Button', key: `${key}:copy` })
+  expect(copyButton?.props.label).toBe('copy path')
+  await pane.press({ key: `${key}:copy` })
+  expect(seen.copied).toEqual(['app/x.py:22'])
+
+  await pane.press({ key })
+  expect(await pane.find({ type: 'Button', key: `${key}:copy` })).toBeUndefined()
+  expect(await rowOf(pane, key)).toEndWith('…')
+  await pane.unmount()
+})
+
+test('a press folds or opens a folder or file, and the choice survives a new round', async ($, on) => {
+  const files = inRounds([survivorsMd(nitAt('src/export/csv.ts:8'), impAt('src/export/json.ts:3'), nitAt('app/x.py:1')), null])
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const folder = `${TREE}src/export/`
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Button', key: `${folder}csv.ts` })).toBeDefined()
+  await pane.press({ key: folder })
+  expect(await pane.find({ type: 'Button', key: `${folder}csv.ts` })).toBeUndefined()
+  expect(await pane.find({ type: 'Button', key: `${folder}json.ts` })).toBeUndefined()
+  expect(await rowOf(pane, folder)).toMatch(/^▸ src\/export\//)
+  await pane.unmount()
+
+  // Round 2's vote lands, still with a finding under src/export/: the folder stays folded.
+  const r2 = survivorsMd(nitAt('src/export/csv.ts:8'))
+  files['.tasks/export-csv/review/round-2/survivors.md'] = r2
+  await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/review/round-2/survivors.md', content: r2 })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^the verifier kept these in round 2$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Button', key: folder })).toBeDefined()
+  expect(await pane.find({ type: 'Button', key: `${folder}csv.ts` })).toBeUndefined()
+
+  await pane.press({ key: folder })
+  expect(await pane.find({ type: 'Button', key: `${folder}csv.ts` })).toBeDefined()
+  await pane.unmount()
+})
+
+test("plan-review findings sit under the task's plan.md", async ($, on) => {
+  world(on, inRounds([survivorsMd(impAt('.tasks/export-csv/plan.md:14', 'Plan skips the docs step'))], { dir: 'plan-review' }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /Plan review, round 1 of 2/ })).toBeDefined()
+  expect(await treeKeys(pane)).toEqual([`${TREE}.tasks/export-csv/`, `${TREE}.tasks/export-csv/plan.md`, `${TREE}.tasks/export-csv/plan.md:14#0`])
+  expect(await rowOf(pane, `${TREE}.tasks/export-csv/plan.md:14#0`)).toMatch(/✗ :14 Plan skips the docs step$/)
+  await pane.unmount()
+})
+
+test('no tree row is wider than the card, with or without icons', async ($, on) => {
+  const long = `${'n'.repeat(67)}.ts`
+  const chain = 'first/alpha/bravo/charlie/delta/echo/foxtrot/golf/hotel/last'
+  expect(long.length).toBe(70)
+  expect(chain.length).toBe(60)
+  const title = 'A very long Pattern Category that cannot possibly fit on one row of the docked pane'
+  const r2 = survivorsMd(`${impAt(`${chain}/${long}:12`, title)}\nConfidence: 92`, nitAt(`${chain}/b.ts:1`), preAt('lib/old.py:4'))
+  world(on, inRounds([survivorsMd(impAt('app/x.py:3')), r2]))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const key = `${TREE}${chain}/${long}:12#0`
+  const pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, key)).toEndWith('…')
+  await pane.press({ key })
+  // The rows, an open finding's further lines, the key's lines, and its confidence with the copy button.
+  const boxes = await pane.findAll({ type: 'Box' })
+  const lines = [...await allRows(pane), ...boxes.filter(b => /:more-\d+$|:tree-key-\d+$|:detail$/.test(b.key ?? '')).map(b => b.text)]
+  expect(boxes.find(b => b.key === `${key}:detail`)?.text).toMatch(/confidence 92 +copy path$/)
+  expect(lines.length).toBeGreaterThan(8)
+  for (const l of lines) expect(cols(l)).toBeLessThanOrEqual(46)
+  // All four marks: the key wraps onto a second line.
+  expect(boxes.filter(b => /:tree-key-\d+$/.test(b.key ?? '')).map(b => b.text)).toEqual(['key: ✗ important  ✓ fixed this run  n nit', '     p pre-existing'])
+  expect(await rowOf(pane, `${TREE}${chain}/`)).toMatch(/^▾ first\/…\/last\/ /)
+  expect(await rowOf(pane, `${TREE}${chain}/${long}`)).toMatch(/…n+\.ts +✗1/)
+  await pane.unmount()
+})
+
+test('every tree row is a labelled button, and the copy button reads copy path', async ($, on) => {
+  world(on, inRounds([survivorsMd(impAt('app/x.py:3')), `${survivorsMd(nitAt('src/a.ts:1'), impAt('src/b.ts:2'))}`]))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount(ON_TERMINAL)
+  const buttons = (await pane.findAll({ type: 'Button' })).filter(b => b.key?.includes(':tree:'))
+  expect(buttons.length).toBeGreaterThan(4)
+  for (const b of buttons) {
+    expect(typeof b.props.label).toBe('string')
+    expect(b.props.label).toMatch(/\S.*, (open|folded)$/)
+  }
+  const label = async (key: string) => (await pane.find({ type: 'Button', key }))?.props.label
+  expect(await label(`${TREE}src/`)).toBe('src/ folder, 2 files, 1 important, 1 nit, open')
+  expect(await label(`${TREE}app/x.py`)).toBe('app/x.py, 1 fixed, folded')
+  const finding = `${TREE}src/a.ts:1#0`
+  expect(await label(finding)).toBe('nit at src/a.ts:1: Naming, folded')
+  await pane.press({ key: finding })
+  expect(await label(finding)).toBe('nit at src/a.ts:1: Naming, open')
+  expect(await label(`${finding}:copy`)).toBe('copy path')
+  // A key press reaches folder and file rows too.
+  await pane.press({ key: `${TREE}app/x.py` })
+  expect(await label(`${TREE}app/x.py`)).toBe('app/x.py, 1 fixed, open')
+  await pane.press({ key: `${TREE}src/` })
+  expect(await label(`${TREE}src/`)).toBe('src/ folder, 2 files, 1 important, 1 nit, folded')
+  await pane.unmount()
+})
+
+test('tree edge cases: no vote yet, a root file, an outside path, no location, many findings, unicode, an unknown file_icons value', async ($, on) => {
+  // No round voted yet: no tree and no key, and the reviewer rows as before.
+  const files = inRounds([null])
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await treeKeys(pane)).toEqual([])
+  expect(await pane.find({ type: 'Text', text: /^key:|^the verifier kept/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^✓ Logic & edge cases\s+clean$/ })).toBeDefined()
+  await pane.unmount()
+
+  // A round counter ahead of the folders on disk: round 1's tree, and nothing throws.
+  const ahead = inRounds([survivorsMd(impAt('app/x.py:3'))])
+  ahead['.tasks/export-csv/state.md'] = (ahead['.tasks/export-csv/state.md'] ?? '').replace(/^round: \d+$/m, 'round: 2').replace(/^plan_rounds: \d+$/m, 'plan_rounds: 2')
+  ahead['.tasks/export-csv/plan-review/round-1/survivors.md'] = NOTHING_KEPT
+  await reload($, files, ahead)
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^the verifier kept these in round 1$/ })).toBeDefined()
+  expect(await treeKeys(pane)).toContain(`${TREE}app/x.py:3#0`)
+  await pane.unmount()
+
+  // A root file, a path outside the roots, no location, 12 findings on one file, and unicode names.
+  const astral = `${'😀'.repeat(40)}.md`
+  const many = Array.from({ length: 12 }, (_, i) => nitAt(`lib/many.py:${i + 1}`, `Naming ${i}`))
+  const survivors = survivorsMd(nitAt('README.md:3'), nitAt('/repo2/app/x.py:1'), '[NIT] Summary wording', ...many, nitAt('docs/café/naïve.md:2'), nitAt(`docs/${astral}:1`))
+  await reload($, files, inRounds([survivors]))
+  pane = await $.ui.mount(ON_TERMINAL)
+  const keys = await treeKeys(pane)
+  expect(keys).toContain(`${TREE}README.md`)
+  expect(await rowOf(pane, `${TREE}README.md`)).toMatch(/^ {2}README\.md /)
+  expect(keys).toContain(`${TREE}/repo2/app/x.py`)
+  // No location: under `other`, after every file.
+  const other = keys.indexOf(`${TREE}:other`)
+  expect(other).toBeGreaterThan(-1)
+  expect(keys.slice(other)).toEqual([`${TREE}:other`, `${TREE}:other:#0`])
+  expect(await rowOf(pane, `${TREE}:other:#0`)).toMatch(/n \(no location\) Summary wording$/)
+  const { important, nit, preExisting } = countFindings(survivors)
+  expect(keys.filter(k => /#\d+$/.test(k))).toHaveLength(important + nit + preExisting)
+  expect(keys.filter(k => k.startsWith(`${TREE}lib/many.py:`))).toHaveLength(12)
+  expect(await rowOf(pane, `${TREE}lib/many.py`)).toMatch(/many\.py +n12$/)
+  expect(keys).toContain(`${TREE}docs/café/naïve.md`)
+  const rows = await allRows(pane)
+  for (const r of rows) {
+    expect(cols(r)).toBeLessThanOrEqual(46)
+    expect(r).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/)
+  }
+  expect(await rowOf(pane, `${TREE}docs/${astral}`)).toMatch(/😀…😀+\.md /u)
+  await pane.unmount()
 })

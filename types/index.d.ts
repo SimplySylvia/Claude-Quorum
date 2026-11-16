@@ -70,7 +70,8 @@ export type Spec = { title: string; goal: string; isUi: boolean; requirements: R
 // What the "Now" section shows for the current stage.
 export type Now =
   | { kind: 'spec'; requirements: number; reviewers: Reviewer[] }
-  | { kind: 'plan' | 'review'; round: number; of: number; reviewers: Reviewer[]; voter: Reviewer; survivors: Findings | null; kept: KeptFinding[] }
+  // `tree`: the findings tree, for the latest round with a survivors.md (null before any).
+  | { kind: 'plan' | 'review'; round: number; of: number; reviewers: Reviewer[]; voter: Reviewer; survivors: Findings | null; tree: FindingsView | null }
   | { kind: 'build' }
   | { kind: 'blind'; blind: Blind }
   | { kind: 'done' }
@@ -101,6 +102,8 @@ export type Snapshot = {
   stopBlocks: number
   pending: number
   rounds: Round[]
+  // The plan review rounds with a folder on disk (plan-review/round-<N>/).
+  planReviewRounds: Round[]
   next: string
   now: Now
   spec: Spec | null
@@ -179,7 +182,8 @@ declare module 'claude-code' {
       // Other unfinished tasks, newest first, a few at most.
       others: Shaped<OtherTask[]>
       now: number
-      // Sections the person opened or closed, by `<slug>:<section>`; absent, the section's default.
+      // Sections and findings-tree rows the person opened or closed, by `<slug>:<section>` or
+      // `<scope>:tree:<path>`; absent, the default.
       sections: Shaped<Record<string, boolean>>
     }
   }

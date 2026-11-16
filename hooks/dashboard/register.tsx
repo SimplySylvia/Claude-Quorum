@@ -6,22 +6,25 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Check, Findings, KeptFinding, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, Section, Snapshot, Stage } from '../../types'
+import type { Check, Findings, FindingsView, KeptFinding, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, Section, Snapshot, Stage } from '../../types'
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, SLICE_AT, stageOf, stages, tokenCount,
   keptFindings, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural,
 } from './task'
+import { confidenceRow, roundKept, trackFindings, treeHeader, treeRows } from './tree'
+import type { TreePart } from './tree'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-13' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-14' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-3' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
 const reviews = atom({ plugin: 'quorum', key: 'reviews' } as const, [], { shape: 'reviews-1' })
 const otherTasks = atom({ plugin: 'quorum', key: 'others' } as const, [], { shape: 'others-1' })
-// Sections the person opened or closed in the pane, by `<slug>:<section>`.
+// Sections and findings-tree rows the person opened or closed in the pane, by `<slug>:<section>`, or
+// `<scope>:tree:<path>` for a tree row (`<scope>` is the task's slug or the review's id).
 const sections = atom({ plugin: 'quorum', key: 'sections' } as const, {}, { shape: 'sections-1' })
 // How long a PR lookup stands before the next refresh asks GitHub again.
 const PR_TTL_MS = 2 * 60 * 1000
@@ -104,8 +107,40 @@ async function readFiles($: EngineInterface, dir: string, names: string[]): Prom
   return out
 }
 
-// One plan or code review round: its reviewers' replies, the voter's, and what survived.
-async function roundNow($: EngineInterface, dir: string, kind: 'plan' | 'review', round: number, of: number, risk: string): Promise<Now> {
+// One round of a plan or code review, as its files stand: what the voter kept, the candidates it voted on, and the
+// findings it dropped on dispute (null while a file isn't written), and whether the round's folder exists yet.
+type RoundFiles = { n: number; survivors: string | null; candidates: string | null; disputes: string | null; exists: boolean }
+
+// Rounds 1..last under a review's folder. A counter ahead of the folders on disk reads as rounds with no files.
+async function roundHistory($: EngineInterface, dir: string, last: number): Promise<RoundFiles[]> {
+  const out: RoundFiles[] = []
+  for (let n = 1; n <= last; n++) {
+    const at = `${dir}/round-${n}`
+    const files = await readFiles($, at, ['survivors.md', 'candidates.md', 'disputes.md'])
+    out.push({
+      n,
+      survivors: files['survivors.md'] ?? null,
+      candidates: files['candidates.md'] ?? null,
+      disputes: files['disputes.md'] ?? null,
+      exists: (await $.fs.list(at).catch(() => [])).length > 0,
+    })
+  }
+  return out
+}
+
+const roundOf = (h: RoundFiles): Round => ({
+  n: h.n,
+  findings: h.survivors === null ? null : countFindings(h.survivors),
+  candidates: h.candidates === null ? null : (({ important, nit, preExisting }) => important + nit + preExisting)(countFindings(h.candidates)),
+})
+
+// The findings tree for a task's review: the rounds with a survivors.md, the last of them on show.
+const treeOf = (history: RoundFiles[], roots: string[]): FindingsView | null =>
+  trackFindings(history.flatMap(h => (h.survivors === null ? [] : [roundKept(h.n, h.survivors, h.disputes ?? '', null)])), roots, 'round')
+
+// One plan or code review round: its reviewers' replies, the voter's, what survived, and the findings tree over
+// the review's rounds so far.
+async function roundNow($: EngineInterface, dir: string, kind: 'plan' | 'review', round: number, of: number, risk: string, tree: FindingsView | null): Promise<Now> {
   const files = await readFiles($, `${dir}/round-${round}`, REVIEW_FILES)
   const survivors = files['survivors.md']
   return {
@@ -115,12 +150,17 @@ async function roundNow($: EngineInterface, dir: string, kind: 'plan' | 'review'
     reviewers: roundReviewers(kind, risk, files),
     voter: reviewer('voter', files['votes.md']),
     survivors: survivors === undefined ? null : countFindings(survivors),
-    kept: survivors === undefined ? [] : keptFindings(survivors),
+    tree,
   }
 }
 
+// Each review's rounds, and the roots a finding's path is read against (the session's, the main working tree's,
+// and the task's worktree's).
+type Histories = { code: RoundFiles[]; plan: RoundFiles[]; roots: string[] }
+
 // What the current stage is doing, read from the files its skill saves.
-async function nowFor($: EngineInterface, dir: string, t: Pick<Snapshot, 'stage' | 'risk' | 'round' | 'maxRounds' | 'planRounds' | 'blindRuns'>, rd: string): Promise<Now> {
+async function nowFor($: EngineInterface, dir: string, t: Pick<Snapshot, 'stage' | 'risk' | 'round' | 'maxRounds' | 'planRounds' | 'blindRuns'>, rd: string, h: Histories): Promise<Now> {
+  const codeRound = () => roundNow($, `${dir}/review`, 'review', t.round, t.maxRounds, t.risk, treeOf(h.code, h.roots))
   switch (STAGES[t.stage]) {
     case 'Spec': {
       const files = await readFiles($, `${dir}/spec-review`, ['feasibility.md', 'improver.md'])
@@ -130,11 +170,11 @@ async function nowFor($: EngineInterface, dir: string, t: Pick<Snapshot, 'stage'
         reviewers: [reviewer('feasibility', files['feasibility.md']), reviewer('improver', files['improver.md'])],
       }
     }
-    case 'Plan': return roundNow($, `${dir}/plan-review`, 'plan', t.planRounds, 2, t.risk)
+    case 'Plan': return roundNow($, `${dir}/plan-review`, 'plan', t.planRounds, 2, t.risk, treeOf(h.plan, h.roots))
     case 'Build': return { kind: 'build' }
-    case 'Review': return roundNow($, `${dir}/review`, 'review', t.round, t.maxRounds, t.risk)
+    case 'Review': return codeRound()
     case 'Blind test': {
-      if (t.risk === 'LOW' || t.blindRuns === 0) return t.round > 0 ? roundNow($, `${dir}/review`, 'review', t.round, t.maxRounds, t.risk) : { kind: 'done' }
+      if (t.risk === 'LOW' || t.blindRuns === 0) return t.round > 0 ? codeRound() : { kind: 'done' }
       const run = t.blindRuns
       const files = await readFiles($, `${dir}/blind`, [`blind-${run}.md`, `a11y-${run}.md`, `security-${run}.md`, `triage-${run}.md`])
       return {
@@ -147,7 +187,8 @@ async function nowFor($: EngineInterface, dir: string, t: Pick<Snapshot, 'stage'
 }
 
 async function snapshot($: EngineInterface, maxRounds: number, previous: Snapshot | null): Promise<Snapshot | null> {
-  const { slug, branch, head, tasksRoot: root } = await activeSlug($, await $.session.root())
+  const sessionRoot = await $.session.root()
+  const { slug, branch, head, tasksRoot: root } = await activeSlug($, sessionRoot)
   if (!slug) return null
   const text = await readOr($, `${root}/.tasks/${slug}/state.md`)
   if (text === null) return null
@@ -155,17 +196,12 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
   const status = scalar(fm, 'status')
   const risk = scalar(fm, 'risk')
   const round = count(fm, 'round')
+  const planRounds = count(fm, 'plan_rounds')
 
-  const rounds: Round[] = []
-  for (let n = 1; n <= round; n++) {
-    const dir = `${root}/.tasks/${slug}/review/round-${n}`
-    const survivors = await readOr($, `${dir}/survivors.md`)
-    const candidates = await readOr($, `${dir}/candidates.md`)
-    rounds.push({
-      n,
-      findings: survivors === null ? null : countFindings(survivors),
-      candidates: candidates === null ? null : (({ important, nit, preExisting }) => important + nit + preExisting)(countFindings(candidates)),
-    })
+  const histories: Histories = {
+    code: await roundHistory($, `${root}/.tasks/${slug}/review`, round),
+    plan: await roundHistory($, `${root}/.tasks/${slug}/plan-review`, planRounds),
+    roots: [sessionRoot, root, scalar(fm, 'worktree')],
   }
 
   // ESCALATED records the status it interrupted; HALTED comes from the review loop, or from blind test after 2 runs.
@@ -174,7 +210,6 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     : status === 'HALTED' && count(fm, 'blind_runs') > 0
       ? STAGES.indexOf('Blind test')
       : stageOf(status, previous?.slug === slug ? previous.stage : undefined)
-  const planRounds = count(fm, 'plan_rounds')
   const blindRuns = count(fm, 'blind_runs')
 
   const dir = `${root}/.tasks/${slug}`
@@ -207,9 +242,10 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     blindRuns,
     stopBlocks: count(fm, 'stop_blocks'),
     pending: list(fm, 'pending_findings').length,
-    rounds,
+    rounds: histories.code.map(roundOf),
+    planReviewRounds: histories.plan.filter(h => h.exists).map(roundOf),
     next: nextStep(status, risk),
-    now: await nowFor($, dir, { stage, risk, round, maxRounds, planRounds, blindRuns }, rd),
+    now: await nowFor($, dir, { stage, risk, round, maxRounds, planRounds, blindRuns }, rd, histories),
     spec: parseSpec(rd),
     checks: joinChecks(evalRows(evalMd), proof),
     proof,
@@ -604,9 +640,49 @@ export const register: Register = (on, options) => {
     const badge = (key: string, label: string, color: string) => (
       <Text key={key} backgroundColor={color} color="inverseText" bold> {label} </Text>
     )
-    const copy = (key: string, text: string) => (
-      <Button key={key} plain dimColor label="copy" onPress={press => void $.ui.copy({ text, surface: press.surface }).catch(() => undefined)} />
+    const copy = (key: string, text: string, label = 'copy') => (
+      <Button key={key} plain dimColor label={label} onPress={press => void $.ui.copy({ text, surface: press.surface }).catch(() => undefined)} />
     )
+
+    // The findings tree: its header and key, then a pressable row per folder, file, and finding, inside a card's
+    // border and padding. A press folds or opens the row; an open finding adds the rest of its title, its
+    // confidence, and a button that copies its `path:line`.
+    const treeWidth = Math.max(24, (e.props.bodyColumns ?? 50) - 4)
+    const partsOf = (key: string, parts: TreePart[]) => parts.map((p, i) => (
+      <Text key={`${key}:${i}`} color={p.color} dimColor={p.dim} bold={p.bold}>{p.text}</Text>
+    ))
+    const findingsTree = (id: string, view: FindingsView | null, isHigh: boolean, width: number) => {
+      const head = treeHeader(view, width)
+      if (!view || !head) return null
+      return (
+        <Box key={`${id}:tree`} flexDirection="column">
+          <Text key={`${id}:tree-header`} dimColor wrap="truncate-end">{head.header}</Text>
+          {head.key.map((parts, i) => (
+            <Box key={`${id}:tree-key-${i}`}><Text wrap="truncate-end">{partsOf(`${id}:tree-key-${i}`, parts)}</Text></Box>
+          ))}
+          {treeRows(view, { scope: id, width, icons: false, isHigh, folds }).flatMap(row => {
+            // A finding dropped on dispute is drawn dim throughout.
+            const isDim = row.kind === 'finding' && row.parts.every(p => p.dim)
+            const confidence = row.kind === 'finding' && row.isOpen ? confidenceRow(row, width) : []
+            return [
+              <Button key={row.key} plain hover={{ color: 'claude' }} label={row.label} onPress={() => void update($, sections, all => ({ ...all, [row.key]: !row.isOpen }))}>
+                <Text wrap="truncate-end" dimColor={isDim}>{partsOf(row.key, row.parts)}</Text>
+              </Button>,
+              ...(row.kind === 'finding' && row.isOpen ? row.more.map((text, i) => (
+                <Box key={`${row.key}:more-${i}`}><Text wrap="truncate-end" dimColor={isDim}>{text}</Text></Box>
+              )) : []),
+              confidence.length > 0 ? (
+                <Box key={`${row.key}:detail`} flexDirection="row">
+                  {/* The copy button's text is the row's last part. */}
+                  <Text dimColor>{(row.copy === null ? confidence : confidence.slice(0, -1)).map(p => p.text).join('')}</Text>
+                  {row.copy === null ? null : copy(`${row.key}:copy`, row.copy, 'copy path')}
+                </Box>
+              ) : null,
+            ]
+          })}
+        </Box>
+      )
+    }
 
     // One line per reviewer or report: ● running, ✓ or ✗ done, ○ waiting.
     const line = (key: string, state: 'running' | 'done' | 'waiting', label: string, detail: string, isBad = false) => (
@@ -873,7 +949,7 @@ export const register: Register = (on, options) => {
               <Text dimColor>{reviewerProgress(n)} replied</Text>
               {n.reviewers.map(reviewerLine)}
               {reviewerLine(n.voter)}
-              {n.kept.filter(f => f.tag !== 'NIT' || n.kept.length <= 4).map((f, i) => keptLine(f, i))}
+              {findingsTree(t.slug, n.tree, t.risk === 'HIGH', treeWidth)}
               {(() => {
                 const v = verdict(n)
                 return v ? <Text color={v[1]} wrap="truncate-end">{v[0]}</Text> : null
