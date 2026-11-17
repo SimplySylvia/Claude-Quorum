@@ -270,3 +270,33 @@ proof() {
   "$BIN/quorum-state" --task demo set research_decision confirmed
   run "$BIN/quorum-state" --task demo set research_decision maybe; [ "$status" -eq 1 ]
 }
+
+@test "root skips resolving the root, and incr passes it on" {
+  "$BIN/quorum-state" --task demo init MEDIUM
+  # A copy whose quorum-active-task always fails: only --root can tell it where the task lives.
+  T=$(mktemp -d)
+  mkdir -p "$T/bin" "$T/libexec"
+  cp "$BIN/quorum-state" "$BIN/quorum-git" "$T/bin/"
+  cp "$REPO_ROOT/libexec/git-probe.sh" "$REPO_ROOT/libexec/git" "$T/libexec/"
+  printf '#!/bin/sh\nexit 1\n' > "$T/bin/quorum-active-task"
+  chmod +x "$T/bin/quorum-active-task"
+  run "$T/bin/quorum-state" --task demo --root "$WORK" get status
+  [ "$status" -eq 0 ]; [ "$output" = "BUILDING" ]
+  run "$T/bin/quorum-state" --task demo --root "$WORK" path
+  [ "$output" = "$WORK/.tasks/demo/state.md" ]
+  run "$T/bin/quorum-state" --task demo --root "$WORK" incr round
+  [ "$status" -eq 0 ]; [ "$output" = "1" ]
+  run "$T/bin/quorum-state" --task demo --root "$WORK" get round; [ "$output" = "1" ]
+  run "$T/bin/quorum-state" --task demo get status; [ "$status" -ne 0 ]
+  run "$T/bin/quorum-state" --root "$WORK" --task demo get status
+  [ "$status" -eq 1 ]; [ "$output" = "quorum-state: --root needs --task SLUG before it" ]
+  run "$T/bin/quorum-state" --task demo --root "$WORK/nope" get status
+  [ "$status" -eq 1 ]; [ "$output" = "quorum-state: --root: not a directory: $WORK/nope" ]
+  : > "$WORK/afile"
+  run "$T/bin/quorum-state" --task demo --root "$WORK/afile" get status; [ "$status" -eq 1 ]
+  rm -rf "$T"
+  # Without --root, the real script resolves the root as before.
+  run "$BIN/quorum-state" --task demo get round; [ "$status" -eq 0 ]; [ "$output" = "1" ]
+  run "$BIN/quorum-state" path
+  [ "$output" = "$("$BIN/quorum-active-task" --root)/.tasks/demo/state.md" ]
+}

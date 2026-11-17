@@ -25,8 +25,88 @@ cd_dir() {
 }
 
 # The same with quoted text emptied: for reading a stage's flags, so `-m "skip -n"` holds no -n.
-bare_stages() {
-  no_heredocs "$1" | sed -e 's/"[^"]*"/""/g' -e "s/'[^']*'/''/g" | awk '{ gsub(/\|\||&&|[|;&]/, "\n"); print }'
+bare_stages() { no_heredocs "$1" | bare_split; }
+
+# bare_split: stdin's lines with quoted text emptied, split into stages, to stdout.
+bare_split() {
+  sed -e 's/"[^"]*"/""/g' -e "s/'[^']*'/''/g" | awk '{ gsub(/\|\||&&|[|;&]/, "\n"); print }'
+}
+
+# join_continued: stdin to stdout with each `\`+newline removed, as bash reads a continued line. A line ending in an
+# odd number of backslashes loses the last one and runs on into the next line; an even number is left alone.
+join_continued() {
+  awk '{ line = held $0; n = 0
+         while (n < length(line) && substr(line, length(line) - n, 1) == "\\") n++
+         if (n % 2 == 1) { held = substr(line, 1, length(line) - 1); next }
+         held = ""; print line }
+       END { if (held != "") print held }'
+}
+
+# unlock_stages CMD: CMD's stages for unlock_stage: heredoc bodies removed first (so a body line ending in `\` can't
+# swallow its terminator), then continued lines joined, then quoted text emptied and split as bare_stages does.
+unlock_stages() { no_heredocs "$1" | join_continued | bare_split; }
+
+# unlock_stage STAGE: exit 0 if STAGE runs `quorum-state ... push|set|clear unlocked`, the write that only the user
+# may make. Backslash escapes are read first (`a\ b` is one word, `quorum-st\ate` is quorum-state), and a `sudo`,
+# `env`, `command`, `time`, `nohup`, `exec`, `bash` or `sh` prefix is skipped. `bash -c` exits 1: its command is quoted
+# text, which bare_split empties. A `--task` or `--root` value may be a `$(...)` or backtick substitution of several
+# words.
+unlock_stage() {
+  local s after=""
+  s=$(printf '%s\n' "$1" | awk '{
+    out = ""; n = length($0)
+    for (i = 1; i <= n; i++) {
+      c = substr($0, i, 1)
+      if (c == "\\" && i < n) { i++; c = substr($0, i, 1); if (c == " " || c == "\t") c = "_" }
+      out = out c
+    }
+    print out }')
+  set -f
+  # shellcheck disable=SC2086  # word-splitting the stage is the point
+  set -- $s
+  set +f
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      *=*|sudo|env|command|time|nohup) after=""; shift; continue ;;
+      exec) after="exec"; shift; continue ;;
+      bash|sh) after="sh"; shift; continue ;;
+    esac
+    if [ "$after" = exec ]; then
+      case "$1" in
+        -a) shift; if [ $# -gt 0 ]; then shift; fi; continue ;;
+        -*) shift; continue ;;
+      esac
+    elif [ "$after" = sh ]; then
+      case "$1" in
+        -c) return 1 ;;
+        -o|+o) shift; if [ $# -gt 0 ]; then shift; fi; continue ;;
+        -*|+*) shift; continue ;;
+      esac
+    fi
+    break
+  done
+  if [ $# -eq 0 ] || [ "${1##*/}" != quorum-state ]; then return 1; fi
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --task|--root)
+        shift
+        [ $# -gt 0 ] || return 1
+        # shellcheck disable=SC2016  # matching the literal text $( is the point
+        case "$1" in
+          '$('*|'`'*)
+            case "$1" in
+              *')'|?*'`') ;;
+              *) shift; while [ $# -gt 0 ]; do case "$1" in *')'|*'`') break ;; esac; shift; done ;;
+            esac ;;
+        esac
+        [ $# -gt 0 ] || return 1
+        shift ;;
+      push|set|clear) [ "${2:-}" = unlocked ]; return ;;
+      *) return 1 ;;
+    esac
+  done
+  return 1
 }
 
 # commit_flags STAGE: if STAGE runs `git commit` (git, quorum-git, or a path to git, with any global options before

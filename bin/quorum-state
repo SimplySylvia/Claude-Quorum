@@ -11,6 +11,8 @@
 #   quorum-state [--task SLUG] clear KEY             empty a list, or set a scalar to null
 #   quorum-state [--task SLUG] log [TEXT...]         append TEXT to the body, the human-readable round log: the
 #                                                    arguments (with \n read as a newline), else stdin
+#   quorum-state --task SLUG --root DIR CMD ...      any command above, with DIR as the root that holds .tasks/,
+#                                                    instead of asking quorum-active-task (DIR must be a directory)
 #
 # Setting status READY or AWAITING-HUMAN needs a proof: .tasks/<slug>/proof-final.md from the prover, run at the
 # current HEAD, with no failed check ("Result: ALL PASS" or "<n> SKIPPED"), and, when the task has an rd.md, a MET
@@ -30,8 +32,9 @@
 # reviewed, the `session` running it (a Claude Code session id), and status REVIEWING, FIXING (its builder is fixing
 # the kept findings), REVIEWED, or INTERRUPTED (a run that never finished; see quorum-reviews). No `kind` is a task.
 #
-# Without --task, the slug comes from quorum-active-task. The frontmatter is rewritten in canonical key order;
-# the body after the closing --- is kept as is. Values may not contain tabs or newlines. Bash 3.2 compatible.
+# Without --task, the slug comes from quorum-active-task, and so does the root without --root. The frontmatter is
+# rewritten in canonical key order; the body after the closing --- is kept as is. Values may not contain tabs or
+# newlines. Bash 3.2 compatible.
 set -euo pipefail
 
 die() { echo "quorum-state: $*" >&2; exit 1; }
@@ -51,13 +54,20 @@ is_in() { case "$2" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 known_key() { is_in "$1" " $ORDER "; }
 
 task=""
+ROOT=""
 if [ "${1:-}" = "--task" ]; then
   task=${2:-}; [ -n "$task" ] || die "--task needs a slug"; shift 2
+  if [ "${1:-}" = "--root" ]; then
+    [ $# -ge 2 ] || die "--root needs a directory"
+    [ -d "$2" ] || die "--root: not a directory: $2"
+    ROOT=$2; shift 2
+  fi
 fi
+[ "${1:-}" != "--root" ] || die "--root needs --task SLUG before it"
 cmd=${1:-}; [ -n "$cmd" ] || die "missing command (path, init, get, set, incr, push, last, clear, log)"; shift
 
 quorum_git_probe
-ROOT=$("$HERE/quorum-active-task" --root)
+[ -n "$ROOT" ] || ROOT=$("$HERE/quorum-active-task" --root)
 if [ -z "$task" ]; then
   task=$("$HERE/quorum-active-task") || exit 1
 fi
@@ -230,10 +240,10 @@ case "$cmd" in
   incr)
     key=${1:-}; [ -n "$key" ] || die "incr needs a key"; need_file
     is_in "$key" "$COUNTERS" || die "$key is not a counter (round, stop_blocks, plan_rounds, blind_runs)"
-    cur=$("$0" --task "$task" get "$key"); cur=${cur:-0}
+    cur=$("$0" --task "$task" --root "$ROOT" get "$key"); cur=${cur:-0}
     printf '%s' "$cur" | grep -Eq '^[0-9]+$' || die "$key is not an integer: $cur"
     new=$((cur + 1))
-    "$0" --task "$task" set "$key" "$new"
+    "$0" --task "$task" --root "$ROOT" set "$key" "$new"
     printf '%s\n' "$new" ;;
 
   push)

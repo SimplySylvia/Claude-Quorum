@@ -134,9 +134,15 @@ case "$tool" in
 
   Bash)
     cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
-    if printf '%s' "$cmd" | grep -Eq 'quorum-state([[:space:]]+--task[[:space:]]+[^[:space:]]+)?[[:space:]]+(push|set|clear)[[:space:]]+unlocked'; then
+    joined=$(printf '%s\n' "$cmd" | join_continued)
+    if printf '%s' "$joined" | grep -Eq 'quorum-state([[:space:]]+--task[[:space:]]+[^[:space:]]+)?([[:space:]]+--root[[:space:]]+("[^"]*"|'\''[^'\'']*'\''|(\\.|[^[:space:]])+))?[[:space:]]+(push|set|clear)[[:space:]]+unlocked'; then
       block "only the user unlocks a protected check file."
     fi
+    while IFS= read -r stage; do
+      if unlock_stage "$stage"; then block "only the user unlocks a protected check file."; fi
+    done <<EOF
+$(unlock_stages "$cmd")
+EOF
     while IFS= read -r stage; do
       flags=$(commit_flags "$stage") || continue
       if printf '%s\n' "$flags" | grep -Eq '^(--no-verify|-[A-Za-z]*n[A-Za-z]*)$'; then

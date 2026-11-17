@@ -135,3 +135,29 @@ bash_cmd() { jq -n --arg c "$1" '{hook_event_name: "PreToolUse", tool_name: "Bas
   run rw '.tasks\demo\research\..\..\..\app\x.py';                 [ "$status" -eq 2 ]
   run rw app/report.py quorum:builder;                   [ "$status" -eq 0 ]
 }
+
+@test "quorum-state with --root can't push unlocked either" {
+  run bash_cmd "quorum-state --task demo --root \"$WORK\" push unlocked x";                              [ "$status" -eq 2 ]
+  run bash_cmd 'quorum-state --task $(cat .tasks/.active) push unlocked .claude/hooks/verify-completion.sh'; [ "$status" -eq 2 ]
+  run bash_cmd 'quorum-state --task `cat .tasks/.active` set unlocked x';                                [ "$status" -eq 2 ]
+  run bash_cmd '"$BIN"/quorum-state --task demo --root $(quorum-active-task --root) clear unlocked';      [ "$status" -eq 2 ]
+  run bash_cmd 'quorum-state --task demo --root /tmp/a\ b push unlocked .claude/hooks/verify-completion.sh'; [ "$status" -eq 2 ]
+  run bash_cmd 'bash -c "quorum-state --task demo --root /tmp/a\ b push unlocked x"';                    [ "$status" -eq 2 ]
+  run bash_cmd $'quorum-state --task demo \\\npush unlocked x';                                          [ "$status" -eq 2 ]
+  run bash_cmd $'quorum-state --task $(cat .tasks/.active) \\\n--root /w clear unlocked';                [ "$status" -eq 2 ]
+  run bash_cmd 'bash "$BIN"/quorum-state --task demo --root $(quorum-active-task --root) push unlocked x'; [ "$status" -eq 2 ]
+  run bash_cmd 'sh quorum-state --task $(cat .tasks/.active) set unlocked x';                            [ "$status" -eq 2 ]
+  run bash_cmd 'exec quorum-state --task demo --root $(pwd) clear unlocked';                             [ "$status" -eq 2 ]
+  run bash_cmd 'quorum-st\ate --task $(cat .tasks/.active) push unlocked x';                             [ "$status" -eq 2 ]
+  [[ "$output" == *"only the user unlocks a protected check file."* ]]
+}
+
+@test "the unlock check leaves other quorum-state calls alone" {
+  run bash_cmd 'quorum-state --task demo log set unlocked files later';  [ "$status" -eq 0 ]
+  run bash_cmd 'quorum-state --task $(cat .tasks/.active) get unlocked'; [ "$status" -eq 0 ]
+  run bash_cmd 'git commit -m "quorum-state: set unlocked"';             [ "$status" -eq 0 ]
+  run bash_cmd $'quorum-state --task demo \\\nget unlocked';             [ "$status" -eq 0 ]
+  run bash_cmd 'exec quorum-state --task demo log set unlocked x';       [ "$status" -eq 0 ]
+  run bash_cmd 'bash -n scripts/x.sh';                                   [ "$status" -eq 0 ]
+  run bash_cmd 'echo a\ b push unlocked';                                [ "$status" -eq 0 ]
+}
