@@ -12,7 +12,7 @@ import {
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, SLICE_AT, stageOf, stages, tokenCount,
   nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress,
 } from './task'
-import { awaitingFrom, changeHeader, confidenceRow, iconsOn, isBigTree, markText, markWords, roundKept, runEnds, trackFindings, treeHeader, treeRows } from './tree'
+import { awaitingFrom, awaitingOf, changeHeader, confidenceRow, footprint, iconsOn, isBigTree, markText, markWords, roundKept, runEnds, trackFindings, treeHeader, treeRows } from './tree'
 import type { TreeChange, TreePart } from './tree'
 
 const PANE = 'quorum-dashboard'
@@ -631,6 +631,8 @@ export const register: Register = (on, options) => {
     const problems = problemsOf(t)
     const progress = [reviewerProgress(t.now), checkProgress(t.checks, t.proof !== null)].filter(Boolean).join(' · ')
     const command = nextCommand(nextFor(t, known))
+    // The recorded change's file count, once the build has a base (the Task card's footprint line).
+    const fp = t.files ? footprint(t.files, t.rounds, t.head) : null
 
     return (
       <Box flexDirection="row" gap={2}>
@@ -644,6 +646,7 @@ export const register: Register = (on, options) => {
           {currentLabel ? <Text bold> {currentLabel}</Text> : null}
         </Text>
         {columns >= 110 && progress ? <Text dimColor>{progress}</Text> : null}
+        {columns >= 110 && fp ? <Text dimColor>{plural(fp.files, 'file')}</Text> : null}
         {problems.length > 0 ? <Text color="error">{columns >= 110 ? problems.join(' · ') : problems[0]}</Text> : null}
         {/* A review running beside the task, briefly: the pane has the rest. */}
         {r && columns >= 110 ? <Text dimColor>{r.id}: {reviewProgress(r)}</Text> : null}
@@ -730,24 +733,25 @@ export const register: Register = (on, options) => {
     )
     const runningAs = (role: string) => crew.findLast(a => a.role === role && a.endedAt === null)
     // Counts in the tree's marks, each coloured as the tree colours it: `✗1 n1 p1`, or `none` when all are zero.
-    const marks = (f: Findings, none: string) => (
-      f.important + f.nit + f.preExisting === 0 ? <Text dimColor>{none}</Text> : (
-        <Text>
-          {f.important > 0 ? <Text color="error" bold>✗{f.important}</Text> : null}
-          {f.important > 0 && f.nit > 0 ? ' ' : null}
-          {f.nit > 0 ? <Text dimColor>n{f.nit}</Text> : null}
-          {f.important + f.nit > 0 && f.preExisting > 0 ? ' ' : null}
-          {f.preExisting > 0 ? <Text dimColor>p{f.preExisting}</Text> : null}
-        </Text>
-      )
-    )
-    // A reply's glyph: ✓ only when clean, ✗ with an IMPORTANT finding, • for nits or pre-existing only.
-    const findingsLine = (key: string, label: string, f: Findings) => {
-      const [glyph, color] = f.important > 0 ? ['✗', 'error'] : f.nit + f.preExisting > 0 ? ['•', undefined] : ['✓', 'success']
+    // `awaiting` of the IMPORTANT ones are awaiting re-review, drawn `↻` after the rest's `✗`.
+    const marks = (f: Findings, none: string, awaiting = 0) => {
+      const items = [
+        f.important - awaiting > 0 ? <Text key="important" color="error" bold>✗{f.important - awaiting}</Text> : null,
+        awaiting > 0 ? <Text key="awaiting" color="warning">↻{awaiting}</Text> : null,
+        f.nit > 0 ? <Text key="nit" dimColor>n{f.nit}</Text> : null,
+        f.preExisting > 0 ? <Text key="pre" dimColor>p{f.preExisting}</Text> : null,
+      ].filter(item => item !== null)
+      return items.length === 0 ? <Text dimColor>{none}</Text> : <Text>{items.flatMap((item, i) => (i > 0 ? [' ', item] : [item]))}</Text>
+    }
+    // A reply's glyph: ✓ only when clean, ✗ with an IMPORTANT finding, • for nits or pre-existing only. During a
+    // round's fix, a reply whose IMPORTANT findings are now awaiting re-review (`awaiting`) reads `• ↻1 found ✗1`.
+    const findingsLine = (key: string, label: string, f: Findings, awaiting = 0) => {
+      const [glyph, color] = awaiting > 0 ? ['•', undefined] : f.important > 0 ? ['✗', 'error'] : f.nit + f.preExisting > 0 ? ['•', undefined] : ['✓', 'success']
       return (
         <Text key={key} wrap="truncate-end">
           <Text color={color} dimColor={color === undefined}>{glyph} </Text>
           <Text>{label.padEnd(22)}</Text>
+          {awaiting > 0 ? <Text><Text color="warning">↻{awaiting}</Text><Text dimColor> found </Text></Text> : null}
           {marks(f, 'clean')}
         </Text>
       )
@@ -756,24 +760,27 @@ export const register: Register = (on, options) => {
       const agent = runningAs(role)
       return agent ? line(role, 'running', label, `running ${seconds(agent, clockNow)}`) : line(role, 'waiting', label, 'waiting')
     }
-    const reviewerLine = (r: Reviewer) => {
+    const reviewerLine = (r: Reviewer, awaiting = 0) => {
       const label = ROLE_LABEL[r.role] ?? r.role
-      return r.findings ? findingsLine(r.role, label, r.findings) : pending(r.role, label)
+      return r.findings ? findingsLine(r.role, label, r.findings, awaiting) : pending(r.role, label)
     }
     // The voter row, once the round's survivors.md exists: what it kept (after the nit cap), what the round's own
-    // disputes.md dropped, and the pipeline's next step, so the verdict sits on this row.
-    const voterLine = (kind: 'plan' | 'review' | 'standalone', survivors: Findings | null, round: number, of: number, status: string, dropped: number) => {
+    // disputes.md dropped, and the pipeline's next step, so the verdict sits on this row. `awaiting` of the kept
+    // IMPORTANT findings are awaiting re-review: `↻`, and a fix round reads `→ re-review`. `prefix` names the round
+    // when the verdict is an earlier round's (`round 1: `).
+    const voterLine = (kind: 'plan' | 'review' | 'standalone', survivors: Findings | null, round: number, of: number, status: string, dropped: number, awaiting = 0, prefix = '') => {
       const label = ROLE_LABEL.voter ?? 'voter'
       if (!survivors) return pending('voter', label)
-      const isBad = survivors.important > 0
+      const [glyph, color] = survivors.important > awaiting ? ['✗', 'error'] : awaiting > 0 ? ['↻', 'warning'] : ['✓', 'success']
+      const next = voterNext(kind, survivors.important, round, of, status)
       return (
         <Text key="voter" wrap="truncate-end">
-          <Text color={isBad ? 'error' : 'success'}>{isBad ? '✗' : '✓'} </Text>
+          <Text color={color}>{glyph} </Text>
           <Text>{label.padEnd(22)}</Text>
-          <Text dimColor>kept </Text>
-          {marks(survivors, 'nothing')}
+          <Text dimColor>{prefix}kept </Text>
+          {marks(survivors, 'nothing', awaiting)}
           {dropped > 0 ? <Text dimColor> · {dropped} dropped on dispute</Text> : null}
-          <Text dimColor> → {voterNext(kind, survivors.important, round, of, status)}</Text>
+          <Text dimColor> → {awaiting > 0 && next === 'fix round' ? 're-review' : next}</Text>
         </Text>
       )
     }
@@ -885,7 +892,7 @@ export const register: Register = (on, options) => {
           {rv.run === 0 ? <Text dimColor>Picking the reviewers</Text> : (
             <Box flexDirection="column">
               <Text dimColor>reviewers {rv.reviewers.filter(r => r.findings !== null).length}/{rv.reviewers.length} replied</Text>
-              {rv.reviewers.map(reviewerLine)}
+              {rv.reviewers.map(r => reviewerLine(r))}
               {voterLine('standalone', rv.survivors, rv.run, 0, rv.status, 0)}
               {rv.status === 'FIXING'
                 ? line('builder', builder?.endedAt === null ? 'running' : builder ? 'done' : 'waiting', 'Builder',
@@ -924,6 +931,45 @@ export const register: Register = (on, options) => {
     const codeChange = changeOf(t.files?.files ?? [], t.rereview)
     const buildHeader = codeChange ? changeHeader('build', codeChange, t.planSteps) : undefined
     const codeTree = (view: FindingsView | null) => findingsTree(t.slug, view, t.risk === 'HIGH', treeWidth, codeChange, view ? undefined : buildHeader)
+    // The footprint: the change's files, lines, and latest verdict, once the build has a base. Each item is its own
+    // Text after a ` · `, so a wrapped line breaks only between items.
+    const fp = t.files ? footprint(t.files, t.rounds, t.head) : null
+    const fpItems = (key: string) => (fp?.parts ?? []).map((parts, i) => (
+      <Text key={`${key}-${i}`}>{i > 0 ? <Text dimColor> · </Text> : null}{partsOf(`${key}-${i}`, parts)}</Text>
+    ))
+    // From Blind test on (HALTED aside), the tree folds to one Files row whose summary is the footprint; a press
+    // opens the Review tree, and the choice is kept like a section's.
+    const filesKey = `${t.slug}:files`
+    const isFilesOpen = folds[filesKey] ?? false
+    const filesRow = fp && t.stage >= STAGES.indexOf('Blind test') && t.status !== 'HALTED' ? (
+      <Box key={`${filesKey}-row`} flexDirection="column">
+        <Button
+          key={filesKey}
+          plain
+          hover={{ color: 'claude' }}
+          label={`Files, ${fp.words.join(', ')}, ${isFilesOpen ? 'open' : 'folded'}`}
+          onPress={() => void update($, sections, all => ({ ...all, [filesKey]: !isFilesOpen }))}
+        >
+          <Text wrap="truncate-end">
+            <Text dimColor>{isFilesOpen ? '▾ ' : '▸ '}</Text>
+            <Text bold>Files</Text>
+            <Text>  </Text>
+            {fpItems('files')}
+          </Text>
+        </Button>
+        {isFilesOpen ? codeTree(t.codeView) : null}
+      </Box>
+    ) : null
+    // The code review's voter row. While round N+1 reviews with no vote yet, and round N's fix awaits re-review,
+    // it keeps round N's verdict, labelled with its round.
+    const roundVoter = (n: Extract<Now, { kind: 'plan' | 'review' }>) => {
+      const of = n.of || t.maxRounds
+      const awaiting = n.kind === 'review' ? awaitingOf(n.tree, t.rereview) : 0
+      if (n.tree && n.tree.round === n.round) return voterLine(n.kind, n.survivors, n.round, of, t.status, n.tree.dropped, awaiting)
+      const last = n.tree && awaiting > 0 ? t.rounds.find(r => r.n === n.tree?.round)?.findings ?? null : null
+      if (n.tree && last && !n.survivors) return voterLine(n.kind, last, n.tree.round, of, t.status, n.tree.dropped, awaiting, `round ${n.tree.round}: `)
+      return voterLine(n.kind, n.survivors, n.round, of, t.status, 0)
+    }
     const { title, ticket } = splitTicket(spec?.title || t.slug)
 
     const shown = new Set<string>([
@@ -994,6 +1040,7 @@ export const register: Register = (on, options) => {
             })}
           </Text>
           {stageDetails(t, known) ? <Text dimColor wrap="truncate-end">{stageDetails(t, known)}</Text> : null}
+          {fp ? <Box key="footprint" flexDirection="row" flexWrap="wrap">{fpItems('footprint')}</Box> : null}
           {known && known.number > 0 && known.url ? (
             <Box flexDirection="row" gap={1}>
               {/* The PR's number is the link; its state follows, as GitHub last reported it (none when unknown). */}
@@ -1010,16 +1057,18 @@ export const register: Register = (on, options) => {
             <Text bold color={nowColor}>{nowTitle(n, t.maxRounds)}</Text>
           </Text>
           {n.kind === 'spec' && <Text dimColor>{plural(n.requirements, 'requirement')} in rd.md · {plural(taskChecks, 'check')} in eval.md</Text>}
-          {n.kind === 'spec' && n.reviewers.map(reviewerLine)}
+          {n.kind === 'spec' && n.reviewers.map(r => reviewerLine(r))}
           {(n.kind === 'plan' || n.kind === 'review') && n.round > 0 && (
             <Box flexDirection="column">
               <Text dimColor>{reviewerProgress(n)} replied</Text>
-              {n.reviewers.map(reviewerLine)}
+              {/* During round N's fix, a reviewer whose IMPORTANT finding is now awaiting re-review says so; once
+                  round N+1 starts, the rows are its own. */}
+              {n.reviewers.map(r => reviewerLine(r, n.tree?.round === n.round ? n.rereviewBy[r.role] ?? 0 : 0))}
               {/* While round N+1 reviews, the tree shows round N, whose drops aren't this round's. */}
-              {voterLine(n.kind, n.survivors, n.round, n.of || t.maxRounds, t.status, n.tree?.round === n.round ? n.tree.dropped : 0)}
+              {roundVoter(n)}
               {n.kind === 'plan'
                 ? findingsTree(t.slug, n.tree, t.risk === 'HIGH', treeWidth, planChange, planChange ? changeHeader('plan', planChange, t.planSteps) : undefined)
-                : codeTree(n.tree)}
+                : filesRow ?? codeTree(n.tree)}
             </Box>
           )}
           {n.kind === 'build' && (
@@ -1044,12 +1093,13 @@ export const register: Register = (on, options) => {
               {reportLine('security', n.blind.security, k => k ? `${k} IMPORTANT` : 'clean')}
               {reportLine('triage', n.blind.caused, k => k ? `${plural(k, 'item')} caused by this change` : 'nothing caused by this change')}
               {/* HALTED after a blind run: the Review tree, unfolded, under the blind test's rows. */}
-              {t.status === 'HALTED' && codeChange ? codeTree(t.codeView) : null}
+              {t.status === 'HALTED' && codeChange ? codeTree(t.codeView) : filesRow}
             </Box>
           )}
           {n.kind === 'done' && !(known && known.number > 0) && (
             <Text dimColor>{t.prDrafted ? 'Every stage is done; pr.md is drafted.' : 'Every stage is done.'}</Text>
           )}
+          {n.kind === 'done' ? filesRow : null}
           <Box flexDirection="row" gap={1} marginTop={1}>
             {command
               ? <Button key="next" variant="primary" label={`▶ Next: ${command}`} onPress={() => void fillPrompt($, command)} />
