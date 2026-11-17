@@ -11,11 +11,19 @@
 #    ignored, and the active task is checked as usual.
 #    The task is the one the session's directory (the input's cwd) resolves: in a task's git worktree, that
 #    worktree's. Its checks run in the task's worktree when it has one, with that worktree's verify-completion.sh.
-# 2. Run verify-completion.sh with a timeout (verify_timeout_s, default 300).
-# 3. On failure, count it in stop_blocks and exit 2 with the failing output, so Claude keeps working.
-# 4. Loop guard: on the 3rd failure in a row, let the stop through, save the status in escalated_from, set
+# 2. Skip: compute a key for the tree the checks run in (the repo two levels above the verify script chosen) from
+#    HEAD, the unstaged and staged diffs, the untracked files outside .tasks/ (contents and executable bits, a link
+#    by its target text, anything else by type only, never opened), the verify script's path and content, that
+#    tree's path, verify_timeout_s and the plugin version. When it equals .tasks/<task>/verify-pass, exit 0 with no
+#    output and don't run the checks. Ignored files and tool versions aren't in the key. An unborn HEAD, a git
+#    error, a dirty or moved submodule, an untracked nested repo, an unreadable untracked file, or an untracked name
+#    with a newline or a leading quote gives no key, which only turns the skip off. There's no maximum age.
+# 3. Run verify-completion.sh with a timeout (verify_timeout_s, default 300). After a pass whose key is the same
+#    before and after the run, write the key to the stamp atomically; otherwise, and on any failure, delete it.
+# 4. On failure, count it in stop_blocks and exit 2 with the failing output, so Claude keeps working.
+# 5. Loop guard: on the 3rd failure in a row, let the stop through, save the status in escalated_from, set
 #    ESCALATED, and warn the user. A broken environment can't trap a session.
-# 5. On success, reset stop_blocks and restore the status from escalated_from.
+# 6. On success (a pass or a skip), reset stop_blocks if it isn't 0 and restore the status from escalated_from.
 # Bash 3.2 compatible.
 set -uo pipefail
 
@@ -76,8 +84,78 @@ VERIFY="$CODE/.claude/hooks/verify-completion.sh"
 timeout_s=${CLAUDE_PLUGIN_OPTION_VERIFY_TIMEOUT_S:-300}
 case "$timeout_s" in ''|*[!0-9]*) timeout_s=300 ;; esac
 
-out=$(mktemp); marker="$out.timeout"
-trap 'rm -f "$out" "$marker"' EXIT
+out=$(mktemp); marker="$out.timeout"; keyf="$out.key"
+trap 'rm -f "$out" "$marker" "$keyf" "$keyf.paths" "$keyf.diff" "$keyf.others" "$keyf.hashes"' EXIT
+
+KTREE=${VERIFY%/.claude/hooks/verify-completion.sh}
+STAMP="$ROOT/.tasks/$task/verify-pass"
+NL='
+'
+kgit() { GIT_OPTIONAL_LOCKS=0 "$BIN/quorum-git" -C "$KTREE" "$@"; }
+
+# stop_key: print the key of the tree the checks run in, or return 1 when there is none. Every failure here only
+# turns the skip off: nothing is opened that isn't a readable regular file, and no object is written.
+stop_key() {
+  local h p t x n
+  case "$KTREE$VERIFY" in *"$NL"*) return 1 ;; esac
+  : >"$keyf" && : >"$keyf.paths" || return 1
+  h=$(kgit rev-parse --verify -q HEAD 2>/dev/null) && [ -n "$h" ] || return 1
+  printf 'HEAD %s\n' "$h" >>"$keyf"
+  for x in '' --cached; do
+    # shellcheck disable=SC2086  # $x is empty or one flag
+    kgit diff $x --binary --no-color --no-ext-diff --no-textconv --ignore-submodules=none HEAD -- . ':(exclude).tasks' \
+      >"$keyf.diff" 2>/dev/null || return 1
+    # A submodule shows as its commit line, which doesn't change with further edits inside it.
+    if grep -q '^[-+]Subproject commit ' "$keyf.diff"; then return 1; fi
+    n=$(wc -c <"$keyf.diff" | tr -d ' ')
+    printf 'DIFF%s %s\n' "$x" "$n" >>"$keyf" && cat "$keyf.diff" >>"$keyf" || return 1
+  done
+  kgit ls-files -z --others --exclude-standard -- . ':(exclude).tasks' >"$keyf.others" 2>/dev/null || return 1
+  # Each path is relative to KTREE, so every test is on "$KTREE/$p", never on the session's directory.
+  while IFS= read -r -d '' p; do
+    case "$p" in
+      *"$NL"*|'"'*) return 1 ;;   # hash-object --stdin-paths would read a leading quote as C-quoting
+      */) return 1 ;;             # an untracked nested repository, whose contents git doesn't list
+    esac
+    if [ -L "$KTREE/$p" ]; then
+      t=$(readlink "$KTREE/$p" && printf x) || return 1
+      t=${t%x}; t=${t%"$NL"}
+      case "$t" in *"$NL"*) return 1 ;; esac
+      printf 'L %s %s\n' "$p" "$t"
+    elif [ -f "$KTREE/$p" ]; then
+      [ -r "$KTREE/$p" ] || return 1
+      x=-; [ -x "$KTREE/$p" ] && x=x
+      printf 'F %s %s\n' "$p" "$x"
+      printf '%s\n' "$p" >>"$keyf.paths"
+    else
+      t=other
+      if [ -d "$KTREE/$p" ]; then t=dir; elif [ -p "$KTREE/$p" ]; then t=fifo; elif [ -S "$KTREE/$p" ]; then t=socket; fi
+      printf 'T %s %s\n' "$p" "$t"
+    fi
+  done <"$keyf.others" >>"$keyf" || return 1
+  printf 'VERIFY %s\n' "$VERIFY" >>"$keyf"
+  printf '%s\n' "$VERIFY" >>"$keyf.paths"
+  kgit hash-object --no-filters --stdin-paths <"$keyf.paths" >"$keyf.hashes" 2>/dev/null || return 1
+  cat "$keyf.hashes" >>"$keyf" || return 1
+  t=$(jq -r .version "$HERE/../.claude-plugin/plugin.json" 2>/dev/null) || return 1
+  printf 'KTREE %s\ntimeout %s\nversion %s\n' "$KTREE" "$timeout_s" "$t" >>"$keyf" || return 1
+  t=$(kgit hash-object --stdin <"$keyf" 2>/dev/null) && [ -n "$t" ] || return 1
+  printf '%s\n' "$t"
+}
+
+# A pass and a skip share this success path.
+passed() {
+  [ "$(state get stop_blocks)" = "0" ] || state set stop_blocks 0
+  if [ "$status" = ESCALATED ]; then
+    prev=$(state get escalated_from)
+    state set status "${prev:-IN_REVIEW}"
+    state clear escalated_from
+  fi
+  exit 0
+}
+
+before=$(stop_key 2>/dev/null) || before=""
+if [ -n "$before" ] && [ -f "$STAMP" ] && [ "$(head -n 1 "$STAMP" 2>/dev/null)" = "$before" ]; then passed; fi
 
 # Run the checks in the background with a watchdog (macOS has no `timeout` command).
 bash "$VERIFY" >"$out" 2>&1 &
@@ -94,15 +172,20 @@ wait "$pid"; rc=$?
 kill "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null
 
 if [ "$rc" -eq 0 ] && [ ! -e "$marker" ]; then
-  [ "$(state get stop_blocks)" = "0" ] || state set stop_blocks 0
-  if [ "$status" = ESCALATED ]; then
-    prev=$(state get escalated_from)
-    state set status "${prev:-IN_REVIEW}"
-    state clear escalated_from
+  after=""; [ -z "$before" ] || after=$(stop_key 2>/dev/null) || after=""
+  # Stamp-write errors are ignored: the next stop just runs the checks again.
+  if [ -n "$before" ] && [ "$before" = "$after" ]; then
+    tmp=$(mktemp "$STAMP.XXXXXX" 2>/dev/null) || tmp=""
+    if [ -z "$tmp" ] || ! { printf '%s\n' "$after" >"$tmp" && mv -f "$tmp" "$STAMP"; } 2>/dev/null; then
+      rm -f "$tmp" "$STAMP" 2>/dev/null
+    fi
+  else
+    rm -f "$STAMP" 2>/dev/null
   fi
-  exit 0
+  passed
 fi
 
+rm -f "$STAMP" 2>/dev/null
 blocks=$(state incr stop_blocks)
 if [ -e "$marker" ]; then
   echo "verify-completion.sh timed out after ${timeout_s}s (verify_timeout_s)." >>"$out"
