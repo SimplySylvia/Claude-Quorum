@@ -14,13 +14,17 @@ While a task is active, Quorum shows where it is without you asking:
 <sub>Both are the demo task from `assets/src/dashboard-demo.sh` (see [CONTRIBUTING.md](../CONTRIBUTING.md)): mid-review, and
 finished with its PR open.</sub>
 
-- **The band above the prompt:** the task's status, a dot per stage, the round's progress, anything wrong in red,
-  and **▶ Next** and **Dashboard** buttons.
+- **The band above the prompt:** the task's status, a dot per stage, the round's progress, the change's file count
+  (`12 files`) at 110 columns or more, anything wrong in red, and **▶ Next** and **Dashboard** buttons.
 - **The pane,** which opens by itself during a task (`/quorum-dashboard` shows or hides it):
-  - **Task card:** title, goal, status, a stage stepper, and the PR once there is one.
+  - **Task card:** title, goal, status, a stage stepper, and the PR once there is one. Once the build has started,
+    a footprint line sums up the change: `12 files · +268 −11 · 1 important · 1 nit · 1 pre`, naming the findings
+    the latest voted code review round kept. It reads `no findings` after a vote that kept none, `not reviewed yet`
+    before any vote, and adds `as of a1b2c3d` when the list was recorded at an older commit than the current one.
   - **Now card:** what the current stage is doing, such as each reviewer's progress and what it found, the voter's
-    verdict and the next step, and the findings the voter kept, as a [tree of their files](#the-findings-tree). Its
-    border turns amber when it's your move and red when the task is stuck.
+    verdict and the next step, and, from Plan on, a [tree of the task's changed files](#the-file-tree) with the
+    findings the voter kept under their files. Its border turns amber when it's your move and red when the task is
+    stuck.
   - **Folding sections:** Requirements, Checks, Review rounds (the plan's rounds and the code's, side by side), Spend
     (tokens and models used, the models the task chose, and a warning when an agent ran on another), Other tasks,
     and Other agents. A section with a problem opens by itself.
@@ -35,18 +39,69 @@ The pane docks beside the chat in a wide fullscreen terminal, and sits above the
 reads `.tasks/`, so `claude -p`, cloud sessions, and the VS Code chat panel work as before, without it. It shows
 tasks and reviews; maps and research aren't on it yet.
 
-## The findings tree
+## The file tree
 
-The findings the verifier kept show as a tree of the files they're in, read from the project root, so a path
-written with `./`, as an absolute path, or in the task's worktree lands on the same file. A chain of folders with
-one child each is merged into one row (`app/frontend/src/components/`), and a long name is cut in the middle. A
-finding with no file sits under **other**, after the files.
+While a task runs, the Now card shows the change as one tree of files: what the plan said each step would touch,
+what the build has changed so far, which changes no step planned, and where the review's findings land. The plan,
+build, review-loop, and blind-test steps record the list into `.tasks/<slug>/files.tsv` with `quorum-files record`
+at their save points (see [Repository layout](reference.md) in the reference), so the dashboard still only reads
+`.tasks/` and never runs git. The tree changes when a stage records, not as each file is edited.
+
+- **Plan:** under the plan review's reviewer and voter rows, a header such as `4 steps · 9 files, 3 new`, then the
+  files the plan's steps name, with the plan review's findings under `.tasks/<slug>/plan.md`.
+- **Build:** a header such as `5 of 9 planned files changed · 1 unplanned`, then the change so far. No findings.
+- **Review:** the same tree, with the findings of the round on show under their files. Before any round has voted,
+  it keeps the Build header. HALTED, and ESCALATED during review, show this tree too, unfolded.
+- **Blind test, and after the review loop converges:** one folded row,
+  `▸ Files  7 files · +268 −11 · 1 nit · 1 pre`, with the footprint line's summary. A press opens the Review
+  tree, and the dashboard remembers the choice. It shows once the build has started; before that, the Review tree
+  stays.
+- **Spec,** and a task with no list recorded yet, have no file tree; a Review with no list shows only the findings'
+  files, as a `/quorum:review` does.
+
+A file row reads, left to right: progress, the git letter, the name, line counts, the step, and the finding marks,
+such as `✓ M report.py  +86 −3  s3  ✗1`.
+
+- **Progress** against the plan: `✓` its step is built, `○` its step isn't built yet, and `*` changed though no
+  step names it, with the word `unplanned` beside the name. A file several steps name is `✓` only when all of them
+  are built; in a build that isn't sliced into steps, every step counts as built once the build's proof exists. A
+  task with no plan has no progress column. A second key line names the ones shown:
+  `✓ built  ○ not yet  * unplanned`.
+- **The letter:** `M` modified, `A` added, `D` deleted, `R` renamed. It's dim while the file is only planned.
+- **Line counts:** `+86 −3`, leaving out a side with no lines, `bin` for a binary file, and nothing while the file
+  is only planned. A folder shows its file count there instead (`4 files`); the change's line totals are on the
+  footprint line.
+- **The step:** `s3`, the lowest step that names the file, blank when none does.
+- **Columns line up** across the whole tree, folded rows included, so nothing moves when a folder opens or closes.
+  In a narrow pane the name gives way first, cut in the middle down to 4 columns, then the `unplanned` word, the
+  step, and the line counts; the progress, the letter, and the marks always stay.
+- **Big changes fold:** past 15 files, a folder with no open or `↻` finding and no unplanned file starts folded,
+  and the header adds `clean folders folded (15+ files)`. A press opens it. With 15 files or fewer, folders start
+  open.
+- **`file_icons`:** set the plugin option to `nerd` for a file type icon beside each file and folder. It's off by
+  default, needs a [Nerd Font](https://www.nerdfonts.com/) (v3) in the terminal, and shows only in the terminal,
+  not in the VS Code panel.
+
+### Findings in the tree
+
+The findings the verifier kept sit under their files, read from the project root, so a path written with `./`, as
+an absolute path, or in the task's worktree lands on the same file. A chain of folders with one child each is
+merged into one row (`app/frontend/src/components/`), and a long name is cut in the middle. A finding with no file
+sits under **other**, after the files. A `/quorum:review` records no file list, so its tree holds only the files
+with findings.
 
 - **The header** names the round on show: `the verifier kept these in round 2`, or `kept nothing in round 2`.
   While the next round reviews, the tree keeps the last round the verifier voted on. A `/quorum:review` says run
   where a task says round.
-- **Marks:** `✗` important, `✓` fixed this run, `n` nit, `p` pre-existing. A key line under the header names
-  only the marks shown, such as `key: ✗ important  n nit`, and wraps between entries in a narrow pane.
+- **Marks:** `✗` important, `↻` awaiting re-review, `✓` fixed this run, `n` nit, `p` pre-existing. A key line
+  under the header names only the marks shown, such as `key: ✗ important  n nit`, and wraps between entries in a
+  narrow pane.
+- **Awaiting re-review:** once a round's fix changes the file of an important finding that round kept, the finding
+  shows `↻` instead of `✗` until a later round reviews it. The voter row then reads `kept ↻1 n1 → re-review` in
+  place of `→ fix round`, and each reviewer row whose finding is now `↻` reads `↻1 found ✗1`. While the next round
+  reviews and hasn't voted, the voter row keeps that verdict, labelled with its round
+  (`round 1: kept ↻1 n1 → re-review`), and the reviewer rows are the new round's. A finding a new round keeps on
+  a file an earlier fix changed reads `✗` again, with `→ fix round`.
 - **Folders** roll their findings up by mark beside their file count: `src/  2 files  ✗1  n1`.
 - **A press** on a folder or file folds or opens it, and the dashboard remembers the choice through later rounds.
   Folders start open, and so does a file with findings still to fix. A finding is one line, cut at the end; a press
@@ -56,15 +111,13 @@ finding with no file sits under **other**, after the files.
   just leaves the tree. A file with only fixed findings starts folded, unless the task is HIGH. A finding counts as
   the same one when its file and category match, whatever its severity, so a finding whose line moved, or whose
   severity changed, isn't shown as fixed; one that comes back in a later round is open again. When the round on
-  show keeps nothing, the tree shows only the `✓` rows. For a `/quorum:review`, a finding is fixed only when a later
-  run reviewed a different range end.
+  show keeps nothing, a task's tree still shows its files, with only `✓` rows for findings; a `/quorum:review`
+  tree shows only the `✓` rows. For a `/quorum:review`, a finding is fixed only when a later run reviewed a
+  different range end.
 - **Dropped on dispute:** a finding the voter dropped after the builder disputed it shows dim, with no mark and no
   count, as `dropped on dispute in round 1`, as soon as the voter drops it. The voter row then reads, for example,
   `kept ✗1 n1 · 1 dropped on dispute → fix round`, so its counts and the tree's still add up.
-- **`file_icons`:** set the plugin option to `nerd` for a file type icon beside each file and folder. It's off by
-  default, needs a [Nerd Font](https://www.nerdfonts.com/) (v3) in the terminal, and shows only in the terminal,
-  not in the VS Code panel.
 
-The tree shows only the files with findings. For a whole-repo tree that animates as Claude reads and writes, try
-[claude-code-filetree](https://github.com/data-goblin/claude-code-filetree), a separate mod that runs beside this
-one.
+The tree shows only the task's changed files and the files its findings name. For a whole-repo tree that animates
+as Claude reads and writes, try [claude-code-filetree](https://github.com/data-goblin/claude-code-filetree), a
+separate mod that runs beside this one.

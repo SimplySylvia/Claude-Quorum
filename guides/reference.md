@@ -64,7 +64,7 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `protected_paths` | (none) | More check files a task can't change while it builds or is in review, as comma-separated globs |
 | `mechanical_model` | (none: the session's model) | Model for the steps of a large plan that the plan marks mechanical; a mid-tier model at the least |
 | `worktrees` | `false` | Build each task in its own git worktree (see [More than one task at a time](running-a-task.md#more-than-one-task-at-a-time)) |
-| `file_icons` | `off` | Icons in the dashboard's findings tree: `off` or `nerd`; `nerd` needs a Nerd Font in the terminal |
+| `file_icons` | `off` | Icons in the dashboard's file tree: `off` or `nerd`; `nerd` needs a Nerd Font in the terminal |
 | `blind_block_dirs` | `src,app,lib,packages,Source,Content` | Folders the blind user can't read |
 | `blind_block_exts` | `ts,tsx,js,jsx,py,rs,go,cpp,h,java,kt,rb` | File types the blind user can't read |
 
@@ -81,12 +81,20 @@ blind-test block lists in `.claude/quorum.json`, which helps in monorepos.
 | `agents/` | `researcher`, `spec-reviewer`, `planner`, `builder`, `prover`, `code-reviewer`, `pattern-auditor`, `docs-auditor`, `a11y-auditor`, `verifier-voter`, `security-reviewer`, `blind-user`, `friction-triager`, `pr-writer`, `source-verifier` |
 | `hooks/` | `hooks.json` plus `session-laws.sh`, `block-source-read.sh`, `protect-checks.sh`, `map-guard.sh`, `run-guard.sh`, `secret-guard.sh` (all three read commands with `shell-words.sh`), `stop-verify.sh`, `record-pr.sh`, `session-end.sh`, and `dashboard/`, the dashboard's hooks module |
 | `types/` | The type contract for the values the dashboard keeps in the session |
-| `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state`, `quorum-reviews`, `quorum-lessons`, `quorum-secrets`, `quorum-validate`, `quorum-config`, `quorum-plan`, `quorum-map`, `quorum-run`, `quorum-session`, `quorum-research-check`, `quorum-git` (on the Bash PATH while the plugin is enabled) |
+| `bin/` | `quorum-branch`, `quorum-detect-stack`, `quorum-findings`, `quorum-learned-rule`, `quorum-render-review`, `quorum-render-verify`, `quorum-active-task`, `quorum-state`, `quorum-reviews`, `quorum-lessons`, `quorum-secrets`, `quorum-validate`, `quorum-config`, `quorum-plan`, `quorum-map`, `quorum-run`, `quorum-session`, `quorum-research-check`, `quorum-files`, `quorum-git` (on the Bash PATH while the plugin is enabled) |
 | `libexec/` | `git`, which `quorum-git` puts first on PATH when it runs a real git by full path, so git's own child processes (`git worktree add` starts some) reach it too |
 | `guides/` | The guides the README links to: how it works, running a task, research and maps, reviewing, learning, the dashboard, guardrails, and this reference |
 | `tests/` | bats tests for every hook and helper, `claude plugin test` tests for the dashboard, fixture repos per stack, and `e2e/sales-app`, a small runnable app for live end-to-end runs |
 | `evals/` | `claude plugin eval` suite: risk tiering, one case per agent, the spec, plan, build, and run paths, research, maps, the retro, voter false-alarm drops, blind-mode source reads, and a near-miss (listed in [CONTRIBUTING.md](../CONTRIBUTING.md#evals)) |
 | `assets/` | The animations and diagrams in the README and the guides, in light and dark versions; `assets/src/diagrams.py` draws the diagrams, and `assets/src/dashboard-demo.sh` builds a demo task for the dashboard |
 | [`CONTRIBUTING.md`](../CONTRIBUTING.md) · [`CHANGELOG.md`](../CHANGELOG.md) · [`TODO.md`](../TODO.md) · [`LICENSE`](../LICENSE) | Development guide · release notes · planned features · MIT license |
+
+`quorum-files record` writes the task's changed files to `.tasks/<slug>/files.tsv`, the list the dashboard's file
+tree reads. Each row holds a file's git letter, the lines it adds and removes against the merge-base with the
+default branch, the plan steps whose line names it (a file a step names but the change doesn't touch yet gets a
+planned row), and whether it changed since the last review round. Before the build starts, the list holds only the
+planned rows. The plan records it at the start of each review round, the build after each builder and each built
+step, the review loop at each round's start and after each fix, and the blind test before the blind user and before
+the final proof. A failed record prints one line and never stops the stage.
 
 </details>

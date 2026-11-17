@@ -20,6 +20,21 @@ copy with `/plugin marketplace update`.
   `dropped on dispute in round 1`.
 - **`file_icons` option.** Set it to `nerd` for Nerd Font file type icons beside the tree's files and folders, in
   the terminal only. It's `off` by default.
+- **The task's changed files are recorded.** `quorum-files record` writes the change to `.tasks/<slug>/files.tsv`:
+  each file's git letter and line counts against the merge-base, the plan steps that name it, and whether it changed
+  since the last round. The plan, build, review-loop, and blind-test steps record it at their save points, so the
+  dashboard still only reads `.tasks/`.
+- **The file tree in every stage.** In Plan the tree shows the files the plan's steps name
+  (`4 steps · 9 files, 3 new`), in Build the change so far (`5 of 9 planned files changed · 1 unplanned`), and in
+  Review the same tree with the findings. From Blind test on it folds to one `▸ Files` row that a press opens. Each
+  file row reads its plan progress (`✓` built, `○` not yet, `*` unplanned), its git letter, its line counts
+  (`+86 −3`), and its step (`s3`), in columns that line up. Past 15 files, clean folders start folded.
+- **`↻` awaiting re-review.** An important finding whose file the round's fix changed shows `↻` until a later
+  round reviews it, and the voter row reads `→ re-review`; while the next round reviews, it keeps that verdict as
+  `round 1: kept ↻1 → re-review`.
+- **The footprint line and the band's file count.** Once the build starts, the Task card reads
+  `12 files · +268 −11 · 1 important · 1 nit · 1 pre` (or `not reviewed yet`, or `no findings`, with `as of` a
+  short sha when the list is older than HEAD), and the band adds `12 files` at 110 columns or more.
 
 ### Changed
 
@@ -29,6 +44,8 @@ copy with `/plugin marketplace update`.
   reads its result in marks too, and its button keeps it in words.
 - **Review rounds show the plan's rounds beside the code's:** `plan r1 ✗1 · r2 clean  code r1 ✗1 · r2 reviewing`.
   The section's button reads the rounds in words.
+- **The Now card's tree holds the whole change.** It shows the task's changed files, not only the files with
+  findings; a `/quorum:review` tree still shows only the findings' files.
 
 ## 0.11.3 (2026-11-15)
 

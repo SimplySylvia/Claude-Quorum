@@ -1,6 +1,9 @@
-// The findings tree's pure model and layout: join a finding's path to the project root, track kept findings across a
-// review's rounds (open, fixed, or dropped on dispute), build the tree of their files, and lay out its rows and key to
-// the card's width, with the marks the rows around it share. No `$` here, so tests can call it directly.
+// The file tree's pure model and layout: the tree of a task's changed files (files.tsv's rows, with their plan
+// progress, git letters, line counts, and steps) and the files its kept findings name. Join a finding's path to the
+// project root, track kept findings across a review's rounds (open, awaiting re-review, fixed, or dropped on
+// dispute), build the tree, and lay out its rows, header, key, and the footprint line to the card's width, with the
+// marks the rows around it share. A `/quorum:review` has no recorded change, so its tree holds only the findings'
+// files. No `$` here, so tests can call it directly.
 
 import type { ChangedFile, FileList, Findings, FindingsView, Round, RoundKept, TreeFinding } from '../../types'
 import { isStaleProof, keptFindings, plural } from './task'

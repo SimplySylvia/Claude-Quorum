@@ -22,6 +22,6 @@
     "protected_paths": { "type": "string", "title": "More protected check files", "description": "Comma-separated globs of files a task may not change while it builds or is in review, beyond verify-completion.sh, CI, and the usual test and lint configs. A glob without a / matches a file name anywhere.", "default": "" },
     "blind_block_dirs": { "type": "string", "title": "Blind test: blocked folders", "description": "Comma-separated folders the blind user may not read.", "default": "src,app,lib,packages,Source,Content" },
     "blind_block_exts": { "type": "string", "title": "Blind test: blocked file types", "description": "Comma-separated file extensions the blind user may not read.", "default": "ts,tsx,js,jsx,py,rs,go,cpp,h,java,kt,rb" },
-    "file_icons": { "type": "string", "title": "File icons", "description": "Icons beside the files in the dashboard's findings tree: off, or nerd for Nerd Fonts v3 icons. nerd needs a Nerd Font in the terminal.", "default": "off", "options": ["off", "nerd"] }
+    "file_icons": { "type": "string", "title": "File icons", "description": "Icons beside the files in the dashboard's file tree: off, or nerd for Nerd Fonts v3 icons. nerd needs a Nerd Font in the terminal.", "default": "off", "options": ["off", "nerd"] }
   }
 }
