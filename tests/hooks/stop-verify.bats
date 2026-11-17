@@ -196,3 +196,13 @@ subagent_stop_in() { echo "{\"hook_event_name\":\"SubagentStop\",\"agent_type\":
   [[ "$output" == *"review-pr-7"* ]]
   [ "$("$BIN/quorum-state" --task review-pr-7 get stop_blocks)" = "1" ]
 }
+
+@test "with CLAUDE_PROJECT_DIR a linked worktree and the session outside the repo, the stop checks the task the root resolves, as before" {
+  "$BIN/quorum-state" --task a init MEDIUM BUILDING
+  "$BIN/quorum-render-verify" --check 'unit=echo "the check always fails"; exit 1' > .claude/hooks/verify-completion.sh
+  git worktree add -q -b feat/a "$BATS_TEST_TMPDIR/wt"
+  mkdir -p "$BATS_TEST_TMPDIR/outside"
+  run env CLAUDE_PROJECT_DIR="$BATS_TEST_TMPDIR/wt" bash -c 'jq -n --arg c "$1" '\''{hook_event_name: "Stop", stop_hook_active: false, cwd: $c}'\'' | "$2/stop-verify.sh"' _ "$BATS_TEST_TMPDIR/outside" "$HOOKS"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"for task 'demo'"* ]]
+}

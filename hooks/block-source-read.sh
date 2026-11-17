@@ -24,7 +24,12 @@ set -uo pipefail
 
 ROOT=${CLAUDE_PROJECT_DIR:-$(pwd)}
 ROOT=${ROOT//\\//}  # on Windows a path may have backslashes
-BIN="$(cd "$(dirname "$0")" && pwd)/../bin"
+HERE=$(cd "$(dirname "$0")" && pwd)
+BIN="$HERE/../bin"
+# shellcheck source=hooks/task-context.sh
+. "$HERE/task-context.sh"
+# shellcheck source=libexec/git-probe.sh
+. "$HERE/../libexec/git-probe.sh"
 input=$(cat)
 
 agent=$(printf '%s' "$input" | jq -r '.agent_type // empty' 2>/dev/null)
@@ -32,12 +37,14 @@ markers() { for m in "$ROOT"/.tasks/.blind-mode-active "$ROOT"/.tasks/*/.blind-m
 if [ "$agent" != "quorum:blind-user" ] && ! markers; then exit 0; fi
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then cd "$cwd" 2>/dev/null || true; fi
+quorum_git_probe
+task_context "$BIN"
 if [ "$agent" != "quorum:blind-user" ] && [ ! -e "$ROOT/.tasks/.blind-mode-active" ]; then
-  task=$("$BIN/quorum-active-task" 2>/dev/null) || exit 0
+  task=$TASK_SLUG; [ -n "$task" ] || exit 0
   [ -e "$ROOT/.tasks/$task/.blind-mode-active" ] || exit 0
 fi
 strict=0; [ "$agent" = "quorum:blind-user" ] && strict=1
-CODE=$("$BIN/quorum-active-task" --code 2>/dev/null) || CODE=$ROOT
+CODE=${TASK_CODE:-$ROOT}
 
 dirs=${CLAUDE_PLUGIN_OPTION_BLIND_BLOCK_DIRS:-src,app,lib,packages,Source,Content}
 exts=${CLAUDE_PLUGIN_OPTION_BLIND_BLOCK_EXTS:-ts,tsx,js,jsx,py,rs,go,cpp,h,java,kt,rb}

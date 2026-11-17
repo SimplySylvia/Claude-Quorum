@@ -42,3 +42,14 @@ ran() {
   run jq -r '.hooks.PostToolUse[] | select(.matcher == "Bash") | .hooks[].command' "$HOOKS/hooks.json"
   [[ "$output" == *"/hooks/record-pr.sh" ]]
 }
+
+@test "record-pr probes git once for its children" {
+  SHIM="$BATS_TEST_TMPDIR/shim"; git_shim "$SHIM"; export GIT_LOG="$BATS_TEST_TMPDIR/git.log"
+  : > "$GIT_LOG"
+  in=$(jq -n --arg c 'gh pr create --fill' --arg o 'https://github.com/acme/app/pull/7' '{hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: {command: $c}, tool_response: {stdout: $o, stderr: ""}}')
+  run env -u QUORUM_GIT_USE -u QUORUM_GIT_PROBE PATH="$SHIM:$PATH" QUORUM_GIT_CANDIDATES="$SHIM/git" bash -c 'printf "%s" "$1" | "$2/record-pr.sh"' _ "$in" "$HOOKS"
+  [ "$status" -eq 0 ]
+  [ "$("$BIN/quorum-state" --task demo get pr)" = "https://github.com/acme/app/pull/7" ]
+  echo "versions: $(grep -c -- '--version' "$GIT_LOG")"; cat "$GIT_LOG"
+  [ "$(grep -c -- '--version' "$GIT_LOG")" -le 1 ]
+}

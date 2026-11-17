@@ -39,3 +39,14 @@ end() { jq -n --arg s "$1" --arg c "${2:-$WORK}" '{session_id: $s, cwd: $c, hook
   run end s1; [ "$status" -eq 0 ]
   [ ! -e .tasks/.run-sessions/s1 ] && [ -f .tasks/.run-sessions/s2 ]
 }
+
+@test "session-end probes git once for its children" {
+  SHIM="$BATS_TEST_TMPDIR/shim"; git_shim "$SHIM"; export GIT_LOG="$BATS_TEST_TMPDIR/git.log"
+  : > "$GIT_LOG"
+  run env -u QUORUM_GIT_USE -u QUORUM_GIT_PROBE PATH="$SHIM:$PATH" QUORUM_GIT_CANDIDATES="$SHIM/git" bash -c 'jq -n --arg c "$1" '\''{session_id: "s1", cwd: $c, hook_event_name: "SessionEnd", reason: "prompt_input_exit"}'\'' | "$2/session-end.sh"' _ "$WORK" "$HOOKS"
+  [ "$status" -eq 0 ]
+  [ ! -e .tasks/.map-sessions/s1 ] && [ ! -e .tasks/.run-sessions/s1 ]
+  [ -f .tasks/.map-sessions/s2 ] && [ -f .tasks/.run-sessions/s2 ]
+  echo "versions: $(grep -c -- '--version' "$GIT_LOG")"; cat "$GIT_LOG"
+  [ "$(grep -c -- '--version' "$GIT_LOG")" -le 1 ]
+}

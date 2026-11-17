@@ -20,6 +20,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 BIN="$HERE/../bin"
 # shellcheck source=hooks/shell-words.sh
 . "$HERE/shell-words.sh"
+# shellcheck source=libexec/git-probe.sh
+. "$HERE/../libexec/git-probe.sh"
 
 input=$(cat 2>/dev/null || true)
 tool=$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null) || exit 0
@@ -77,6 +79,7 @@ EOF
     while IFS= read -r stage; do
       flags=$(commit_flags "$stage") || continue
       all=""; printf '%s\n' "$flags" | grep -Eq '^(--all|-[A-Za-z]*a[A-Za-z]*)$' && all=--all
+      quorum_git_probe
       # shellcheck disable=SC2086  # $all is one flag or nothing
       if found=$("$BIN/quorum-secrets" staged $all 2>/dev/null); then continue; fi
       [ -n "$found" ] || continue

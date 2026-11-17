@@ -161,3 +161,36 @@ bash_cmd() { jq -n --arg c "$1" '{hook_event_name: "PreToolUse", tool_name: "Bas
   run bash_cmd 'bash -n scripts/x.sh';                                   [ "$status" -eq 0 ]
   run bash_cmd 'echo a\ b push unlocked';                                [ "$status" -eq 0 ]
 }
+
+@test "a root with a space and quotes still blocks an edit to the check script" {
+  R="$BATS_TEST_TMPDIR/a b'c\"d"
+  mkdir -p "$R"; cd "$R"
+  git init -q -b main
+  git -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m init
+  export CLAUDE_PROJECT_DIR="$R"
+  mkdir -p .claude/hooks
+  echo 'exit 0' > .claude/hooks/verify-completion.sh
+  echo '{"protected_paths": "app/locked.py"}' > .claude/quorum.json
+  "$BIN/quorum-state" --task demo init MEDIUM BUILDING
+  "$BIN/quorum-active-task" --set demo
+  run edit app/locked.py;                           [ "$status" -eq 2 ]
+  run edit .claude/hooks/verify-completion.sh;      [ "$status" -eq 2 ]
+  [[ "$output" == *"Task 'demo' is BUILDING"* ]]
+  run edit "$R/.claude/hooks/verify-completion.sh"; [ "$status" -eq 2 ]
+  run edit app/x.py;                                [ "$status" -eq 0 ]
+}
+
+@test "when quorum-active-task --all fails, the separate modes still block an edit to the check script" {
+  T="$BATS_TEST_TMPDIR/plugin"
+  mkdir -p "$T/hooks" "$T/bin"
+  for f in "$HOOKS"/*; do ln -s "$f" "$T/hooks/${f##*/}"; done
+  ln -s "$REPO_ROOT/libexec" "$T/libexec"
+  for f in "$BIN"/*; do [ "${f##*/}" = quorum-active-task ] || ln -s "$f" "$T/bin/${f##*/}"; done
+  export ALL_LOG="$BATS_TEST_TMPDIR/all.log"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "${1:-default}" >> "$ALL_LOG"\n[ "${1:-}" != --all ] || exit 1\nexec "%s/bin/quorum-active-task" "$@"\n' "$REPO_ROOT" > "$T/bin/quorum-active-task"
+  chmod +x "$T/bin/quorum-active-task"
+  run bash -c 'jq -n --arg p "$1" '\''{tool_name: "Edit", tool_input: {file_path: $p}}'\'' | "$2/hooks/protect-checks.sh"' _ .claude/hooks/verify-completion.sh "$T"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"BLOCKED BY QUORUM"* ]]
+  grep -qx -- --all "$ALL_LOG"
+}

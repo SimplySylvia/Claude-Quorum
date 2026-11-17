@@ -31,6 +31,10 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 BIN="$HERE/../bin"
 # shellcheck source=hooks/shell-words.sh
 . "$HERE/shell-words.sh"
+# shellcheck source=hooks/task-context.sh
+. "$HERE/task-context.sh"
+# shellcheck source=libexec/git-probe.sh
+. "$HERE/../libexec/git-probe.sh"
 
 input=$(cat 2>/dev/null || true)
 tool=$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null) || exit 0
@@ -49,13 +53,15 @@ if [ "$(printf '%s' "$input" | jq -r '.agent_type // empty' 2>/dev/null)" = "quo
   exit 2
 fi
 
-task=$("$BIN/quorum-active-task" 2>/dev/null) || exit 0
-status=$("$BIN/quorum-state" --task "$task" get status 2>/dev/null) || exit 0
+quorum_git_probe
+task_context "$BIN"
+task=$TASK_SLUG; [ -n "$task" ] || exit 0
+status=$(task_state "$task" get status 2>/dev/null) || exit 0
 case "$status" in BUILDING|IN_REVIEW) ;; *) exit 0 ;; esac
-CODE=$("$BIN/quorum-active-task" --code 2>/dev/null) || exit 0
+CODE=$TASK_CODE; [ -n "$CODE" ] || exit 0
 
 SPEC=""
-[ -z "$("$BIN/quorum-state" --task "$task" get base_sha 2>/dev/null)" ] || SPEC=".tasks/$task/rd.md .tasks/$task/eval.md"
+[ -z "$(task_state "$task" get base_sha 2>/dev/null)" ] || SPEC=".tasks/$task/rd.md .tasks/$task/eval.md"
 PROTECTED="$SPEC .claude/hooks/verify-completion.sh .claude/settings.json .claude/settings.local.json .claude/quorum.json
 .github/workflows/* .gitlab-ci.yml .circleci/* .buildkite/* .husky/* .pre-commit-config.yaml lefthook.yml .lefthook.yml
 tsconfig*.json jsconfig.json .eslintrc .eslintrc.* eslint.config.* .eslintignore .prettierrc .prettierrc.* prettier.config.*
@@ -69,7 +75,7 @@ if [ -f "$CODE/.claude/quorum.json" ]; then
   x=$(jq -r '.protected_paths // empty' "$CODE/.claude/quorum.json" 2>/dev/null); [ -z "$x" ] || extra="$extra,$x"
 fi
 PROTECTED="$PROTECTED $(printf '%s' "$extra" | tr ',' ' ')"
-unlocked=$("$BIN/quorum-state" --task "$task" get unlocked 2>/dev/null || true)
+unlocked=$(task_state "$task" get unlocked 2>/dev/null || true)
 
 # glob_match PATH GLOB: a glob with a / matches the whole relative path; one without matches the file name.
 # shellcheck disable=SC2254  # the glob is meant to match as a glob
@@ -113,7 +119,7 @@ case "$tool" in
     path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
     path=${path//\\//}
     if rel=$(protected "$path"); then block "$tool $rel is a protected check file."; fi
-    MAIN=$("$BIN/quorum-active-task" --main 2>/dev/null) || MAIN=$CODE
+    MAIN=${TASK_MAIN:-$CODE}
     if [ -f "$MAIN/.claude/quorum.json" ] && jq -e '.pattern_rules | length > 0' "$MAIN/.claude/quorum.json" >/dev/null 2>&1; then
       rel=$path; rel=${rel#"$CODE"/}; rel=${rel#"$(pwd -P)"/}; rel=${rel#"$(pwd)"/}; rel=${rel#"$MAIN"/}
       text=$(printf '%s' "$input" | jq -r '.tool_input.new_string // .tool_input.content // .tool_input.new_source // empty')

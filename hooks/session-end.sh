@@ -12,12 +12,15 @@ set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 BIN="$HERE/../bin"
+# shellcheck source=libexec/git-probe.sh
+. "$HERE/../libexec/git-probe.sh"
 
 input=$(cat 2>/dev/null || true)
 session=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null) || exit 0
 printf '%s' "$session" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_-]*$' || exit 0
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then cd "$cwd" 2>/dev/null || exit 0; fi
+quorum_git_probe
 MAIN=$("$BIN/quorum-active-task" --main 2>/dev/null) || exit 0
 if [ -f "$MAIN/.tasks/.map-sessions/$session" ]; then "$BIN/quorum-map" leave "$session" >/dev/null 2>&1 || true; fi
 if [ -f "$MAIN/.tasks/.run-sessions/$session" ]; then "$BIN/quorum-run" leave "$session" >/dev/null 2>&1 || true; fi

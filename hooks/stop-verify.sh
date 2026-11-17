@@ -21,6 +21,10 @@ set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 BIN="$HERE/../bin"
+# shellcheck source=hooks/task-context.sh
+. "$HERE/task-context.sh"
+# shellcheck source=libexec/git-probe.sh
+. "$HERE/../libexec/git-probe.sh"
 MAX_BLOCKS=3
 
 input=$(cat 2>/dev/null || true)
@@ -32,9 +36,14 @@ esac
 
 cwd=$(printf '%s' "$input" | jq -r '.cwd // ""' 2>/dev/null || true)
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then cd "$cwd" || exit 0; fi
-ROOT=$("$BIN/quorum-active-task" --root 2>/dev/null) || ROOT=${CLAUDE_PROJECT_DIR:-$(pwd)}
-CODE=$("$BIN/quorum-active-task" --code 2>/dev/null) || CODE=$ROOT
+orig=${CLAUDE_PROJECT_DIR:-}
+quorum_git_probe
+task_context "$BIN"
+ROOT=${TASK_ROOT:-${CLAUDE_PROJECT_DIR:-$(pwd)}}
+CODE=${TASK_CODE:-$ROOT}
 export CLAUDE_PROJECT_DIR="$ROOT"
+# quorum-state gets the root it would resolve under this export: the same ROOT.
+TASK_ROOT=$ROOT
 [ -f "$ROOT/.claude/hooks/verify-completion.sh" ] || [ -f "$CODE/.claude/hooks/verify-completion.sh" ] || exit 0
 
 task=""
@@ -45,11 +54,17 @@ if [ "$event" = SubagentStop ] && [ -f "$FIX_MARKER" ]; then
   session=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null || true)
   if [ -z "$task" ] || [ ! -f "$ROOT/.tasks/$task/state.md" ]; then task=""
   elif [ -n "$writer" ] && [ -n "$session" ] && [ "$writer" != "$session" ]; then task=""
-  elif [ "$("$BIN/quorum-state" --task "$task" get status 2>/dev/null)" != FIXING ]; then task=""
+  elif [ "$(task_state "$task" get status 2>/dev/null)" != FIXING ]; then task=""
   fi
 fi
-if [ -z "$task" ]; then task=$("$BIN/quorum-active-task" 2>/dev/null) || exit 0; fi
-state() { "$BIN/quorum-state" --task "$task" "$@"; }
+if [ -z "$task" ]; then
+  # When CLAUDE_PROJECT_DIR already was the root, the export changed nothing, so the slug read above still holds.
+  if [ -n "$orig" ] && [ "$orig" = "$ROOT" ]; then task=$TASK_SLUG
+  else task=$("$BIN/quorum-active-task" 2>/dev/null) || exit 0
+  fi
+  [ -n "$task" ] || exit 0
+fi
+state() { task_state "$task" "$@"; }
 status=$(state get status 2>/dev/null) || exit 0
 case "$status" in BUILDING|IN_REVIEW|ESCALATED|FIXING) ;; *) exit 0 ;; esac
 if [ "$event" = Stop ] && [ -n "$(state get pending_findings 2>/dev/null)" ]; then exit 0; fi

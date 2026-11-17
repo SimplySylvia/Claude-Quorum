@@ -18,6 +18,10 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 BIN="$HERE/../bin"
 # shellcheck source=hooks/shell-words.sh
 . "$HERE/shell-words.sh"
+# shellcheck source=hooks/task-context.sh
+. "$HERE/task-context.sh"
+# shellcheck source=libexec/git-probe.sh
+. "$HERE/../libexec/git-probe.sh"
 
 input=$(cat 2>/dev/null || true)
 tool=$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null) || exit 0
@@ -26,11 +30,13 @@ session=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)
 printf '%s' "$session" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_-]*$' || exit 0
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then cd "$cwd" 2>/dev/null || exit 0; fi
-MAIN=$("$BIN/quorum-active-task" --main 2>/dev/null) || exit 0
+quorum_git_probe
+task_context "$BIN"
+MAIN=$TASK_MAIN; [ -n "$MAIN" ] || exit 0
 marker="$MAIN/.tasks/.map-sessions/$session"
 [ -f "$marker" ] || exit 0
 map=$(head -n 1 "$marker" | tr -d '[:space:]')
-CODE=$("$BIN/quorum-active-task" --code 2>/dev/null) || CODE=$MAIN
+CODE=${TASK_CODE:-$MAIN}
 
 phys() { (cd "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1"; }
 TREES="$MAIN $CODE $(phys "$MAIN") $(phys "$CODE")"
