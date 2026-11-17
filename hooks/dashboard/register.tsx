@@ -1076,7 +1076,7 @@ export const register: Register = (on, options) => {
               {(['builder', 'prover'] as const).map(role => {
                 const agent = crew.findLast(a => a.role === role)
                 const label = role === 'builder' ? 'Builder' : 'Prover'
-                if (!agent) return line(role, 'waiting', label, role === 'builder' ? 'implements plan.md' : 'runs every check after the build')
+                if (!agent) return line(role, 'waiting', label, role === 'builder' ? 'implements plan.md' : 'runs checks, not final-only')
                 return line(role, agent.endedAt === null ? 'running' : 'done', label, `${agent.endedAt === null ? 'running' : 'took'} ${seconds(agent, clockNow)}`)
               })}
               {codeTree(null)}

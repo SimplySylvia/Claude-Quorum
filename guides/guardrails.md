@@ -5,8 +5,9 @@
 ## Guardrails
 
 - **Proof before done.** The Stop hook blocks finishing during a task until the repo's fast checks pass; after 3
-  failures in a row it lets you go and marks the task `ESCALATED`. A task can't be marked `READY` or
-  `AWAITING-HUMAN` without the prover's `proof-final.md`, run at the current commit, with no failed check.
+  failures in a row it lets you go and marks the task `ESCALATED`. A stop with nothing changed since the checks
+  last passed is skipped, without running them again. A task can't be marked `READY` or `AWAITING-HUMAN` without
+  the prover's `proof-final.md`, run at the current commit, with no failed check.
 - **Root cause before fixes.** The builder writes each new test first and shows it failing before the code that
   makes it pass. When a check fails, it follows the `debugging` skill: reproduce, read the whole error, check what
   changed, and name the cause with evidence before changing code. It also checks each review finding against the
@@ -67,4 +68,12 @@
   and offers to end them.
 - **Accessibility checks are partial.** Automated scans find only part of WCAG 2.2; the a11y auditor lists the
   rest under "Needs a human". A clean report isn't a conformance claim.
-- **`verify-completion.sh` should stay fast.** The Stop hook runs it on every finish; put slow suites in `eval.md`.
+- **`verify-completion.sh` should stay fast.** The Stop hook runs it on each finish where something it depends on
+  changed since it last passed; put slow suites in `eval.md`, and mark the slowest `Final proof only.` so only the
+  final proof runs them.
+- **The stop check is skipped when nothing in its key changed.** The key covers `HEAD`, the staged and unstaged
+  diffs, the untracked files outside `.tasks/`, the verify script, `verify_timeout_s` and the plugin version, and a
+  pass stores it in `.tasks/<task>/verify-pass`. It doesn't cover ignored files or tool versions, so a change to
+  either alone doesn't rerun the checks. A dirty submodule, a nested repo or an odd untracked name (a newline or a
+  leading quote in it) turns the skip off, and the checks run every time. The `verify-pass` stamp is trusted the
+  way `state.md` is: an agent that can write `.tasks/` can already change the task's status.

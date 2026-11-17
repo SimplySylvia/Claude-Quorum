@@ -176,7 +176,7 @@ def draw_map(theme):
                                                          "--worktree: in its own worktree",
                                                          "4+ steps: a builder per step"])
     s.row(CONTENT, t + 28, [("builder", "test first; checks locked, must pass", False),
-                            ("prover", "runs every eval.md check", False)])
+                            ("prover", "runs eval.md checks, not final-only", False)])
 
     # 3–4 · Review loop: reviewers in parallel, the voter, and the builder's fixes.
     t = band("review", "4–5", "Review loop", "/quorum:review-loop", 252,

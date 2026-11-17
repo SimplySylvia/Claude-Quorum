@@ -18,7 +18,8 @@ doesn't help. Quorum has one mechanism for each:
   builder's reasoning, and each looks from its own angle: logic, architecture, repo patterns, docs, tests, or
   accessibility.
 - **It calls the work done too early.** A Stop hook won't let a task finish until the repo's checks pass, and the
-  prover runs every check in the spec and shows the output, including that each new test fails without the fix.
+  prover runs the checks in the spec (the slowest, marked `Final proof only.`, at the final proof) and shows the
+  output, including that each new test fails without the fix.
 - **Reviews never end.** Builder and reviewer argue for dozens of rounds over the same nits. Quorum caps the loop
   at 3 rounds, reviews only new lines after round 1, limits nits to 2, and runs a voter that drops weak findings.
 - **Lessons don't stick.** A bug fixed today comes back next week. Quorum turns it into the cheapest thing that

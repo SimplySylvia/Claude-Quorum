@@ -8,7 +8,8 @@ Hooks read JSON on stdin, so tests feed fixture hook input and check the exit co
 
 ```bash
 bats -r tests/                                # every hook, bin/ helper, and the stage steps
-shellcheck hooks/*.sh bin/* evals/run.sh evals/_fixture/make.sh evals/*/scaffold.sh assets/src/*.sh
+assets/src/run-bats.sh -r tests/              # bats in parallel when GNU parallel is installed
+shellcheck hooks/*.sh bin/* libexec/* evals/run.sh evals/_fixture/make.sh evals/*/scaffold.sh assets/src/*.sh
 claude plugin validate --strict .             # manifest, paths, marketplace, the dashboard module; warnings fail
 claude plugin test .                          # the dashboard's tests in tests/dashboard/, against the engine
 ```

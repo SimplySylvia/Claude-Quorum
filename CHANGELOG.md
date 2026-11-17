@@ -37,6 +37,22 @@ copy with `/plugin marketplace update`.
   short sha when the list is older than HEAD, and an important finding awaiting re-review counted as
   `1 awaiting re-review`), and the band adds `12 files` once the band itself is 110 columns or more, which a
   docked pane can prevent.
+- **The stop check skips an unchanged tree.** After a pass, the Stop hook writes a key for the tree the checks ran
+  in to `.tasks/<task>/verify-pass`: `HEAD`, the staged and unstaged diffs, the untracked files outside `.tasks/`,
+  the verify script, `verify_timeout_s` and the plugin version. A later stop with the same key exits at once without
+  running the checks, and any failure deletes the stamp. Ignored files and tool versions aren't in the key; a dirty
+  submodule, a nested repo or an odd untracked name turns the skip off.
+- **`Final proof only.` rows.** An `eval.md` row whose Passes when starts with `Final proof only.` is left out of
+  the build proof, which reports it `SKIPPED` with Evidence `final proof only`, and the final proof runs it:
+  `quorum-validate proof` fails a `proof-final.md` that doesn't report it `PASS`. The dashboard's waiting Prover
+  row reads `runs checks, not final-only`.
+- **Helpers that share their work.** `quorum-active-task --all` prints the slug, root, code and main trees on four
+  lines from one `rev-parse` per directory, `quorum-state --task SLUG --root DIR` takes the root as given, and the
+  helpers and hooks find a working git once and export it to their children as `QUORUM_GIT_USE` and
+  `QUORUM_GIT_PROBE`. The five PreToolUse hooks now start at most 25 git processes for one Bash call.
+- **`assets/src/run-bats.sh`** runs bats with `--jobs` set to the CPU count when GNU parallel is installed, and
+  plain bats otherwise. **`assets/src/bench-hooks.sh`** counts the PreToolUse hooks' git processes and times them
+  for one Bash call, on this checkout or another one with `--plugin DIR`.
 
 ### Changed
 
@@ -48,6 +64,23 @@ copy with `/plugin marketplace update`.
   The section's button reads the rounds in words.
 - **The Now card's tree holds the whole change.** It shows the task's changed files, not only the files with
   findings; a `/quorum:review` tree still shows only the findings' files.
+- **The checks lock catches more spellings of an unlock.** Besides the plain form, it blocks
+  `quorum-state … push|set|clear unlocked` given `--root`, a `--task` or `--root` value written as `$(…)` or in
+  backticks, a backslash-escaped space, a call split over `\`-newline continuations, a `bash`, `sh` or `exec`
+  prefix, or a backslash in the command's name.
+
+### Fixed
+
+- **`quorum-findings scope` matches absolute paths.** A finding cited with an absolute path (the repo's root, its
+  `pwd -P` form, a task worktree's, or a Windows `C:\…`, `C:/…` or Git Bash `/c/…` path, the drive letter in either
+  case) used to be dropped as outside the change; it's now matched like the relative path. A cited file's
+  lint-ignore line is read from the repo root, not the current directory.
+
+### Upgrading from 0.11
+
+Nothing in an existing repo has to change: its `eval.md`, `verify-completion.sh` and tasks keep working, and the
+stop skip and the shared git probe need no setup. To opt in, mark slow `eval.md` rows `Final proof only.` and run
+bats with `assets/src/run-bats.sh`.
 
 ## 0.11.3 (2026-11-15)
 

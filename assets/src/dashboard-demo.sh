@@ -79,7 +79,7 @@ cat > "$task/eval.md" <<'MD'
 # Eval: Export the sales rows as CSV
 
 ## Fast checks
-Run by the Stop hook on every finish: `bash .claude/hooks/verify-completion.sh`.
+Run by the Stop hook on each finish, unless nothing they depend on has changed since they last passed: `bash .claude/hooks/verify-completion.sh`.
 
 ## Task checks
 | # | Requirement | Command | Passes when |
