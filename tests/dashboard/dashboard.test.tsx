@@ -1433,7 +1433,14 @@ describe('findings tree helpers', () => {
     expect(row(build, 'src/two.ts').label).toBe('src/two.ts, step 1 built, step 2 not built yet, modified, 5 lines added')
     expect(row(build, 'new.ts').label).toBe('new.ts, step 1 built, renamed from old.ts, 2 lines added, 2 removed')
     // An unsliced build with its proof: every planned file is built. With no plan the progress column is gone.
-    expect(rowText(row(treeRows(null, opts({ change: change(files, { built: [], allBuilt: true }) })), 'src/c.ts'))).toMatch(/^✓ A /)
+    const unsliced = treeRows(null, opts({ change: change(files, { built: [], allBuilt: true }) }))
+    expect(rowText(row(unsliced, 'src/b.ts'))).toMatch(/^✓ A /)
+    // A planned file its built step hasn't changed yet stays ○, sliced or not: ✓ needs the change too.
+    for (const rows of [unsliced, treeRows(null, opts({ change: change(files, { built: [1, 2] }) }))]) {
+      expect(rowText(row(rows, 'src/c.ts'))).toMatch(/^○ A /)
+      expect(part(row(rows, 'src/c.ts'), '○')?.dim).toBe(true)
+      expect(row(rows, 'src/c.ts').label).toBe('src/c.ts, step 2 built, not changed yet, added')
+    }
     const noPlan = treeRows(null, opts({ change: change(files.map(f => ({ ...f, steps: [] })), { hasPlan: false }) }))
     expect(rowText(row(noPlan, 'src/a.ts'))).toMatch(/^M {5}a\.ts + \+86 −3 {3}$/)
     expect(row(noPlan, 'src/d.ts').label).toBe('src/d.ts, modified, 1 line added, 1 removed')
@@ -1557,6 +1564,13 @@ describe('findings tree helpers', () => {
     expect(voted?.parts[3]?.[0]?.dim).toBe(true)
     const clean = footprint(list(files), [{ n: 1, findings: { important: 1, nit: 0, preExisting: 0 }, candidates: 1 }, { n: 2, findings: { important: 0, nit: 0, preExisting: 0 }, candidates: 0 }], head)
     expect(items(clean)?.at(-1)).toBe('no findings')
+    // A kept IMPORTANT awaiting re-review is counted as that, as the tree and key count it, not as important.
+    const rounds1 = [{ n: 1, findings: { important: 2, nit: 1, preExisting: 0 }, candidates: 3 }]
+    const awaits = footprint(list(files), rounds1, head, 1)
+    expect(items(awaits)).toEqual(['3 files', '+98 −3', '1 important', '1 awaiting re-review', '1 nit'])
+    expect(awaits?.words).toEqual(['3 files', '98 lines added, 3 removed', '1 important', '1 awaiting re-review', '1 nit'])
+    expect(awaits?.parts[3]?.[0]?.color).toBe('warning')
+    expect(items(footprint(list(files), rounds1, head, 2))).toEqual(['3 files', '+98 −3', '2 awaiting re-review', '1 nit'])
     expect(clean?.parts.at(-1)?.[0]?.color).toBe('success')
     // An old list says when it was recorded.
     const old = footprint(list(files), [], `def5678${'0'.repeat(33)}`)
@@ -2297,14 +2311,15 @@ test('a quorum-files command refreshes the dashboard', async ($, on) => {
   world(on, files)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   let pane = await $.ui.mount(ON_TERMINAL)
-  expect(await rowOf(pane, `${TREE}src/a.ts`)).toMatch(/^✓ A {5}a\.ts +s1$/)
+  // Step 1 is built but a.ts isn't changed yet: ○, not ✓.
+  expect(await rowOf(pane, `${TREE}src/a.ts`)).toMatch(/^○ A {5}a\.ts +s1$/)
   expect(await pane.find({ type: 'Button', key: `${TREE}src/b.ts` })).toBeUndefined()
   await pane.unmount()
 
   files[LIST] = filesTsv([fileRow('A', '12', '0', 'src/a.ts', '1'), fileRow('M', '1', '1', 'src/b.ts')])
   await $.tool.call({ tool: 'Bash', command: 'quorum-files record' })
   pane = await $.ui.mount(ON_TERMINAL)
-  expect(await rowOf(pane, `${TREE}src/a.ts`)).toMatch(/\+12 s1$/)
+  expect(await rowOf(pane, `${TREE}src/a.ts`)).toMatch(/^✓ A {5}a\.ts +\+12 s1$/)
   expect(await rowOf(pane, `${TREE}src/b.ts`)).toMatch(/^\* M {5}b\.ts +unplanned +\+1 −1 {3}$/)
   await pane.unmount()
 })
@@ -2358,10 +2373,13 @@ test('a file row reads progress, git letter, name, line counts, step, and marks,
   expect(await rowOf(pane, `${TREE}src/d.ts`)).toMatch(/^M {5}d\.ts +\+1 −1 {3}$/)
   await pane.unmount()
 
-  // A 3-step plan is built in one go: with no built_steps, its proof-build.md marks every planned file built.
+  // A 3-step plan is built in one go: with no built_steps, its proof-build.md marks every planned file built, and
+  // every changed one ✓. The planned-only c.ts stays ○.
   await reload($, files, { ...task({ status: 'BUILDING' }), [PLAN]: planMd(3), '.tasks/export-csv/proof-build.md': PROOF })
   pane = await $.ui.mount(ON_TERMINAL)
-  for (const f of ['src/a.ts', 'src/b.ts', 'src/c.ts', 'img/logo.png']) expect(await rowOf(pane, `${TREE}${f}`)).toMatch(/^✓ /)
+  for (const f of ['src/a.ts', 'src/b.ts', 'img/logo.png']) expect(await rowOf(pane, `${TREE}${f}`)).toMatch(/^✓ /)
+  expect(await rowOf(pane, `${TREE}src/c.ts`)).toMatch(/^○ /)
+  expect((await pane.find({ type: 'Button', key: `${TREE}src/c.ts` }))?.props.label).toBe('src/c.ts, step 2 built, not changed yet, added')
   expect(await rowOf(pane, `${TREE}src/d.ts`)).toMatch(/^\* /)
   await pane.unmount()
   // A 4-step plan is sliced: its steps are built only once built_steps names them.
@@ -2728,9 +2746,9 @@ test('a kept important finding whose file changed since the round shows as await
   // round 1's survivors.md was written 5 seconds before the list was recorded.
   const mtimes: Record<string, number> = { [R1]: VOTED_BEFORE, [R2]: VOTED_BEFORE }
   const kept = survivorsMd(impAt('src/a.ts:3'))
-  const task = (rounds: (string | null)[], fix: string) => {
+  const task = (rounds: (string | null)[], fix: string, status?: string) => {
     const t: Record<string, string> = {
-      ...inRounds(rounds, { extra: builtSteps(1) }),
+      ...inRounds(rounds, { status, extra: builtSteps(1) }),
       [PLAN]: planMd(1),
       [LIST]: filesTsv([fileRow('M', '4', '1', 'src/a.ts', '1', fix), fileRow('M', '1', '0', 'src/b.ts', '1', '0')], { since: 'def456' }),
     }
@@ -2757,6 +2775,15 @@ test('a kept important finding whose file changed since the round shows as await
   expect((await pane.find({ type: 'Text', text: /^↻1$/ }))?.props.color).toBe('warning')
   // During round 1's fix, the reviewer that raised it says so, with the • glyph.
   expect(await logic(pane)).toMatch(/^• Logic & edge cases\s+↻1 found ✗1$/)
+  // The footprint counts it as awaiting re-review too, not as important.
+  expect(await footprintOf(pane)).toBe('2 files · +5 −1 · 1 awaiting re-review')
+  expect((await pane.find({ type: 'Text', text: /^1 awaiting re-review$/ }))?.props.color).toBe('warning')
+  await pane.unmount()
+
+  // So does the folded Files row from Blind test on.
+  await reload($, files, task([kept], '1', 'CONVERGED'))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await label(pane, FILES_ROW)).toBe('Files, 2 files, 5 lines added, 1 removed, 1 awaiting re-review, folded')
   await pane.unmount()
 
   // Round 2 starts reviewing with no vote yet: the voter row keeps round 1's verdict, labelled, and the reviewer
@@ -2773,6 +2800,7 @@ test('a kept important finding whose file changed since the round shows as await
   expect(await rowOf(pane, `${TREE}src/a.ts:3#0`)).toMatch(/^\s*✗ :3 /)
   expect(await voter(pane)).toMatch(/^✗ Verifier vote\s+kept ✗1 → fix round$/)
   expect(await logic(pane)).toMatch(/^✗ Logic & edge cases\s+✗1$/)
+  expect(await footprintOf(pane)).toBe('2 files · +5 −1 · 1 important')
   expect(await pane.find({ type: 'Text', text: /awaiting re-review/ })).toBeUndefined()
   await pane.unmount()
   await reload($, files, task([kept, null], '0'))

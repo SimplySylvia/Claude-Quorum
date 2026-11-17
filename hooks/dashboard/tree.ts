@@ -350,10 +350,12 @@ export const iconsOn = (option: unknown, surface: string) => option === 'nerd' &
 
 type Progress = '✓' | '○' | '*' | ''
 
-// A file's progress against the plan: `✓` when every step that names it is built, `○` when one isn't yet, `*` when
-// no step names it; blank for a file the list doesn't hold, or a task with no plan.
+// A file's progress against the plan: `✓` when every step that names it is built and the file has changed, `○` when
+// one isn't built yet or the file is only planned, `*` when no step names it; blank for a file the list doesn't hold,
+// or a task with no plan.
 const progressOf = (c: ChangedFile | null, ch: TreeChange | null): Progress =>
-  !c || !ch?.hasPlan ? '' : c.steps.length === 0 ? '*' : ch.allBuilt || c.steps.every(n => ch.built.includes(n)) ? '✓' : '○'
+  !c || !ch?.hasPlan ? '' : c.steps.length === 0 ? '*'
+    : c.added !== null && (ch.allBuilt || c.steps.every(n => ch.built.includes(n))) ? '✓' : '○'
 
 // The lead marks, in the order the key names them.
 const PROGRESS = [
@@ -384,7 +386,8 @@ const isBinary = (c: ChangedFile) => c.added === 'bin' || c.removed === 'bin'
 const countParts = (c: ChangedFile | null): TreePart[] =>
   !c || c.added === null ? [] : isBinary(c) ? [{ text: 'bin' }] : lineParts(lines(c.added), lines(c.removed))
 
-// A file's columns in words, for its label: progress, letter, then counts.
+// A file's columns in words, for its label: progress, letter, then counts. A file whose steps are all built but that
+// isn't changed yet says so with its progress (`step 2 built, not changed yet`), since that's why it's `○`.
 function fileWords(c: ChangedFile, ch: TreeChange): string[] {
   const p = progressOf(c, ch)
   const built = c.steps.filter(n => ch.allBuilt || ch.built.includes(n))
@@ -393,7 +396,7 @@ function fileWords(c: ChangedFile, ch: TreeChange): string[] {
     : [...(built.length > 0 ? [`${stepList(built)} built`] : []), ...(waiting.length > 0 ? [`${stepList(waiting)} not built yet`] : [])]
   const letter = c.letter === 'R' && c.oldPath ? `renamed from ${c.oldPath}` : LETTER_WORD[c.letter]
   const counts = c.added === null ? 'not changed yet' : isBinary(c) ? 'binary' : lineWords(lines(c.added), lines(c.removed))
-  return [...progress, letter, counts]
+  return c.added === null && p === '○' && waiting.length === 0 ? [...progress, counts, letter] : [...progress, letter, counts]
 }
 
 // ---- The tree
@@ -707,8 +710,10 @@ export function awaitingFrom(reply: string, view: FindingsView | null, rereview:
 
 // The Task card's footprint line once the build has a base: the files changed and their lines (planned-only rows
 // and binary lines left out), the latest voted round's kept findings by severity (or `no findings`, or `not
-// reviewed yet`), and `as of` the list's commit when HEAD has moved on. Each item's parts, and its words for a label.
-export function footprint(list: FileList, rounds: Round[], head: string): { files: number; parts: TreePart[][]; words: string[] } | null {
+// reviewed yet`), and `as of` the list's commit when HEAD has moved on. `awaiting` of its IMPORTANT findings are
+// awaiting re-review (awaitingOf), and read so, as the tree and key read them. Each item's parts, and its words for
+// a label.
+export function footprint(list: FileList, rounds: Round[], head: string, awaiting = 0): { files: number; parts: TreePart[][]; words: string[] } | null {
   if (list.base === '') return null
   const rows = list.files.filter(f => f.added !== null)
   const added = rows.reduce((n, f) => n + lines(f.added), 0)
@@ -720,7 +725,9 @@ export function footprint(list: FileList, rounds: Round[], head: string): { file
   if (!voted) items.push(item('not reviewed yet', undefined, { dim: true }))
   else if (voted.important + voted.nit + voted.preExisting === 0) items.push(item('no findings', undefined, { color: 'success' }))
   else {
-    if (voted.important) items.push(item(`${voted.important} important`, undefined, { color: 'error' }))
+    const waiting = Math.min(awaiting, voted.important)
+    if (voted.important > waiting) items.push(item(`${voted.important - waiting} important`, undefined, { color: 'error' }))
+    if (waiting) items.push(item(`${waiting} awaiting re-review`, undefined, { color: 'warning' }))
     if (voted.nit) items.push(item(plural(voted.nit, 'nit'), undefined, { dim: true }))
     if (voted.preExisting) items.push(item(`${voted.preExisting} pre`, `${voted.preExisting} pre-existing`, { dim: true }))
   }

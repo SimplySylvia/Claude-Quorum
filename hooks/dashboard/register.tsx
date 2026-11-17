@@ -632,7 +632,7 @@ export const register: Register = (on, options) => {
     const progress = [reviewerProgress(t.now), checkProgress(t.checks, t.proof !== null)].filter(Boolean).join(' · ')
     const command = nextCommand(nextFor(t, known))
     // The recorded change's file count, once the build has a base (the Task card's footprint line).
-    const fp = t.files ? footprint(t.files, t.rounds, t.head) : null
+    const fp = t.files ? footprint(t.files, t.rounds, t.head, awaitingOf(t.codeView, t.rereview)) : null
 
     return (
       <Box flexDirection="row" gap={2}>
@@ -933,7 +933,7 @@ export const register: Register = (on, options) => {
     const codeTree = (view: FindingsView | null) => findingsTree(t.slug, view, t.risk === 'HIGH', treeWidth, codeChange, view ? undefined : buildHeader)
     // The footprint: the change's files, lines, and latest verdict, once the build has a base. Each item is its own
     // Text after a ` · `, so a wrapped line breaks only between items.
-    const fp = t.files ? footprint(t.files, t.rounds, t.head) : null
+    const fp = t.files ? footprint(t.files, t.rounds, t.head, awaitingOf(t.codeView, t.rereview)) : null
     const fpItems = (key: string) => (fp?.parts ?? []).map((parts, i) => (
       <Text key={`${key}-${i}`}>{i > 0 ? <Text dimColor> · </Text> : null}{partsOf(`${key}-${i}`, parts)}</Text>
     ))

@@ -27,14 +27,16 @@ copy with `/plugin marketplace update`.
 - **The file tree in every stage.** In Plan the tree shows the files the plan's steps name
   (`4 steps · 9 files, 3 new`), in Build the change so far (`5 of 9 planned files changed · 1 unplanned`), and in
   Review the same tree with the findings. From Blind test on it folds to one `▸ Files` row that a press opens. Each
-  file row reads its plan progress (`✓` built, `○` not yet, `*` unplanned), its git letter, its line counts
-  (`+86 −3`), and its step (`s3`), in columns that line up. Past 15 files, clean folders start folded.
+  file row reads its plan progress (`✓` built and changed, `○` not yet, `*` unplanned), its git letter, its line
+  counts (`+86 −3`), and its step (`s3`), in columns that line up. Past 15 files, clean folders start folded.
 - **`↻` awaiting re-review.** An important finding whose file the round's fix changed shows `↻` until a later
   round reviews it, and the voter row reads `→ re-review`; while the next round reviews, it keeps that verdict as
   `round 1: kept ↻1 → re-review`.
 - **The footprint line and the band's file count.** Once the build starts, the Task card reads
   `12 files · +268 −11 · 1 important · 1 nit · 1 pre` (or `not reviewed yet`, or `no findings`, with `as of` a
-  short sha when the list is older than HEAD), and the band adds `12 files` at 110 columns or more.
+  short sha when the list is older than HEAD, and an important finding awaiting re-review counted as
+  `1 awaiting re-review`), and the band adds `12 files` once the band itself is 110 columns or more, which a
+  docked pane can prevent.
 
 ### Changed
 

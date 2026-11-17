@@ -15,12 +15,16 @@ While a task is active, Quorum shows where it is without you asking:
 finished with its PR open.</sub>
 
 - **The band above the prompt:** the task's status, a dot per stage, the round's progress, the change's file count
-  (`12 files`) at 110 columns or more, anything wrong in red, and **▶ Next** and **Dashboard** buttons.
+  (`12 files`) once the band is 110 columns wide or more, anything wrong in red, and **▶ Next** and **Dashboard**
+  buttons. The 110 columns are the band's own width, not the terminal's, so a docked pane narrows the band and can
+  hide the count; undock or close the pane, or widen the terminal, to see it.
 - **The pane,** which opens by itself during a task (`/quorum-dashboard` shows or hides it):
   - **Task card:** title, goal, status, a stage stepper, and the PR once there is one. Once the build has started,
     a footprint line sums up the change: `12 files · +268 −11 · 1 important · 1 nit · 1 pre`, naming the findings
-    the latest voted code review round kept. It reads `no findings` after a vote that kept none, `not reviewed yet`
-    before any vote, and adds `as of a1b2c3d` when the list was recorded at an older commit than the current one.
+    the latest voted code review round kept. An important finding awaiting re-review counts as
+    `1 awaiting re-review`, as the tree shows it, not as important. It reads `no findings` after a vote that kept
+    none, `not reviewed yet` before any vote, and adds `as of a1b2c3d` when the list was recorded at an older commit
+    than the current one. The folded Files row (below) has the same summary.
   - **Now card:** what the current stage is doing, such as each reviewer's progress and what it found, the voter's
     verdict and the next step, and, from Plan on, a [tree of the task's changed files](#the-file-tree) with the
     findings the voter kept under their files. Its border turns amber when it's your move and red when the task is
@@ -62,9 +66,11 @@ at their save points (see [Repository layout](reference.md) in the reference), s
 A file row reads, left to right: progress, the git letter, the name, line counts, the step, and the finding marks,
 such as `✓ M report.py  +86 −3  s3  ✗1`.
 
-- **Progress** against the plan: `✓` its step is built, `○` its step isn't built yet, and `*` changed though no
-  step names it, with the word `unplanned` beside the name. A file several steps name is `✓` only when all of them
-  are built; in a build that isn't sliced into steps, every step counts as built once the build's proof exists. A
+- **Progress** against the plan: `✓` its step is built and the file has changed, `○` its step isn't built yet or
+  the file isn't changed yet (its label reads `step 2 built, not changed yet`), and `*` changed though no step
+  names it, with the word `unplanned` beside the name. A file several steps name is `✓` only when all of them are
+  built and the file has changed; in a build that isn't sliced into steps, every step counts as built once the
+  build's proof exists. A
   task with no plan has no progress column. A second key line names the ones shown:
   `✓ built  ○ not yet  * unplanned`.
 - **The letter:** `M` modified, `A` added, `D` deleted, `R` renamed. It's dim while the file is only planned.
