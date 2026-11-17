@@ -1,0 +1,11 @@
+## Verification Commands
+<!-- Managed by /quorum:init-pipeline. Keep in sync with .claude/hooks/verify-completion.sh, which runs the fast checks. -->
+- **Setup:** none
+- **Build:** none
+- **Typecheck:** none
+- **Lint:** none
+- **Test:** `echo run >> .tasks/runs.log; echo ok`
+- **Dev / start:** none
+
+## Code Review & Verification Standards
+All code reviews, subagent audits, and `/quorum:review-loop` passes MUST strictly follow the domain failure modes, severity tags, and learned rules defined in @REVIEW.md.
