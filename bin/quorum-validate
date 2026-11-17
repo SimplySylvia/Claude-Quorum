@@ -8,7 +8,9 @@
 #                                         and every requirement has a step
 #   quorum-validate [--task SLUG] proof   proof-final.md's ## Requirements table: a verdict for every requirement,
 #                                         each MET with its evidence (PARTIAL, MISSING, and CONTRADICTS fail); and
-#                                         for a bug fix (`bug: true`), a "Bug: VERIFIED" line
+#                                         for a bug fix (`bug: true`), a "Bug: VERIFIED" line; and each eval.md
+#                                         row whose Passes when starts with "Final proof only." reported PASS in
+#                                         the checks table above proof-final.md's first ## heading
 #
 # Prints one line per problem, "ERROR: ..." or "WARN: ...", and exits 1 if there's an ERROR. A requirement is a
 # numbered line under rd.md's "## Requirements"; an eval.md row covers requirement N when its # is N, a letter
@@ -47,6 +49,17 @@ covers() {
   return 1
 }
 
+# eval.md's Task checks: sets header, body (the rows with an id), and ccol and pcol, the Command and Passes when
+# columns found by header (older eval.md files have no Requirement column).
+eval_table() {
+  local rows
+  rows=$(section "$DIR/eval.md" "Task checks" | table)
+  header=$(printf '%s\n' "$rows" | head -n 1)
+  body=$(printf '%s\n' "$rows" | tail -n +2 | awk -F '\t' '$1 != ""')
+  ccol=$(printf '%s\n' "$header" | awk -F '\t' '{ for (i = 1; i <= NF; i++) if (tolower($i) == "command") print i }')
+  pcol=$(printf '%s\n' "$header" | awk -F '\t' '{ for (i = 1; i <= NF; i++) if (tolower($i) ~ /^passes/) print i }')
+}
+
 errors=0
 error() { echo "ERROR: $*"; errors=$((errors + 1)); }
 warn() { echo "WARN: $*"; }
@@ -60,12 +73,7 @@ dups=$(printf '%s\n' "$nums" | sort | uniq -d | tr '\n' ' ')
 case "$what" in
   spec)
     [ -f "$DIR/eval.md" ] || die "no eval.md for task $task"
-    rows=$(section "$DIR/eval.md" "Task checks" | table)
-    header=$(printf '%s\n' "$rows" | head -n 1)
-    body=$(printf '%s\n' "$rows" | tail -n +2 | awk -F '\t' '$1 != ""')
-    # The Command and Passes when columns, by header (older eval.md files have no Requirement column).
-    ccol=$(printf '%s\n' "$header" | awk -F '\t' '{ for (i = 1; i <= NF; i++) if (tolower($i) == "command") print i }')
-    pcol=$(printf '%s\n' "$header" | awk -F '\t' '{ for (i = 1; i <= NF; i++) if (tolower($i) ~ /^passes/) print i }')
+    eval_table
     [ -n "$body" ] || error "eval.md has no rows under ## Task checks"
     [ -n "$ccol" ] && [ -n "$pcol" ] || error "eval.md's Task checks table needs Command and Passes when columns"
     for n in $nums; do
@@ -150,6 +158,26 @@ EOF
         *) error "requirement $n's verdict \"$verdict\" isn't MET, PARTIAL, MISSING, or CONTRADICTS" ;;
       esac
     done
+    # Rows whose Passes when starts with "Final proof only." run only here: the checks table above the first
+    # "## " heading must report each one PASS.
+    if [ -f "$DIR/eval.md" ]; then
+      eval_table
+      if [ -n "$pcol" ]; then
+        finals=$(printf '%s\n' "$body" | awk -F '\t' -v c="$pcol" 'index($c, "Final proof only.") == 1 { print $1 }')
+        checks=$(awk '/^## / { exit } { print }' "$DIR/proof-final.md" | table)
+        rcol=$(printf '%s\n' "$checks" | head -n 1 | awk -F '\t' '{ for (i = 1; i <= NF; i++) if (tolower($i) == "result") { print i; exit } }')
+        while IFS= read -r id; do
+          [ -n "$id" ] || continue
+          row=""
+          [ -z "$rcol" ] || row=$(printf '%s\n' "$checks" | tail -n +2 | awk -F '\t' -v id="$id" '$1 == id { print; exit }')
+          if [ -z "$row" ]; then error "proof-final.md doesn't report row $id, which runs only in the final proof"; continue; fi
+          result=$(printf '%s' "$row" | cut -f"$rcol" | tr -d '*' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+          [ "$result" = PASS ] || error "row $id runs only in the final proof, and proof-final.md reports it $result"
+        done <<EOF
+$finals
+EOF
+      fi
+    fi
     if [ "$("$HERE/quorum-state" --task "$task" get bug 2>/dev/null)" = true ]; then
       bug=$(sed -n 's/^Bug:[[:space:]]*//p' "$DIR/proof-final.md" | head -n 1)
       case "$bug" in

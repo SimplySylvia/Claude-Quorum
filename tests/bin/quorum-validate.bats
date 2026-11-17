@@ -187,3 +187,37 @@ MD
   [[ "$output" == *"ERROR: eval.md row 3b uses grep -P"* ]]
   [ "$(printf '%s\n' "$output" | grep -c '^ERROR')" -eq 2 ]
 }
+
+@test "proof fails when a final-proof-only row was not run in the final proof" {
+  sed -i.bak 's/^| 2 | Fields are quoted .*/&\
+| 2b | Fields are quoted | `bats -r tests\/` | Final proof only. 0 failures |/' .tasks/demo/eval.md
+  grep -qF '| 2b |' .tasks/demo/eval.md || return 1
+  run qv spec; [ "$status" -eq 0 ]; [ -z "$output" ]
+  cat > .tasks/demo/proof-final.md <<'MD'
+Proof: demo at abc1234
+Result: 1 SKIPPED
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| fast | bash .claude/hooks/verify-completion.sh | PASS | "All checks passed." |
+| 1 | export | PASS | 12 rows |
+| 2b | bats -r tests/ | SKIPPED | final proof only |
+
+## Requirements
+| Req | Verdict | Evidence |
+|---|---|---|
+| 1 | MET | rows 1, 1b pass; `app/report.py:41` |
+| 2 | MET | row 2 passes; `app/report.py:44` |
+| 3 | MET | row 3: README.md:14 |
+MD
+  run qv proof
+  [ "$status" -eq 1 ]
+  [ "$output" = "ERROR: row 2b runs only in the final proof, and proof-final.md reports it SKIPPED" ]
+  sed -i.bak '/^| 2b |/d' .tasks/demo/proof-final.md
+  run qv proof
+  [ "$status" -eq 1 ]
+  [ "$output" = "ERROR: proof-final.md doesn't report row 2b, which runs only in the final proof" ]
+  sed -i.bak 's/^| 1 | export | PASS | 12 rows |/&\
+| 2b | bats -r tests\/ | **PASS** | 0 failures |/' .tasks/demo/proof-final.md
+  run qv proof; [ "$status" -eq 0 ]; [ -z "$output" ]
+}

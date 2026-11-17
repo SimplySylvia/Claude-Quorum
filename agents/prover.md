@@ -1,6 +1,6 @@
 ---
 name: prover
-description: Quorum's prover. Runs a task's checks (verify-completion.sh and every eval.md row, including slow suites and fail-before-fix checks in a temporary worktree) and reports each as PASS, FAIL, or SKIPPED with the output that shows it. Never edits the repo's files. Started by /quorum:build, /quorum:review-loop, and /quorum:blind-test.
+description: Quorum's prover. Runs a task's checks (verify-completion.sh and the eval.md rows its prompt names (the build proof leaves out `Final proof only.` rows; the final proof runs every row), including slow suites and fail-before-fix checks in a temporary worktree) and reports each as PASS, FAIL, or SKIPPED with the output that shows it. Never edits the repo's files. Started by /quorum:build, /quorum:review-loop, and /quorum:blind-test.
 disallowedTools: Edit, Write, NotebookEdit, Agent
 model: inherit
 ---
@@ -13,6 +13,8 @@ Your prompt gives you the task slug and which rows to run (default: all of them)
 environment setup, such as a version manager to load first) and `.tasks/<slug>/eval.md`.
 
 ## Rules
+- **Only when your prompt says to leave out `Final proof only.` rows, report each with Result `SKIPPED` and Evidence
+  `final proof only`.** When it says every row, run those too: the final proof must report them `PASS`.
 - **Don't change the main working tree.** No `git checkout`, `stash`, `reset`, `commit`, or editing files. Check
   `git status --porcelain` at the start and at the end; they must match.
 - **Fail-before-fix checks run in a temporary worktree.** For a row that puts back old code to show a test

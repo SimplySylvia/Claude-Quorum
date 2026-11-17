@@ -99,8 +99,9 @@ nothing, every step is built: go on to the proof.
 Show the builder's report (changes, commits, check output), and for one builder the line `quorum-files record`
 printed to stderr, if it printed one. Then start `quorum:prover`:
 
-> Task `<slug>`. Run `bash .claude/hooks/verify-completion.sh` and every row in `.tasks/<slug>/eval.md`. Read
-> `CLAUDE.md` first.
+> Task `<slug>`. Run `bash .claude/hooks/verify-completion.sh` and every row in `.tasks/<slug>/eval.md` except
+> those whose Passes when starts with `Final proof only.`: the final proof runs those, so report each with Result
+> `SKIPPED` and Evidence `final proof only`. Read `CLAUDE.md` first.
 
 Save its reply verbatim to `.tasks/<slug>/proof-build.md` and show it. If any row fails, say which, and offer to
 start the builder again with the failures.
