@@ -43,8 +43,8 @@ Save its reply verbatim to `blind/security-<run>.md`. Every finding in it blocks
 
 1. Read the **user goal for the blind test** from `rd.md` and the dev/start command and entry point from
    `CLAUDE.md`. If `rd.md` has no goal, write one from the requirements: one sentence, what a user would try.
-2. Turn on blind mode: `touch .tasks/<slug>/.blind-mode-active`. It blinds this task's sessions only, so other
-   tasks' work goes on. Whatever happens next, remove it at the end (sub-step 5 below).
+2. Run `quorum-files record`, then turn on blind mode: `touch .tasks/<slug>/.blind-mode-active`. It blinds this
+   task's sessions only, so other tasks' work goes on. Whatever happens next, remove it at the end (sub-step 5 below).
 3. If the app is a server, start it in the background with its dev command, logging to `blind/server-<run>.log`,
    and wait until it answers. Use local, temporary, or synthetic data only; never production or shared databases.
    A CLI needs no start.
@@ -88,11 +88,12 @@ Collect the blocking problems: every `[IMPORTANT]` from the security pass and th
   `/quorum:review-loop` does. Tell the user to run `/quorum:spec-and-eval --redesign <slug>`.
 
 `quorum-state log` a short block for this run either way: the security and accessibility summary lines, the blind
-test result, the blockers, and the triage counts.
+test result, the blockers, the triage counts, and the line `quorum-files record` printed to stderr, if it printed one.
 
 ## 5. Stage 8 summary
 
-1. **Verification proof:** start `quorum:prover` with:
+1. **Verification proof:** first `quorum-files record` (show the line it printed to stderr, if it printed one), then
+   start `quorum:prover` with:
 
    > Final proof. Task `<slug>`. Base commit `<quorum-state get base_sha>`. Run `bash .claude/hooks/verify-completion.sh`
    > and every row in `.tasks/<slug>/eval.md`, then give each requirement in `.tasks/<slug>/rd.md` a verdict. Read

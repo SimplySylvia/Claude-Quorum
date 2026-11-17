@@ -8,7 +8,7 @@ as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers alr
 
 You are the orchestrator. You don't write or review the plan yourself: the planner writes it, reviewers review it,
 the voter votes. Use the slug in `<arguments>`, or `quorum-active-task`. Work from the repo root, and use
-`quorum-state` and `quorum-findings` (on your PATH) for state and counting.
+`quorum-state`, `quorum-findings`, and `quorum-files` (on your PATH) for state, counting, and the task's file list.
 
 `<arguments>` may contain `--yes` (only when the user typed it): then approve a plan with no `[IMPORTANT]` findings
 left without asking, and say so. Don't run git commands that change the working tree, index, or history here.
@@ -45,7 +45,8 @@ once more with those lines as findings to answer, and save its reply over `plan.
 
 ## 4. Review the plan
 
-Let N = `quorum-state incr plan_rounds`.
+First run `quorum-files record`, so the dashboard shows the files the saved plan names. Then let N =
+`quorum-state incr plan_rounds`.
 
 **Models.** In round 1, first resolve the task's reviewer model as in
 `<plugin root>/skills/pipeline-laws/models.md` (configured defaults: `reviewer_model` = <reviewer_model>, `helper_model` = <helper_model>). Start every plan reviewer and
@@ -80,7 +81,8 @@ the voter with `reviewer_model`; the planner runs on the session's model.
 
    Save its reply verbatim to `round-<N>/votes.md`, then `quorum-findings cap <nit_cap> votes.md > survivors.md`
    (`nit_cap` is `<nit_cap>`, or 2 if that reads as a placeholder).
-4. `quorum-state log` a block: `## Plan round <N>`, the `quorum-findings summary` line, and the Pattern Categories.
+4. `quorum-state log` a block: `## Plan round <N>`, the `quorum-findings summary` line, and the Pattern Categories,
+   plus the line `quorum-files record` printed to stderr, if it printed one.
 
 ## 5. Revise or approve
 

@@ -69,7 +69,8 @@ On the fast path, use this prompt instead:
 > `.tasks/<slug>/rd.md`, and `.tasks/<slug>/eval.md`. Make the smallest change that meets the requirements on the
 > current branch, run the checks, and commit. This is the first build; there are no review findings yet.
 
-The builder's SubagentStop hook keeps it working until `.claude/hooks/verify-completion.sh` passes.
+The builder's SubagentStop hook keeps it working until `.claude/hooks/verify-completion.sh` passes. When it hands
+back, run `quorum-files record`.
 
 **A large plan is built a step at a time.** If `quorum-plan sliced` exits 0 (`plan.md` has 4 or more steps, and
 the task isn't on the fast path), don't start one builder for the whole plan. One agent's context would have to
@@ -85,8 +86,9 @@ step K (N is the number of `quorum-plan steps`):
    > <`quorum-plan show K`>. Leave the repo's checks passing, commit one commit for this step, and note any
    > deviation under the plan's `## Deviations`. There are no review findings yet.
 
-2. When it hands back (its SubagentStop hook has made the checks pass), `quorum-state push built_steps K`, and say
-   one line: `▸ Build step K/N: <what it did>, <commit>`.
+2. When it hands back (its SubagentStop hook has made the checks pass), `quorum-state push built_steps K`, then
+   `quorum-files record`, and say one line: `▸ Build step K/N: <what it did>, <commit>`, with the line
+   `quorum-files record` printed to stderr appended, if it printed one.
 
 If a step can't be finished (the checks keep failing and the task escalates), stop and say which step. The next
 `/quorum:build` or `/quorum:run` starts at that step, not at the beginning. When `quorum-plan next` prints
@@ -94,7 +96,8 @@ nothing, every step is built: go on to the proof.
 
 ## 4. Report
 
-Show the builder's report (changes, commits, check output). Then start `quorum:prover`:
+Show the builder's report (changes, commits, check output), and for one builder the line `quorum-files record`
+printed to stderr, if it printed one. Then start `quorum:prover`:
 
 > Task `<slug>`. Run `bash .claude/hooks/verify-completion.sh` and every row in `.tasks/<slug>/eval.md`. Read
 > `CLAUDE.md` first.

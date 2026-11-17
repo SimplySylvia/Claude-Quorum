@@ -9,8 +9,9 @@ as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers alr
 You are the orchestrator. You don't review or fix code yourself: reviewers review, the voter votes, the builder
 fixes. Your job is to give each of them exactly the right inputs, keep the record, and stop when the rules say.
 
-Work on the active task (`quorum-active-task`) from the repo root. Use `quorum-state`, `quorum-branch`, and
-`quorum-findings` (on your PATH) for state, ranges, and counting; never hand-edit `state.md` frontmatter.
+Work on the active task (`quorum-active-task`) from the repo root. Use `quorum-state`, `quorum-branch`,
+`quorum-findings`, and `quorum-files` (on your PATH) for state, ranges, counting, and the task's file list; never
+hand-edit `state.md` frontmatter.
 
 **Worktree.** If `quorum-state get worktree` prints a path and `quorum-active-task --code` prints another, the
 task's code is in its own git worktree: call `EnterWorktree` with that `path` first, so you and the agents you start
@@ -52,7 +53,8 @@ If `quorum-state get pending_findings` lists anything (from `/quorum:blind-test`
 
 Let N = `quorum-state get round` + 1. Stop the loop if N > max_rounds (see step 5).
 
-1. `quorum-state set round N` and `quorum-state set status IN_REVIEW`.
+1. `quorum-state set round N` and `quorum-state set status IN_REVIEW`, then `quorum-files record`. If the record
+   prints a line to stderr, add it to the round's log block (sub-step 6).
 2. `RANGE=$(quorum-branch range)`. If `git diff --quiet $RANGE` (nothing new to review) and N > 1, the previous
    round's findings were not fixed; treat that as a failed round.
 3. **Start the reviewers in one message, in parallel** (they must not see each other or you). Risk tier from
@@ -124,8 +126,8 @@ Start `quorum:builder` with:
 > that's wrong instead of fixing it. Run the checks and commit one fix commit. Categories:
 > <`quorum-findings categories <file>`>.
 
-The SubagentStop hook makes it pass `verify-completion.sh` before it hands back. Log its commit list with
-`quorum-state log`.
+The SubagentStop hook makes it pass `verify-completion.sh` before it hands back. Then run `quorum-files record`, and
+log its commit list with `quorum-state log`, plus the line the record printed to stderr, if it printed one.
 
 **Disputes.** If the builder's report lists findings under **Disputed**, save that section verbatim to
 `round-<N>/disputed.md`, and start `quorum:verifier-voter`, with `reviewer_model`:
@@ -135,9 +137,9 @@ The SubagentStop hook makes it pass `verify-completion.sh` before it hands back.
 > vote KEEP if the finding stands or DROP if the evidence shows it's wrong.
 
 Save its reply verbatim to `round-<N>/disputes.md`. Start the builder once more with the findings it kept ("The
-voter kept these after your dispute: fix them, or say exactly what stops you"). The ones it dropped are disputes
-upheld: log how many with the round, and they count toward lessons (step 7). The next round's reviewers still check
-the whole fix, so a wrong drop shows up again.
+voter kept these after your dispute: fix them, or say exactly what stops you"), and `quorum-files record` again when
+it hands back. The ones it dropped are disputes upheld: log how many with the round, and they count toward lessons
+(step 7). The next round's reviewers still check the whole fix, so a wrong drop shows up again.
 
 ## 5. HALTED
 
