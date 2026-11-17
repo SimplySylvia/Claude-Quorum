@@ -43,3 +43,21 @@ state() { CLAUDE_PROJECT_DIR="$DEMO/$1" "$BIN/quorum-state" --task csv-export "$
   run "$SCRIPT" "$DEMO/taken";                [ "$status" -eq 1 ]
   run "$SCRIPT" "$DEMO/x" --stage shipping;   [ "$status" -eq 1 ]
 }
+
+@test "review: files.tsv lists an unplanned file and a fix awaiting re-review" {
+  run "$SCRIPT" "$DEMO/review"
+  [ "$status" -eq 0 ]
+  list="$DEMO/review/.tasks/csv-export/files.tsv"
+  [ -f "$list" ]
+  # app/util.py is in the build commit, but no plan step names it
+  [ "$(awk -F'\t' '$4 == "app/util.py" { print $6 }' "$list")" = "-" ]
+  # round 1's fix changed app/report.py after round 1's round_shas entry
+  [ "$(awk -F'\t' '$4 == "app/report.py" { print $7 }' "$list")" = "1" ]
+  r1=$(state review last round_shas)
+  head -1 "$list" | grep -q " since=$r1 "
+  # the list is recorded after round 1's survivors.md, at least a second later
+  recorded=$(head -1 "$list" | sed -n 's/.* recorded=\([0-9][0-9]*\)$/\1/p')
+  survivors="$DEMO/review/.tasks/csv-export/review/round-1/survivors.md"
+  mtime=$(stat -c %Y "$survivors" 2>/dev/null || stat -f %m "$survivors")
+  [ -n "$recorded" ] && [ "$mtime" -lt "$recorded" ]
+}

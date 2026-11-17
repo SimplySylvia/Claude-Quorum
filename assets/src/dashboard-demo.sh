@@ -41,6 +41,7 @@ slug=csv-export
 task=".tasks/$slug"
 state() { "$bin/quorum-state" --task "$slug" "$@"; }
 commit() { git add -A && git commit -qm "$1"; }
+record() { "$bin/quorum-files" --task "$slug" record; }
 
 # ---------------------------------------------------------------- the spec (stage 1)
 mkdir -p "$task/spec-review"
@@ -117,13 +118,14 @@ MD
 cat > "$task/plan.md" <<'MD'
 # Plan: csv-export
 
-## Files
-- `app/report.py`: add an `export` command next to `summary`; reuse `load()` for DATA_FILE.
-- `tests/test_report.py`: tests for quoting and the empty file.
-- `README.md`: add `export` under Commands.
-
-## Reuse
-- `load(path)` in `app/report.py` reads DATA_FILE; export must call it with the argument, not the default.
+## Steps
+1. **The export command** — `app/report.py` · requirements: 1, 2, 3
+   - Reuses: `app/report.py:12` load(path) reads DATA_FILE; export must call it with the argument, not the default.
+   - Convention: the standard library's `csv.writer`, as research.md recommends.
+2. **Tests for quoting and the empty file** — `tests/test_report.py` · requirements: 2, 3
+   - Reuses: the fixtures in `tests/data/`.
+3. **The README names export** — `README.md` · requirements: 4
+   - Reuses: the Commands list.
 
 ## Tests
 - `test_export_quotes`: fails today because there is no export command.
@@ -143,6 +145,7 @@ cp "$task/plan-review/round-1/patterns.md" "$task/plan-review/round-1/votes.md"
 cp "$task/plan-review/round-1/patterns.md" "$task/plan-review/round-1/survivors.md"
 echo 'Summary: 0 issues found. Ready to land.' > "$task/plan-review/round-2/patterns.md"
 for f in candidates votes survivors; do echo 'Summary: 0 issues found. Ready to land.' > "$task/plan-review/round-2/$f.md"; done
+record
 state set plan_rounds 2
 state set plan_approved 2026-11-08
 state set status BUILDING
@@ -166,7 +169,9 @@ open(p, "w").write(s)
 PY
 # shellcheck disable=SC2016  # the backticks are literal Markdown
 printf '\n- `python3 app/report.py export [DATA_FILE]`: the rows as CSV\n' >> README.md
+printf '"""Helpers for report.py."""\n\nCSV_LINE_END = "\\r\\n"\n' > app/util.py
 commit "Add the export command"
+record
 cat > "$task/proof-build.md" <<MD
 Proof: $slug at $(git rev-parse --short HEAD)
 Result: 1 FAIL
@@ -230,6 +235,9 @@ Summary: 1 IMPORTANT, 1 NIT, 0 PRE-EXISTING. Ignored argument: export read the d
 MD
 printf '\n# export honors DATA_FILE\n' >> app/report.py
 commit "Honor DATA_FILE in export"
+# the dashboard shows a fix as awaiting re-review when the list is newer than the round's survivors.md
+touch -t 202001010000 "$r1/survivors.md"
+record
 
 # ---------------------------------------------------------------- code review round 2
 r2="$task/review/round-2"; mkdir -p "$r2"
@@ -240,7 +248,7 @@ Summary: 0 IMPORTANT, 1 NIT, 0 PRE-EXISTING
 [NIT] app/report.py:52 — the DATA_FILE default is repeated in two places.
 MD
 state set round 2
-state push round_shas "$(git rev-parse --short HEAD)"
+record
 
 if [ "$stage" != review ]; then
   echo 'Summary: 0 issues found. Ready to land.' > "$r2/patterns.md"
@@ -259,6 +267,7 @@ MD
   mkdir -p "$task/blind"
   state set status BLIND-TEST
   state incr blind_runs >/dev/null
+  record
   cat > "$task/blind/blind-1.md" <<'MD'
 Goal: Export the sales data to a CSV file and open it
 Result: REACHED
@@ -297,6 +306,7 @@ fi
 
 if [ "$stage" = "done" ]; then
   # -------------------------------------------------------------- the summary and the PR (stages 7 and 8)
+  record
   cat > "$task/proof-final.md" <<MD
 Proof: $slug at $(git rev-parse --short HEAD)
 Result: ALL PASS
