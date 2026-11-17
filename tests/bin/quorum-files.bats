@@ -82,6 +82,21 @@ no_temp() {
   [ "$(paths)" = "blob.bin del.txt four.txt mod1.txt mod2.txt new.txt renamed.txt tracked.bin " ]
 }
 
+@test "record skips an untracked link to a directory and counts an unreadable untracked file as bin" {
+  start_build
+  printf 'x\n' > ok.txt
+  mkdir dir; echo d > dir/d.txt; git add dir/d.txt; git commit -q -m dir
+  ln -s dir dirlink; ln -s nowhere dangling
+  printf 'secret\n' > unreadable.txt; chmod 000 unreadable.txt
+
+  run --separate-stderr record
+  [ "$status" -eq 0 ]; [ -z "$stderr" ]
+  [ "$(row ok.txt)" = "$(want A 1 0 ok.txt - - -)" ]
+  [ "$(row dangling)" = "$(want A 1 0 dangling - - -)" ]
+  [ "$(row unreadable.txt)" = "$(want A bin bin unreadable.txt - - -)" ]
+  [ "$(paths)" = "dangling dir/d.txt ok.txt unreadable.txt " ]
+}
+
 @test "record diffs against the merge-base, so a rebase adds no upstream files" {
   start_build; base=$(git rev-parse HEAD)
   echo t > task.txt; commit task.txt
