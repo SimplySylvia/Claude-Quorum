@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+# Record a task's changed files, for the dashboard's file tree.
+#
+#   quorum-files record [--task SLUG]    write .tasks/<slug>/files.tsv: the change so far, joined to the plan's steps
+#
+# files.tsv is a header line, `# quorum-files 1 head=<sha> base=<sha or -> since=<sha or -> recorded=<unix seconds>`,
+# then one row per file, tab-separated, sorted by PATH in byte order, with `-` for an empty field:
+#
+#   LETTER  ADDED  REMOVED  PATH  OLD_PATH  STEPS  FIX
+#
+# - Before the build (state.md has no base_sha) it holds only the plan's files, and base is `-`. After, the change is
+#   the working tree against the merge-base of HEAD and the default branch (quorum-branch default), or base_sha
+#   when that's the current branch, there's no merge-base, or the merge-base is HEAD.
+# - LETTER is M, A, D, or R (OLD_PATH set); a copy is A. Untracked files git doesn't ignore are A. ADDED and
+#   REMOVED are line counts, `bin` for a binary file, and `-` for a file a step names that isn't changed yet.
+# - STEPS lists the plan.md steps whose own line names the file in backticks (`path` or `path:line`), after the
+#   line's first " — " and before " · requirements:". FIX is 1 for a file changed since state.md's last round_shas
+#   entry (`since`), and for every untracked file; else 0. With no round_shas, FIX is `-`.
+# - Git runs in state.md's `worktree` when it's set, else quorum-active-task --code; the list is always written to
+#   the task's own folder, through a temporary file moved into place. Nothing under .tasks/ is listed, and a path
+#   with a tab or newline is skipped, with one stderr line.
+#
+# A record never stops a stage: when it can't record (no task, no code tree, git fails, an unwritable folder), it
+# prints one line to stderr, leaves any earlier files.tsv as it was, and exits 0. Only a usage error exits 2.
+# Without --task, the slug comes from quorum-active-task. Bash 3.2 compatible.
+set -euo pipefail
+export LC_ALL=C
+
+tmp="" scratch=""
+trap 'rm -rf "$tmp" "$scratch"' EXIT
+
+die() { echo "quorum-files: $*" >&2; exit 2; }
+skip() { echo "quorum-files: $*; kept the earlier list" >&2; exit 0; }
+HERE=$(cd "$(dirname "$0")" && pwd)
+# Through quorum-git, so a sandbox that hides the real git behind Apple's launcher doesn't break this script.
+git() { "$HERE/quorum-git" "$@"; }
+TAB=$'\t' NL=$'\n'
+USAGE="usage: quorum-files record [--task SLUG]"
+
+task="" cmd=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --task) [ -n "${2:-}" ] || die "--task needs a slug"; task=$2; shift 2 ;;
+    record) [ -z "$cmd" ] || die "$USAGE"; cmd=record; shift ;;
+    *) die "$USAGE" ;;
+  esac
+done
+[ "$cmd" = record ] || die "$USAGE"
+if [ -n "$task" ]; then
+  printf '%s' "$task" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$' || die "invalid slug: $task"
+else
+  task=$("$HERE/quorum-active-task" 2>/dev/null) || skip "no active task"
+fi
+
+ROOT=$("$HERE/quorum-active-task" --root 2>/dev/null) || skip "can't find the repo root"
+DIR="$ROOT/.tasks/$task"
+[ -f "$DIR/state.md" ] || skip "no state.md for task $task"
+scratch=$(mktemp -d "$DIR/.files.XXXXXX" 2>/dev/null) || skip "can't write to .tasks/$task"
+state() { "$HERE/quorum-state" --task "$task" "$@" 2>/dev/null; }
+
+wt=$(state get worktree) || skip "can't read .tasks/$task/state.md"
+if [ -n "$wt" ]; then CODE=$wt; else CODE=$("$HERE/quorum-active-task" --code 2>/dev/null) || skip "can't find the code tree"; fi
+[ -d "$CODE" ] || skip "the code tree $CODE doesn't exist"
+fail="git failed in $CODE"
+head=$(git -C "$CODE" rev-parse HEAD 2>/dev/null) || skip "$fail"
+since=$(state last round_shas) || since=-
+[ -n "$since" ] || since=-
+base_sha=$(state get base_sha) || skip "can't read .tasks/$task/state.md"
+
+# The base: the merge-base with the default branch, else base_sha, else nothing (before the build).
+base=-
+if [ -n "$base_sha" ]; then
+  base=$base_sha
+  if def=$(cd "$CODE" && "$HERE/quorum-branch" default 2>/dev/null) && [ -n "$def" ]; then
+    cur=$(git -C "$CODE" branch --show-current 2>/dev/null) || skip "$fail"
+    if [ "$def" != "$cur" ] && mb=$(git -C "$CODE" merge-base HEAD "$def" 2>/dev/null) && [ "$mb" != "$head" ]; then
+      base=$mb
+    fi
+  fi
+fi
+
+# Paths with a tab or newline are dropped, and counted once each; .tasks/ is never listed.
+bad=0
+listable() {
+  case "$1" in
+    *"$TAB"*|*"$NL"*) bad=$((bad + 1)); return 1 ;;
+    .tasks|.tasks/*|"") return 1 ;;
+  esac
+}
+
+# change: PATH  LETTER  ADDED  REMOVED  OLD_PATH  UNTRACKED, one line per changed file.
+: > "$scratch/change"
+if [ "$base" != - ]; then
+  git -C "$CODE" diff --no-ext-diff --numstat -z -M "$base" > "$scratch/numstat" 2>/dev/null || skip "$fail"
+  git -C "$CODE" diff --no-ext-diff --name-status -z -M "$base" > "$scratch/status" 2>/dev/null || skip "$fail"
+  # numstat: "ADDED<TAB>REMOVED<TAB>PATH", or for a rename "ADDED<TAB>REMOVED<TAB>" then the old and new paths.
+  while IFS= read -r -d '' rec; do
+    added=${rec%%"$TAB"*}; rest=${rec#*"$TAB"}; removed=${rest%%"$TAB"*}; p=${rest#*"$TAB"}
+    if [ -z "$p" ]; then IFS= read -r -d '' old || skip "$fail"; IFS= read -r -d '' p || skip "$fail"; fi
+    [ "$added" = - ] && added=bin removed=bin
+    case "$p" in *"$TAB"*|*"$NL"*) continue ;; esac
+    printf '%s\t%s\t%s\n' "$p" "$added" "$removed"
+  done < "$scratch/numstat" > "$scratch/counts"
+  # name-status: "LETTER" then the path, or for a rename or copy "R<score>" then the old and new paths.
+  while IFS= read -r -d '' letter; do
+    old=-
+    case "$letter" in
+      R*|C*) IFS= read -r -d '' old || skip "$fail"; IFS= read -r -d '' p || skip "$fail" ;;
+      *) IFS= read -r -d '' p || skip "$fail" ;;
+    esac
+    case "$letter" in
+      R*) letter=R ;;
+      C*) letter=A old=- ;;
+      M|A|D) ;;
+      *) letter=M ;;
+    esac
+    listable "$p" || continue
+    if [ "$old" != - ]; then case "$old" in *"$TAB"*|*"$NL"*) bad=$((bad + 1)); continue ;; esac; fi
+    printf '%s\t%s\t%s\n' "$p" "$letter" "$old"
+  done < "$scratch/status" > "$scratch/letters"
+  awk -F '\t' 'FILENAME == ARGV[1] { n[$1] = $2 "\t" $3; next } ($1 in n) { print $1 "\t" $2 "\t" n[$1] "\t" $3 "\t0" }' \
+    "$scratch/counts" "$scratch/letters" >> "$scratch/change"
+
+  # Untracked files, tested and counted in the code tree; an embedded repo, a FIFO, or a socket isn't a file.
+  git -C "$CODE" ls-files -z --others --exclude-standard > "$scratch/others" 2>/dev/null || skip "$fail"
+  while IFS= read -r -d '' p; do
+    listable "$p" || continue
+    case "$p" in */) continue ;; esac
+    [ -f "$CODE/$p" ] || [ -L "$CODE/$p" ] || continue
+    # The -z record is the rename form: "ADDED<TAB>REMOVED<TAB>", then /dev/null, then the path.
+    s=0; git -C "$CODE" diff --no-index --no-ext-diff --numstat -z -- /dev/null "$p" > "$scratch/one" 2>/dev/null || s=$?
+    [ "$s" -le 1 ] || skip "$fail"
+    rec=""; IFS= read -r -d '' rec < "$scratch/one" || true
+    added=${rec%%"$TAB"*}; rest=${rec#*"$TAB"}; removed=${rest%%"$TAB"*}
+    case "$added$TAB$removed" in
+      -"$TAB"-) added=bin removed=bin ;;
+      *) printf '%s' "$added$removed" | grep -Eq '^[0-9]+$' || skip "$fail" ;;
+    esac
+    printf '%s\tA\t%s\t%s\t-\t1\n' "$p" "$added" "$removed"
+  done < "$scratch/others" >> "$scratch/change"
+fi
+
+# The plan join: planned holds PATH  STEPS, the steps ascending and comma-separated.
+: > "$scratch/planned"
+if [ -f "$DIR/plan.md" ]; then
+  steps=$("$HERE/quorum-plan" --task "$task" steps 2>/dev/null) || skip "can't read .tasks/$task/plan.md"
+  for n in $steps; do
+    text=$("$HERE/quorum-plan" --task "$task" show "$n" 2>/dev/null) || skip "can't read step $n of plan.md"
+    printf '%s\n' "${text%%"$NL"*}" | awk -v n="$n" '{
+      i = index($0, " — "); if (!i) next
+      s = substr($0, i + length(" — ")); j = index(s, " · requirements:"); if (j) s = substr(s, 1, j - 1)
+      k = split(s, part, "`")
+      for (m = 2; m < k; m += 2) {
+        p = part[m]
+        if (p == "" || p ~ /[ \t]/ || p ~ /^-/ || p ~ /\/$/) continue
+        sub(/:[0-9]+$/, "", p)
+        if (p == ".tasks" || p ~ /^\.tasks\//) continue
+        print p "\t" n
+      }
+    }'
+  done | sort -t "$TAB" -k1,1 -k2,2n -u | awk -F '\t' '
+    $1 != p { if (NR > 1) print p "\t" s; p = $1; s = $2; next }
+    { s = s "," $2 }
+    END { if (NR) print p "\t" s }' > "$scratch/planned"
+fi
+
+# A planned file the change doesn't touch yet: M when it exists at HEAD, else A, with no counts.
+awk -F '\t' 'FILENAME == ARGV[1] { c[$1] = 1; next } !($1 in c) { print $1 }' "$scratch/change" "$scratch/planned" |
+  while IFS= read -r p; do
+    if git -C "$CODE" cat-file -e "HEAD:$p" 2>/dev/null; then l=M; else l=A; fi
+    printf '%s\t%s\t-\t-\t-\t0\n' "$p" "$l"
+  done > "$scratch/unchanged"
+cat "$scratch/unchanged" >> "$scratch/change"
+
+# FIX: the files whose content differs between the last round's sha and the working tree.
+: > "$scratch/fixed"
+if [ "$since" != - ]; then
+  git -C "$CODE" diff --no-ext-diff --name-only -z "$since" > "$scratch/since" 2>/dev/null || skip "$fail"
+  while IFS= read -r -d '' p; do
+    case "$p" in *"$TAB"*|*"$NL"*) continue ;; esac
+    printf '%s\n' "$p"
+  done < "$scratch/since" > "$scratch/fixed"
+fi
+
+[ "$bad" -eq 0 ] || echo "quorum-files: skipped $bad path(s) with a tab or newline in the name" >&2
+
+tmp=$(mktemp "$DIR/.files.tsv.XXXXXX" 2>/dev/null) || skip "can't write to .tasks/$task"
+{
+  printf '# quorum-files 1 head=%s base=%s since=%s recorded=%s\n' "$head" "$base" "$since" "$(date +%s)"
+  awk -F '\t' -v since="$since" '
+    FILENAME == ARGV[1] { st[$1] = $2; next }
+    FILENAME == ARGV[2] { fx[$1] = 1; next }
+    {
+      fix = since == "-" ? "-" : (($6 == "1" || ($1 in fx)) ? "1" : "0")
+      print $2 "\t" $3 "\t" $4 "\t" $1 "\t" $5 "\t" (($1 in st) ? st[$1] : "-") "\t" fix
+    }' "$scratch/planned" "$scratch/fixed" "$scratch/change" | sort -t "$TAB" -k4,4
+} > "$tmp" || skip "can't write to .tasks/$task"
+mv -f "$tmp" "$DIR/files.tsv" 2>/dev/null || skip "can't write to .tasks/$task"
+tmp=""

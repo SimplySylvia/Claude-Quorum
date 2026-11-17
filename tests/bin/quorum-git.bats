@@ -28,7 +28,7 @@ teardown() { cleanup_repo; }
 }
 
 @test "Quorum's scripts reach git through quorum-git" {
-  for f in quorum-branch quorum-state quorum-active-task; do
+  for f in quorum-branch quorum-state quorum-active-task quorum-files; do
     grep -q 'git() { "$HERE/quorum-git" "$@"; }' "$BIN/$f" || { echo "$f doesn't route git through quorum-git"; return 1; }
   done
   run env PATH="$FAKE/shim:$BIN:/usr/bin:/bin" QUORUM_GIT_CANDIDATES="$FAKE/real/git" CLAUDE_PROJECT_DIR="$WORK" "$BIN/quorum-branch" default
