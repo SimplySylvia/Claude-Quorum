@@ -12,7 +12,8 @@
 #   the working tree against the merge-base of HEAD and the default branch (quorum-branch default), or base_sha
 #   when that's the current branch, there's no merge-base, or the merge-base is HEAD.
 # - LETTER is M, A, D, or R (OLD_PATH set); a copy is A. Untracked files git doesn't ignore are A. ADDED and
-#   REMOVED are line counts, `bin` for a binary file, and `-` for a file a step names that isn't changed yet.
+#   REMOVED are line counts, `bin` for a binary file or an untracked file this user can't read, and `-` for a
+#   file a step names that isn't changed yet. An untracked symlink counts 1 0, as git counts its blob.
 # - STEPS lists the plan.md steps whose own line names the file in backticks (`path` or `path:line`), after the
 #   line's first " — " and before " · requirements:". FIX is 1 for a file changed since state.md's last round_shas
 #   entry (`since`), and for every untracked file; else 0. With no round_shas, FIX is `-`.
@@ -121,20 +122,25 @@ if [ "$base" != - ]; then
   awk -F '\t' 'FILENAME == ARGV[1] { n[$1] = $2 "\t" $3; next } ($1 in n) { print $1 "\t" $2 "\t" n[$1] "\t" $3 "\t0" }' \
     "$scratch/counts" "$scratch/letters" >> "$scratch/change"
 
-  # Untracked files, tested and counted in the code tree; an embedded repo, a link to a directory, a FIFO, or a
-  # socket isn't a file.
+  # Untracked files, tested and counted in the code tree; an embedded repo, a FIFO, or a socket isn't a file.
   git -C "$CODE" ls-files -z --others --exclude-standard > "$scratch/others" 2>/dev/null || skip "$fail"
   while IFS= read -r -d '' p; do
     listable "$p" || continue
     case "$p" in */) continue ;; esac
-    if [ -L "$CODE/$p" ]; then [ ! -d "$CODE/$p" ] || continue; else [ -f "$CODE/$p" ] || continue; fi
-    # The -z record is the rename form: "ADDED<TAB>REMOVED<TAB>", then /dev/null, then the path. A file git can't
-    # read has no line count, so it's counted as bin rather than losing the whole list.
-    git -C "$CODE" diff --no-index --no-ext-diff --numstat -z -- /dev/null "$p" > "$scratch/one" 2>/dev/null || true
+    # A symlink, dangling or to a file or a directory, is committed as a blob of its target text, which git counts
+    # as 1 line; git diff --no-index can't count a link to a directory, so no link goes through it.
+    if [ -L "$CODE/$p" ]; then printf '%s\tA\t1\t0\t-\t1\n' "$p"; continue; fi
+    [ -f "$CODE/$p" ] || continue
+    # A file this user can't read has no line count git can give; it's counted as bin, like a binary file.
+    if [ ! -r "$CODE/$p" ]; then printf '%s\tA\tbin\tbin\t-\t1\n' "$p"; continue; fi
+    # The -z record is the rename form: "ADDED<TAB>REMOVED<TAB>", then /dev/null, then the path.
+    s=0; git -C "$CODE" diff --no-index --no-ext-diff --numstat -z -- /dev/null "$p" > "$scratch/one" 2>/dev/null || s=$?
+    [ "$s" -le 1 ] || skip "$fail"
     rec=""; IFS= read -r -d '' rec < "$scratch/one" || true
     added=${rec%%"$TAB"*}; rest=${rec#*"$TAB"}; removed=${rest%%"$TAB"*}
     case "$added$TAB$removed" in
-      ''"$TAB"*|*"$TAB"|*[!0-9"$TAB"]*) added=bin removed=bin ;;
+      -"$TAB"-) added=bin removed=bin ;;
+      *) printf '%s' "$added$removed" | grep -Eq '^[0-9]+$' || skip "$fail" ;;
     esac
     printf '%s\tA\t%s\t%s\t-\t1\n' "$p" "$added" "$removed"
   done < "$scratch/others" >> "$scratch/change"

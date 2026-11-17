@@ -82,7 +82,7 @@ no_temp() {
   [ "$(paths)" = "blob.bin del.txt four.txt mod1.txt mod2.txt new.txt renamed.txt tracked.bin " ]
 }
 
-@test "record skips an untracked link to a directory and counts an unreadable untracked file as bin" {
+@test "record counts an untracked link, to a directory too, as 1 line and an unreadable untracked file as bin" {
   start_build
   printf 'x\n' > ok.txt
   mkdir dir; echo d > dir/d.txt; git add dir/d.txt; git commit -q -m dir
@@ -93,8 +93,9 @@ no_temp() {
   [ "$status" -eq 0 ]; [ -z "$stderr" ]
   [ "$(row ok.txt)" = "$(want A 1 0 ok.txt - - -)" ]
   [ "$(row dangling)" = "$(want A 1 0 dangling - - -)" ]
+  [ "$(row dirlink)" = "$(want A 1 0 dirlink - - -)" ]
   [ "$(row unreadable.txt)" = "$(want A bin bin unreadable.txt - - -)" ]
-  [ "$(paths)" = "dangling dir/d.txt ok.txt unreadable.txt " ]
+  [ "$(paths)" = "dangling dir/d.txt dirlink ok.txt unreadable.txt " ]
 }
 
 @test "record diffs against the merge-base, so a rebase adds no upstream files" {
@@ -215,6 +216,16 @@ MD
   run --separate-stderr env PATH="$numstat:$PATH" QUORUM_GIT_CANDIDATES="$numstat/git" "$BIN/quorum-files" --task demo record
   [ "$status" -eq 0 ]; [ "${#stderr_lines[@]}" -eq 1 ]
   kept
+
+  # Only the untracked file's own count fails: git prints no record, so the list is kept, not filled with bin.
+  echo u > untracked.txt
+  noindex="$BATS_TEST_TMPDIR/noindex"; mkdir -p "$noindex"
+  printf '#!/bin/sh\ncase " $* " in *" --no-index "*) exit 1 ;; esac\nexec "%s" "$@"\n' "$real" > "$noindex/git"
+  chmod +x "$noindex/git"
+  run --separate-stderr env PATH="$noindex:$PATH" QUORUM_GIT_CANDIDATES="$noindex/git" "$BIN/quorum-files" --task demo record
+  [ "$status" -eq 0 ]; [ "${#stderr_lines[@]}" -eq 1 ]
+  kept
+  rm untracked.txt
 
   # No active task and no --task: a detached HEAD, and no .tasks/.active.
   git checkout -q --detach

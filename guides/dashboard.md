@@ -68,8 +68,8 @@ such as `✓ M report.py  +86 −3  s3  ✗1`.
   task with no plan has no progress column. A second key line names the ones shown:
   `✓ built  ○ not yet  * unplanned`.
 - **The letter:** `M` modified, `A` added, `D` deleted, `R` renamed. It's dim while the file is only planned.
-- **Line counts:** `+86 −3`, leaving out a side with no lines, `bin` for a binary file, and nothing while the file
-  is only planned. A folder shows its file count there instead (`4 files`); the change's line totals are on the
+- **Line counts:** `+86 −3`, leaving out a side with no lines, `bin` for a binary file (or a new file you can't
+  read), and nothing while the file is only planned. A folder shows its file count there instead (`4 files`); the change's line totals are on the
   footprint line.
 - **The step:** `s3`, the lowest step that names the file, blank when none does.
 - **Columns line up** across the whole tree, folded rows included, so nothing moves when a folder opens or closes.
