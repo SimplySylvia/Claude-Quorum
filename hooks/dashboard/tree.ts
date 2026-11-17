@@ -2,8 +2,8 @@
 // review's rounds (open, fixed, or dropped on dispute), build the tree of their files, and lay out its rows and key to
 // the card's width, with the marks the rows around it share. No `$` here, so tests can call it directly.
 
-import type { Findings, FindingsView, RoundKept, TreeFinding } from '../../types'
-import { keptFindings, plural } from './task'
+import type { ChangedFile, FileList, Findings, FindingsView, Round, RoundKept, TreeFinding } from '../../types'
+import { isStaleProof, keptFindings, plural } from './task'
 
 // A run of text on a row, drawn as its own Text.
 export type TreePart = { text: string; color?: string; dim?: boolean; bold?: boolean }
@@ -21,7 +21,11 @@ export type TreeRow = {
   confidence: number | null
 }
 
-export type TreeOptions = { scope: string; width: number; icons: boolean; isHigh: boolean; folds: Record<string, boolean> }
+// The recorded change the tree joins (files.tsv's rows), whether the task has a plan, the steps built so far (all of
+// them, once an unsliced build has its proof), and the paths whose kept IMPORTANT finding is awaiting re-review.
+export type TreeChange = { files: ChangedFile[]; hasPlan: boolean; built: number[]; allBuilt: boolean; rereview: string[] }
+
+export type TreeOptions = { scope: string; width: number; icons: boolean; isHigh: boolean; folds: Record<string, boolean>; change?: TreeChange | null }
 
 // ---- Paths
 
@@ -166,12 +170,16 @@ export function trackFindings(rounds: RoundKept[], roots: string[], unit: 'round
 
 // ---- Marks and words
 
-type Counts = Findings & { fixed: number; dropped: number }
+type Counts = Findings & { awaiting: number; fixed: number; dropped: number }
 
-const countOf = (fs: TreeFinding[]): Counts => {
-  const open = (tag: TreeFinding['tag']) => fs.filter(f => f.state === 'open' && f.tag === tag).length
+// An open IMPORTANT finding on a file the fix changed since its round is awaiting re-review, not important.
+const isAwaiting = (f: TreeFinding, rereview: string[]) => f.state === 'open' && f.tag === 'IMPORTANT' && rereview.includes(f.path)
+
+const countOf = (fs: TreeFinding[], rereview: string[] = []): Counts => {
+  const open = (tag: TreeFinding['tag']) => fs.filter(f => f.state === 'open' && f.tag === tag && !isAwaiting(f, rereview)).length
   return {
     important: open('IMPORTANT'),
+    awaiting: fs.filter(f => isAwaiting(f, rereview)).length,
     fixed: fs.filter(f => f.state === 'fixed').length,
     nit: open('NIT'),
     preExisting: open('PRE-EXISTING'),
@@ -182,6 +190,7 @@ const countOf = (fs: TreeFinding[]): Counts => {
 // The marks, in the order every row and the key use. Dropped findings have none.
 const MARKS = [
   { glyph: '✗', field: 'important', word: 'important', color: 'error' },
+  { glyph: '↻', field: 'awaiting', word: 'awaiting re-review', color: 'warning' },
   { glyph: '✓', field: 'fixed', word: 'fixed this run', color: 'success' },
   { glyph: 'n', field: 'nit', word: 'nit', color: null },
   { glyph: 'p', field: 'preExisting', word: 'pre-existing', color: null },
@@ -196,6 +205,7 @@ export function markText(f: Findings): string {
 
 const words = (c: Counts) => [
   c.important ? `${c.important} important` : '',
+  c.awaiting ? `${c.awaiting} awaiting re-review` : '',
   c.fixed ? `${c.fixed} fixed` : '',
   c.nit ? plural(c.nit, 'nit') : '',
   c.preExisting ? `${c.preExisting} pre-existing` : '',
@@ -203,7 +213,7 @@ const words = (c: Counts) => [
 ].filter(Boolean)
 
 // Counts in words, for a label: `1 important, 1 nit`, zero counts left out, or `clean`.
-export const markWords = (f: Findings) => words({ ...f, fixed: 0, dropped: 0 }).join(', ') || 'clean'
+export const markWords = (f: Findings) => words({ ...f, awaiting: 0, fixed: 0, dropped: 0 }).join(', ') || 'clean'
 
 // ---- Widths and cuts, in code points
 
@@ -333,43 +343,106 @@ export const folderIcon = (isOpen: boolean) => ({ glyph: isOpen ? '' : '',
 // Icons only for the exact `nerd` option, and only in the terminal.
 export const iconsOn = (option: unknown, surface: string) => option === 'nerd' && surface === 'terminal'
 
+// ---- The recorded change
+
+type Progress = '✓' | '○' | '*' | ''
+
+// A file's progress against the plan: `✓` when every step that names it is built, `○` when one isn't yet, `*` when
+// no step names it; blank for a file the list doesn't hold, or a task with no plan.
+const progressOf = (c: ChangedFile | null, ch: TreeChange | null): Progress =>
+  !c || !ch?.hasPlan ? '' : c.steps.length === 0 ? '*' : ch.allBuilt || c.steps.every(n => ch.built.includes(n)) ? '✓' : '○'
+
+// The lead marks, in the order the key names them.
+const PROGRESS = [
+  { glyph: '✓', word: 'built', color: 'success' },
+  { glyph: '○', word: 'not yet', color: null },
+  { glyph: '*', word: 'unplanned', color: null },
+] as const
+
+const LETTER_WORD: Record<ChangedFile['letter'], string> = { M: 'modified', A: 'added', D: 'deleted', R: 'renamed' }
+
+const stepList = (ns: number[]) => `${ns.length === 1 ? 'step' : 'steps'} ${ns.join(', ')}`
+
+const lines = (n: number | 'bin' | null) => (typeof n === 'number' ? n : 0)
+
+// `+86 −3`, leaving out a side with no lines; `86 lines added, 3 removed` in words.
+const lineParts = (added: number, removed: number): TreePart[] => [
+  ...(added ? [{ text: `+${added}`, color: 'success' }] : []),
+  ...(added && removed ? [{ text: ' ' }] : []),
+  ...(removed ? [{ text: `−${removed}`, color: 'error' }] : []),
+]
+const lineWords = (added: number, removed: number) =>
+  added && removed ? `${plural(added, 'line')} added, ${removed} removed`
+  : added ? `${plural(added, 'line')} added` : removed ? `${plural(removed, 'line')} removed` : 'no lines changed'
+
+const isBinary = (c: ChangedFile) => c.added === 'bin' || c.removed === 'bin'
+
+// A file row's line-count column: `bin`, `+86 −3`, or nothing while only planned.
+const countParts = (c: ChangedFile | null): TreePart[] =>
+  !c || c.added === null ? [] : isBinary(c) ? [{ text: 'bin' }] : lineParts(lines(c.added), lines(c.removed))
+
+// A file's columns in words, for its label: progress, letter, then counts.
+function fileWords(c: ChangedFile, ch: TreeChange): string[] {
+  const p = progressOf(c, ch)
+  const built = c.steps.filter(n => ch.allBuilt || ch.built.includes(n))
+  const waiting = c.steps.filter(n => !built.includes(n))
+  const progress = p === '' ? [] : p === '*' ? ['unplanned']
+    : [...(built.length > 0 ? [`${stepList(built)} built`] : []), ...(waiting.length > 0 ? [`${stepList(waiting)} not built yet`] : [])]
+  const letter = c.letter === 'R' && c.oldPath ? `renamed from ${c.oldPath}` : LETTER_WORD[c.letter]
+  const counts = c.added === null ? 'not changed yet' : isBinary(c) ? 'binary' : lineWords(lines(c.added), lines(c.removed))
+  return [...progress, letter, counts]
+}
+
 // ---- The tree
 
-type FileNode = { path: string; name: string; findings: TreeFinding[] }
+type FileNode = { path: string; name: string; findings: TreeFinding[]; file: ChangedFile | null }
 type FolderNode = { path: string; name: string; folders: Map<string, FolderNode>; files: Map<string, FileNode> }
 
-function build(findings: TreeFinding[]): { root: FolderNode; other: TreeFinding[] } {
+// The file node for `path`, made with its folders if it's new; null for a path with no name (no location).
+function place(root: FolderNode, path: string): FileNode | null {
+  const lead = path.startsWith('/') ? '/' : ''
+  const segs = path.slice(lead.length).split('/').filter(s => s !== '')
+  const name = segs.pop()
+  if (name === undefined) return null
+  // A leading `/` stays on the first segment: `/repo2/app/`.
+  let dir = root
+  segs.forEach((seg, i) => {
+    const s = i === 0 ? lead + seg : seg
+    let next = dir.folders.get(s)
+    if (!next) dir.folders.set(s, next = { path: `${dir.path}${s}/`, name: s, folders: new Map(), files: new Map() })
+    dir = next
+  })
+  const fileName = segs.length === 0 ? lead + name : name
+  let file = dir.files.get(fileName)
+  if (!file) dir.files.set(fileName, file = { path: `${dir.path}${fileName}`, name: fileName, findings: [], file: null })
+  return file
+}
+
+// The tree of the recorded change's files and the findings' files, joined by path.
+function build(findings: TreeFinding[], files: ChangedFile[] = []): { root: FolderNode; other: TreeFinding[] } {
   const root: FolderNode = { path: '', name: '', folders: new Map(), files: new Map() }
   const other: TreeFinding[] = []
+  for (const c of files) {
+    const node = place(root, c.path)
+    if (node) node.file = c
+  }
   for (const f of findings) {
-    const lead = f.path.startsWith('/') ? '/' : ''
-    const segs = f.path.slice(lead.length).split('/').filter(s => s !== '')
-    const name = segs.pop()
-    if (name === undefined) {
-      other.push(f)
-      continue
-    }
-    // A leading `/` stays on the first segment: `/repo2/app/`.
-    let dir = root
-    segs.forEach((seg, i) => {
-      const s = i === 0 ? lead + seg : seg
-      let next = dir.folders.get(s)
-      if (!next) dir.folders.set(s, next = { path: `${dir.path}${s}/`, name: s, folders: new Map(), files: new Map() })
-      dir = next
-    })
-    const fileName = segs.length === 0 ? lead + name : name
-    let file = dir.files.get(fileName)
-    if (!file) dir.files.set(fileName, file = { path: `${dir.path}${fileName}`, name: fileName, findings: [] })
-    file.findings.push(f)
+    const node = place(root, f.path)
+    if (node) node.findings.push(f)
+    else other.push(f)
   }
   return { root, other }
 }
 
 const sorted = <T extends { name: string }>(m: Map<string, T>) => [...m.values()].sort((a, b) => byCodePoint(a.name, b.name))
 
-const under = (dir: FolderNode): TreeFinding[] => [...[...dir.folders.values()].flatMap(under), ...[...dir.files.values()].flatMap(f => f.findings)]
+const nodesUnder = (dir: FolderNode): FileNode[] => [...[...dir.folders.values()].flatMap(nodesUnder), ...dir.files.values()]
 
-const filesUnder = (dir: FolderNode): number => dir.files.size + [...dir.folders.values()].reduce((n, d) => n + filesUnder(d), 0)
+const under = (dir: FolderNode): TreeFinding[] => nodesUnder(dir).flatMap(f => f.findings)
+
+// More than 15 files, so clean folders start folded.
+export const isBigTree = (view: FindingsView | null, change: TreeChange | null | undefined) =>
+  !!change && nodesUnder(build(view?.findings ?? [], change.files).root).length > 15
 
 type Entry = {
   kind: 'folder' | 'file' | 'other'
@@ -380,6 +453,7 @@ type Entry = {
   counts: Counts
   files: number
   findings: TreeFinding[]
+  file: ChangedFile | null
   isOpen: boolean
   isHidden: boolean
 }
@@ -388,11 +462,19 @@ const stateWord = (isOpen: boolean) => (isOpen ? 'open' : 'folded')
 
 const TAG_WORD: Record<TreeFinding['tag'], string> = { IMPORTANT: 'important', NIT: 'nit', 'PRE-EXISTING': 'pre-existing' }
 
+const pad = (n: number): TreePart[] => (n > 0 ? [{ text: ' '.repeat(n) }] : [])
+
 // The tree's rows, in order: folders before files, each sorted by name, a folder holding only one folder merged
 // with it, and the findings with no location under `other`, last. Rows inside a folded folder or file are left out.
-// Folder, file, and `other` rows are `width` wide, ending in one right-aligned column per mark the view has.
-export function treeRows(view: FindingsView, o: TreeOptions): TreeRow[] {
-  const { root, other } = build(view.findings)
+// Folder, file, and `other` rows are `width` wide, ending in one right-aligned column per mark the view has. With a
+// recorded change, each row also leads with its progress and git letter, and ends with its line counts and step
+// before the marks; with no findings view (Build), there are no marks.
+export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
+  const ch = o.change ?? null
+  if (!view && !ch) return []
+  const rereview = ch?.rereview ?? []
+  const { root, other } = build(view?.findings ?? [], ch?.files ?? [])
+  const isBig = isBigTree(view, ch)
   const entries: Entry[] = []
   const walk = (dir: FolderNode, depth: number, isHidden: boolean) => {
     for (const child of sorted(dir.folders)) {
@@ -405,26 +487,29 @@ export function treeRows(view: FindingsView, o: TreeOptions): TreeRow[] {
         name += `${only.name}/`
       }
       const key = `${o.scope}:tree:${node.path}`
-      const isOpen = o.folds[key] ?? true
-      entries.push({ kind: 'folder', key, path: node.path, name, depth, counts: countOf(under(node)), files: filesUnder(node), findings: [], isOpen, isHidden })
+      const nodes = nodesUnder(node)
+      // In a big tree a folder starts folded unless it holds an open or ↻ finding, or an unplanned file.
+      const hasProblem = () => nodes.some(f => f.findings.some(x => x.state === 'open') || progressOf(f.file, ch) === '*')
+      const isOpen = o.folds[key] ?? (!isBig || hasProblem())
+      entries.push({ kind: 'folder', key, path: node.path, name, depth, counts: countOf(under(node), rereview), files: nodes.length, findings: [], file: null, isOpen, isHidden })
       walk(node, depth + 1, isHidden || !isOpen)
     }
     for (const file of sorted(dir.files)) {
       const key = `${o.scope}:tree:${file.path}`
-      const c = countOf(file.findings)
-      const isOpen = o.folds[key] ?? (c.important + c.nit + c.preExisting + c.dropped > 0 || (o.isHigh && c.fixed > 0))
-      entries.push({ kind: 'file', key, path: file.path, name: file.name, depth, counts: c, files: 1, findings: [...file.findings].sort(byLine), isOpen, isHidden })
+      const c = countOf(file.findings, rereview)
+      const isOpen = o.folds[key] ?? (c.important + c.awaiting + c.nit + c.preExisting + c.dropped > 0 || (o.isHigh && c.fixed > 0))
+      entries.push({ kind: 'file', key, path: file.path, name: file.name, depth, counts: c, files: 1, findings: [...file.findings].sort(byLine), file: file.file, isOpen, isHidden })
     }
   }
   walk(root, 0, false)
   if (other.length > 0) {
     const key = `${o.scope}:tree::other`
-    entries.push({ kind: 'other', key, path: ':other', name: 'other', depth: 0, counts: countOf(other), files: 0, findings: other, isOpen: o.folds[key] ?? true, isHidden: false })
+    entries.push({ kind: 'other', key, path: ':other', name: 'other', depth: 0, counts: countOf(other, rereview), files: 0, findings: other, file: null, isOpen: o.folds[key] ?? true, isHidden: false })
   }
 
   // Columns are measured over every row, folded or not, so a fold never moves one.
-  const total = countOf(view.findings)
-  const marks = MARKS.filter(m => total[m.field] > 0).map(m => ({
+  const total = countOf(view?.findings ?? [], rereview)
+  const marks = (view ? MARKS : []).filter(m => total[m.field] > 0).map(m => ({
     ...m,
     width: Math.max(...entries.map(e => (e.counts[m.field] ? cellWidth(`${m.glyph}${e.counts[m.field]}`) : 0))),
   }))
@@ -437,23 +522,80 @@ export function treeRows(view: FindingsView, o: TreeOptions): TreeRow[] {
     }),
   ].filter(p => p.text !== '')
 
+  // The change's columns: progress and letter at the start; the unplanned word, line counts, and step before the marks.
+  const countText = (e: Entry): TreePart[] => (e.kind === 'folder' ? [{ text: plural(e.files, 'file'), dim: true }] : countParts(e.file))
+  const stepText = (e: Entry) => (e.file && e.file.steps.length > 0 ? `s${Math.min(...e.file.steps)}` : '')
+  const isUnplanned = (e: Entry) => e.kind === 'file' && progressOf(e.file, ch) === '*'
+  const countWidth = Math.max(7, ...entries.map(e => widthOf(countText(e))))
+  const stepWidth = Math.max(2, ...entries.map(e => cellWidth(stepText(e))))
+  const markWidth = view ? Math.max(6, blockWidth) : 0
+  const WORD = 'unplanned'
+  let hasWord = entries.some(isUnplanned)
+  let hasStep = true
+  let hasCount = true
+  const rightWidth = () => {
+    const cols = (hasCount ? countWidth : 0) + (hasCount && hasStep ? 1 : 0) + (hasStep ? stepWidth : 0)
+    return cols + (view ? (cols > 0 ? 2 : 0) + markWidth : 0)
+  }
+  const leadWidth = ch ? (ch.hasPlan ? 2 : 0) + 2 : 0
+  // The widest file row at its least: the lead, indent and icon, a 4-column name, a gap, the word, and the right block.
+  const need = () => Math.max(0, ...entries.filter(e => e.kind === 'file').map(e =>
+    leadWidth + 2 * e.depth + 2 + (o.icons ? 3 : 0) + Math.min(4, cellWidth(e.name)) + 1 + (hasWord && isUnplanned(e) ? cellWidth(WORD) + 1 : 0) + rightWidth()))
+  // What gives way when that doesn't fit, decided once for the view: the word, then the step, then the counts.
+  if (ch && need() > o.width) hasWord = false
+  if (ch && need() > o.width) hasStep = false
+  if (ch && need() > o.width) hasCount = false
+
+  const leadOf = (e: Entry): TreePart[] => {
+    if (!ch) return []
+    const p = e.kind === 'file' ? progressOf(e.file, ch) : ''
+    const mark = PROGRESS.find(m => m.glyph === p)
+    const letter = e.kind === 'file' && e.file ? e.file.letter : ''
+    return [
+      ...(ch.hasPlan ? [mark ? markPart(mark.glyph, mark.color) : { text: ' ' }, { text: ' ' }] : []),
+      letter ? { text: letter, ...(e.file?.added === null ? { dim: true } : {}) } : { text: ' ' },
+      { text: ' ' },
+    ]
+  }
+  const rightOf = (e: Entry): TreePart[] => {
+    if (!ch) return [...(e.kind === 'folder' ? [{ text: `${plural(e.files, 'file')}  `, dim: true }] : []), ...markParts(e.counts)]
+    const count = countText(e)
+    const step = stepText(e)
+    return [
+      ...(hasWord && isUnplanned(e) ? [{ text: WORD, dim: true }, { text: ' ' }] : []),
+      ...(hasCount ? [...pad(countWidth - widthOf(count)), ...count] : []),
+      ...(hasCount && hasStep ? [{ text: ' ' }] : []),
+      ...(hasStep ? [...pad(stepWidth - cellWidth(step)), ...(step ? [{ text: step }] : [])] : []),
+      ...(view ? [...(hasCount || hasStep ? [{ text: '  ' }] : []), ...markParts(e.counts)] : []),
+    ]
+  }
+
   const rows: TreeRow[] = []
   for (const e of entries) {
     if (e.isHidden) continue
-    const lead = `${'  '.repeat(e.depth)}${e.kind === 'file' ? (e.isOpen ? '  ' : '▸ ') : e.isOpen ? '▾ ' : '▸ '}`
+    // A file with no findings has nothing to fold.
+    const hasFindings = e.findings.length > 0
+    const lead = `${'  '.repeat(e.depth)}${e.kind === 'file' ? (e.isOpen || !hasFindings ? '  ' : '▸ ') : e.isOpen ? '▾ ' : '▸ '}`
+    const cols = leadOf(e)
     const icon = !o.icons || e.kind === 'other' ? null : e.kind === 'folder' ? folderIcon(e.isOpen) : fileIcon(e.name)
-    const right: TreePart[] = [...(e.kind === 'folder' ? [{ text: `${plural(e.files, 'file')}  `, dim: true }] : []), ...markParts(e.counts)]
-    const room = o.width - widthOf(right) - 1 - cellWidth(lead) - (icon ? 3 : 0)
+    const right = rightOf(e)
+    const room = o.width - widthOf(right) - 1 - widthOf(cols) - cellWidth(lead) - (icon ? 3 : 0)
     const name = e.kind === 'folder' ? cutChain(e.name, room) : e.kind === 'file' ? cutMiddle(e.name, room) : e.name
-    const left = fit([{ text: lead }, ...(icon ? [{ text: icon.glyph, color: icon.color }, { text: ' ' }] : []), { text: name }], Math.max(0, o.width - widthOf(right) - 1))
+    const left = fit([...cols, { text: lead }, ...(icon ? [{ text: icon.glyph, color: icon.color }, { text: ' ' }] : []), { text: name }], Math.max(0, o.width - widthOf(right) - 1))
     const gap = Math.max(1, o.width - widthOf(left) - widthOf(right))
     const counts = words(e.counts)
-    const label = [e.kind === 'folder' ? `${e.path} folder` : e.kind === 'file' ? e.path : 'other', ...(e.kind === 'folder' ? [plural(e.files, 'file')] : []), ...counts, stateWord(e.isOpen)].join(', ')
+    const label = [
+      e.kind === 'folder' ? `${e.path} folder` : e.kind === 'file' ? e.path : 'other',
+      ...(e.kind === 'folder' ? [plural(e.files, 'file')] : []),
+      ...(e.file && ch ? fileWords(e.file, ch) : []),
+      ...counts,
+      ...(e.kind !== 'file' || hasFindings ? [stateWord(e.isOpen)] : []),
+    ].join(', ')
     rows.push({ key: e.key, kind: e.kind, isOpen: e.isOpen, label, parts: fit([...left, { text: ' '.repeat(gap) }, ...right], o.width), more: [], copy: null, confidence: null })
     if (e.kind === 'folder' || !e.isOpen) continue
 
     // Findings sit two columns in from their file's name.
-    const indent = ' '.repeat(cellWidth(lead) + (icon ? 3 : 0) + 2)
+    const indent = ' '.repeat(widthOf(cols) + cellWidth(lead) + (icon ? 3 : 0) + 2)
     const seen = new Map<string, number>()
     for (const f of e.findings) {
       const i = seen.get(String(f.line)) ?? 0
@@ -461,10 +603,11 @@ export function treeRows(view: FindingsView, o: TreeOptions): TreeRow[] {
       const key = `${e.key}:${f.line ?? ''}#${i}`
       const isOpen = o.folds[key] ?? false
       const isDropped = f.state === 'dropped'
-      const mark = f.state === 'fixed' ? MARKS[1] : f.tag === 'IMPORTANT' ? MARKS[0] : f.tag === 'NIT' ? MARKS[2] : MARKS[3]
+      const awaits = isAwaiting(f, rereview)
+      const mark = f.state === 'fixed' ? MARKS[2] : f.tag === 'IMPORTANT' ? (awaits ? MARKS[1] : MARKS[0]) : f.tag === 'NIT' ? MARKS[3] : MARKS[4]
       const glyph = isDropped ? { text: '·', dim: true } : markPart(mark.glyph, mark.color)
       const where = f.line === null ? '(no location)' : `:${f.line}`
-      const status = f.state === 'fixed' ? `${view.unit} ${f.round} → fixed by ${view.unit} ${f.fixedBy}` : isDropped ? `dropped on dispute in ${view.unit} ${f.round}` : ''
+      const status = f.state === 'fixed' ? `${view?.unit} ${f.round} → fixed by ${view?.unit} ${f.fixedBy}` : isDropped ? `dropped on dispute in ${view?.unit} ${f.round}` : ''
       const prefix: TreePart[] = [{ text: indent, dim: isDropped }, glyph, { text: ` ${where} `, dim: true }]
       const room = o.width - widthOf(prefix)
       const full = status ? `${status}: ${f.title}` : f.title
@@ -475,7 +618,7 @@ export function treeRows(view: FindingsView, o: TreeOptions): TreeRow[] {
         key,
         kind: 'finding',
         isOpen,
-        label: [`${TAG_WORD[f.tag]} ${loc ? `at ${loc}` : 'with no location'}: ${f.title}`, ...(status ? [status] : []), stateWord(isOpen)].join(', '),
+        label: [`${TAG_WORD[f.tag]} ${loc ? `at ${loc}` : 'with no location'}: ${f.title}`, ...(status ? [status] : []), ...(awaits ? ['awaiting re-review'] : []), stateWord(isOpen)].join(', '),
         parts: fit([...prefix, body], o.width),
         more: lines.slice(1).map(l => `${' '.repeat(widthOf(prefix))}${l}`),
         copy: f.path && f.line !== null ? `${f.path}:${f.line}` : null,
@@ -497,17 +640,13 @@ export function confidenceRow(row: TreeRow, width: number): TreePart[] {
   return [{ text: `${' '.repeat(indent)}${conf}${conf && button ? '  ' : ''}`, dim: true }, ...(button ? [{ text: button }] : [])]
 }
 
-// The tree's header, and its key: the marks the view shows, in order, after `key: `, wrapping between entries onto
-// lines indented under the first. No key when the view has no rows.
-export function treeHeader(view: FindingsView | null, width: number): { header: string; key: TreePart[][] } | null {
-  if (!view) return null
-  const header = `the verifier kept ${view.kept > 0 ? 'these' : 'nothing'} in ${view.unit} ${view.round}`
-  const total = countOf(view.findings)
+// Key entries after `key: `, wrapping between entries onto lines indented under the first. None, no line.
+function keyLines(entries: { glyph: TreePart; word: string }[], width: number): TreePart[][] {
   const key: TreePart[][] = []
   let line: TreePart[] = []
   let w = 0
-  for (const m of MARKS.filter(m => total[m.field] > 0)) {
-    const entry = cellWidth(`${m.glyph} ${m.word}`)
+  for (const m of entries) {
+    const entry = cellWidth(`${m.glyph.text} ${m.word}`)
     if (line.length === 0) {
       line = [{ text: 'key: ', dim: true }]
       w = 5
@@ -519,9 +658,69 @@ export function treeHeader(view: FindingsView | null, width: number): { header: 
       line.push({ text: '  ' })
       w += 2
     }
-    line.push(markPart(m.glyph, m.color), { text: ` ${m.word}`, dim: true })
+    line.push(m.glyph, { text: ` ${m.word}`, dim: true })
     w += entry
   }
   if (line.length > 0) key.push(line)
-  return { header, key }
+  return key
+}
+
+// The tree's header, and its key: the marks the view shows, in order, then on their own lines the lead marks the
+// change shows (`✓ built  ○ not yet  * unplanned`). No mark key when the view has no rows; no header ('') with no
+// view, as in Build; null with neither a view nor a change.
+export function treeHeader(view: FindingsView | null, width: number, change?: TreeChange | null): { header: string; key: TreePart[][] } | null {
+  if (!view && !change) return null
+  const header = view ? `the verifier kept ${view.kept > 0 ? 'these' : 'nothing'} in ${view.unit} ${view.round}` : ''
+  const total = countOf(view?.findings ?? [], change?.rereview ?? [])
+  const marks = (view ? MARKS : []).filter(m => total[m.field] > 0).map(m => ({ glyph: markPart(m.glyph, m.color), word: m.word }))
+  const shown = new Set((change?.files ?? []).map(f => progressOf(f, change ?? null)))
+  const leads = PROGRESS.filter(m => shown.has(m.glyph)).map(m => ({ glyph: markPart(m.glyph, m.color), word: m.word }))
+  return { header, key: [...keyLines(marks, width), ...keyLines(leads, width)] }
+}
+
+// The tree's header in Plan (`4 steps · 9 files, 3 new`: the planned files, and how many are new) and in Build
+// (`5 of 9 planned files changed · 1 unplanned`, or `3 files changed` with no plan).
+export function changeHeader(kind: 'plan' | 'build', change: TreeChange, planSteps: number): string {
+  const planned = change.files.filter(f => f.steps.length > 0)
+  if (kind === 'plan') {
+    const fresh = planned.filter(f => f.letter === 'A').length
+    return `${plural(planSteps, 'step')} · ${plural(planned.length, 'file')}${fresh > 0 ? `, ${fresh} new` : ''}`
+  }
+  const changed = change.files.filter(f => f.added !== null)
+  if (!change.hasPlan) return `${plural(changed.length, 'file')} changed`
+  const unplanned = changed.filter(f => f.steps.length === 0).length
+  return `${planned.filter(f => f.added !== null).length} of ${plural(planned.length, 'planned file')} changed${unplanned > 0 ? ` · ${unplanned} unplanned` : ''}`
+}
+
+// How many of the view's open IMPORTANT findings are awaiting re-review.
+export const awaitingOf = (view: FindingsView | null, rereview: string[]) => (view ? countOf(view.findings, rereview).awaiting : 0)
+
+// How many of a reviewer's reply's IMPORTANT findings are ones now awaiting re-review, paired as trackFindings
+// pairs them: by repo-relative path and Pattern Category.
+export function awaitingFrom(reply: string, view: FindingsView | null, rereview: string[], roots: string[]): number {
+  const waiting = new Set((view?.findings ?? []).filter(f => isAwaiting(f, rereview)).map(f => `${f.path}\t${category(f.title)}`))
+  return keptFindings(reply).filter(k => k.tag === 'IMPORTANT' && waiting.has(`${repoPath(splitLoc(k.loc).path, roots)}\t${category(k.title)}`)).length
+}
+
+// The Task card's footprint line once the build has a base: the files changed and their lines (planned-only rows
+// and binary lines left out), the latest voted round's kept findings by severity (or `no findings`, or `not
+// reviewed yet`), and `as of` the list's commit when HEAD has moved on. Each item's parts, and its words for a label.
+export function footprint(list: FileList, rounds: Round[], head: string): { files: number; parts: TreePart[][]; words: string[] } | null {
+  if (list.base === '') return null
+  const rows = list.files.filter(f => f.added !== null)
+  const added = rows.reduce((n, f) => n + lines(f.added), 0)
+  const removed = rows.reduce((n, f) => n + lines(f.removed), 0)
+  const item = (text: string, word = text, style: Omit<TreePart, 'text'> = {}) => ({ parts: [{ text, ...style }], word })
+  const items: { parts: TreePart[]; word: string }[] = [item(plural(rows.length, 'file'))]
+  if (added || removed) items.push({ parts: lineParts(added, removed), word: lineWords(added, removed) })
+  const voted = rounds.filter(r => r.findings !== null).at(-1)?.findings
+  if (!voted) items.push(item('not reviewed yet', undefined, { dim: true }))
+  else if (voted.important + voted.nit + voted.preExisting === 0) items.push(item('no findings', undefined, { color: 'success' }))
+  else {
+    if (voted.important) items.push(item(`${voted.important} important`, undefined, { color: 'error' }))
+    if (voted.nit) items.push(item(plural(voted.nit, 'nit'), undefined, { dim: true }))
+    if (voted.preExisting) items.push(item(`${voted.preExisting} pre`, `${voted.preExisting} pre-existing`, { dim: true }))
+  }
+  if (isStaleProof(list.head, head)) items.push(item(`as of ${list.head.slice(0, 7)}`, undefined, { dim: true }))
+  return { files: rows.length, parts: items.map(i => i.parts), words: items.map(i => i.word) }
 }

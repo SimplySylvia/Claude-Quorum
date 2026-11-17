@@ -35,6 +35,24 @@ export type TreeFinding = {
 // disputes.md dropped, and every finding to draw.
 export type FindingsView = { unit: 'round' | 'run'; round: number; kept: number; dropped: number; findings: TreeFinding[] }
 
+// One row of .tasks/<slug>/files.tsv (bin/quorum-files record): the git letter, lines added and removed (`bin` for
+// a binary file, null while the file is only planned), the repo-relative path and, for a rename, the old one (''
+// otherwise), the plan steps whose line names it (ascending), and whether it changed since the last round sha
+// (null when there's none).
+export type ChangedFile = {
+  letter: 'M' | 'A' | 'D' | 'R'
+  added: number | 'bin' | null
+  removed: number | 'bin' | null
+  path: string
+  oldPath: string
+  steps: number[]
+  fix: boolean | null
+}
+
+// files.tsv's header and rows: HEAD when recorded, the base the change is diffed against, the round sha `fix` is
+// against ('' for `-`), and when it was recorded, in unix seconds.
+export type FileList = { head: string; base: string; since: string; recorded: number; files: ChangedFile[] }
+
 // The pane's foldable sections. Each opens by itself while it holds a problem; a click overrides that.
 export type Section = 'tasks' | 'requirements' | 'checks' | 'rounds' | 'reviews' | 'spend' | 'agents'
 

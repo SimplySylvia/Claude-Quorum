@@ -11,10 +11,10 @@ import {
   plural, voterNext,
 } from '../../hooks/dashboard/task'
 import {
-  cellWidth, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, iconsOn, markText, markWords, repoPath, roundKept, runEnds, splitLoc, trackFindings, treeHeader, treeRows,
+  awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, footprint, iconsOn, isBigTree, markText, markWords, repoPath, roundKept, runEnds, splitLoc, trackFindings, treeHeader, treeRows,
 } from '../../hooks/dashboard/tree'
-import type { TreeRow } from '../../hooks/dashboard/tree'
-import type { FindingsView, TreeFinding } from '../../types'
+import type { TreeChange, TreeRow } from '../../hooks/dashboard/tree'
+import type { ChangedFile, FileList, FindingsView, TreeFinding } from '../../types'
 
 const state = (status: string, extra = '') => `---
 slug: export-csv
@@ -1347,6 +1347,193 @@ describe('findings tree helpers', () => {
     // Nothing kept, but an earlier fix: the header says so, and the key names only ✓.
     expect(treeHeader(view([finding('a.ts', 1, 'IMPORTANT', 'x', { state: 'fixed', fixedBy: 2 })], { kept: 0, round: 2 }), 46))
       .toEqual({ header: 'the verifier kept nothing in round 2', key: [[{ text: 'key: ', dim: true }, { text: '✓', color: 'success' }, { text: ' fixed this run', dim: true }]] })
+  })
+
+  // A files.tsv row, and the change the tree joins: step 1 built unless the test says otherwise.
+  const changed = (path: string, letter: ChangedFile['letter'], added: ChangedFile['added'], removed: ChangedFile['removed'], steps: number[], extra: Partial<ChangedFile> = {}): ChangedFile =>
+    ({ letter, added, removed, path, oldPath: '', steps, fix: null, ...extra })
+  const change = (files: ChangedFile[], extra: Partial<TreeChange> = {}): TreeChange => ({ files, hasPlan: true, built: [1], allBuilt: false, rereview: [], ...extra })
+  const keyText = (k: { text: string }[][]) => k.map(l => l.map(p => p.text).join(''))
+
+  test('treeRows joins the recorded change with lead columns, counts, steps, unplanned, and ↻', () => {
+    const files = [
+      changed('src/a.ts', 'M', 86, 3, [1]),
+      changed('src/b.ts', 'A', 12, 0, [2]),
+      changed('src/c.ts', 'A', null, null, [2]),
+      changed('src/d.ts', 'M', 1, 1, []),
+      changed('src/logo.png', 'M', 'bin', 'bin', [1]),
+      changed('src/two.ts', 'M', 5, 0, [1, 2]),
+      changed('new.ts', 'R', 2, 2, [1], { oldPath: 'old.ts' }),
+    ]
+    const row = (rows: TreeRow[], path: string) => rows.find(r => r.key === `s:tree:${path}`) as TreeRow
+    // Build: no findings view, so no mark block.
+    const build = treeRows(null, opts({ change: change(files) }))
+    expect(build.map(r => r.key)).toEqual(['s:tree:src/', ...['a.ts', 'b.ts', 'c.ts', 'd.ts', 'logo.png', 'two.ts'].map(n => `s:tree:src/${n}`), 's:tree:new.ts'])
+    for (const r of build) expect(width(rowText(r))).toBe(46)
+    expect(rowText(row(build, 'src/'))).toMatch(/^ {4}▾ src\/ +6 files {3}$/)
+    expect(row(build, 'src/').label).toBe('src/ folder, 6 files, open')
+    expect(rowText(row(build, 'src/a.ts'))).toMatch(/^✓ M {5}a\.ts + \+86 −3 s1$/)
+    expect(rowText(row(build, 'src/b.ts'))).toMatch(/^○ A {5}b\.ts + {3}\+12 s2$/)
+    expect(rowText(row(build, 'src/c.ts'))).toMatch(/^○ A {5}c\.ts + {8}s2$/)
+    expect(rowText(row(build, 'src/d.ts'))).toMatch(/^\* M {5}d\.ts +unplanned {3}\+1 −1 {3}$/)
+    expect(rowText(row(build, 'src/logo.png'))).toMatch(/ {5}bin s1$/)
+    // Steps 1 and 2 name it, and only step 1 is built.
+    expect(rowText(row(build, 'src/two.ts'))).toMatch(/^○ M /)
+    // Colours: ✓ success, ○ * and the unplanned word dim, the letter dim only while planned, +N success, −N error.
+    const part = (r: TreeRow, text: string) => r.parts.find(p => p.text === text)
+    expect(part(row(build, 'src/a.ts'), '✓')?.color).toBe('success')
+    expect(part(row(build, 'src/a.ts'), 'M')?.dim).toBeUndefined()
+    expect(part(row(build, 'src/a.ts'), '+86')?.color).toBe('success')
+    expect(part(row(build, 'src/a.ts'), '−3')?.color).toBe('error')
+    expect(part(row(build, 'src/b.ts'), '○')?.dim).toBe(true)
+    expect(part(row(build, 'src/c.ts'), 'A')?.dim).toBe(true)
+    expect(part(row(build, 'src/d.ts'), '*')?.dim).toBe(true)
+    expect(part(row(build, 'src/d.ts'), 'unplanned')?.dim).toBe(true)
+    // A file row with no findings has nothing to fold: no ▸, even folded, and no state word.
+    const folded = treeRows(null, opts({ change: change(files), folds: { 's:tree:src/a.ts': false } }))
+    for (const r of folded.filter(r => r.kind === 'file')) expect(rowText(r)).not.toContain('▸')
+    expect(row(build, 'src/a.ts').label).toBe('src/a.ts, step 1 built, modified, 86 lines added, 3 removed')
+    expect(row(build, 'src/b.ts').label).toBe('src/b.ts, step 2 not built yet, added, 12 lines added')
+    expect(row(build, 'src/c.ts').label).toBe('src/c.ts, step 2 not built yet, added, not changed yet')
+    expect(row(build, 'src/d.ts').label).toBe('src/d.ts, unplanned, modified, 1 line added, 1 removed')
+    expect(row(build, 'src/logo.png').label).toBe('src/logo.png, step 1 built, modified, binary')
+    expect(row(build, 'src/two.ts').label).toBe('src/two.ts, step 1 built, step 2 not built yet, modified, 5 lines added')
+    expect(row(build, 'new.ts').label).toBe('new.ts, step 1 built, renamed from old.ts, 2 lines added, 2 removed')
+    // An unsliced build with its proof: every planned file is built. With no plan the progress column is gone.
+    expect(rowText(row(treeRows(null, opts({ change: change(files, { built: [], allBuilt: true }) })), 'src/c.ts'))).toMatch(/^✓ A /)
+    const noPlan = treeRows(null, opts({ change: change(files.map(f => ({ ...f, steps: [] })), { hasPlan: false }) }))
+    expect(rowText(row(noPlan, 'src/a.ts'))).toMatch(/^M {5}a\.ts + \+86 −3 {3}$/)
+    expect(row(noPlan, 'src/d.ts').label).toBe('src/d.ts, modified, 1 line added, 1 removed')
+    // The headers, and the lead key: only the marks shown.
+    expect(changeHeader('build', change(files), 2)).toBe('5 of 6 planned files changed · 1 unplanned')
+    expect(changeHeader('build', change(files.slice(0, 1)), 2)).toBe('1 of 1 planned file changed')
+    expect(changeHeader('build', change(files, { hasPlan: false }), 0)).toBe('6 files changed')
+    const planned = [changed('app/report.py', 'M', null, null, [1]), changed('app/util.py', 'A', null, null, [2]), changed('README.md', 'M', null, null, [4])]
+    expect(changeHeader('plan', change(planned), 4)).toBe('4 steps · 3 files, 1 new')
+    const plan = treeRows(null, opts({ change: change(planned, { built: [] }) }))
+    for (const r of plan.filter(r => r.kind === 'file')) expect(r.parts.find(p => /^[MA]$/.test(p.text))?.dim).toBe(true)
+    expect(treeHeader(null, 46, change(files))).toEqual({ header: '', key: [[
+      { text: 'key: ', dim: true }, { text: '✓', color: 'success' }, { text: ' built', dim: true }, { text: '  ' },
+      { text: '○', dim: true }, { text: ' not yet', dim: true }, { text: '  ' }, { text: '*', dim: true }, { text: ' unplanned', dim: true },
+    ]] })
+    expect(keyText(treeHeader(null, 46, change(planned, { built: [] }))?.key ?? [])).toEqual(['key: ○ not yet'])
+    expect(treeHeader(null, 46, change(files, { hasPlan: false }))).toEqual({ header: '', key: [] })
+
+    // Review: a kept IMPORTANT on a file the fix changed is ↻, beside a fixed one and a nit, each its own term.
+    const findings = [
+      finding('src/a.ts', 41, 'IMPORTANT', 'Ignored argument'),
+      finding('src/a.ts', 9, 'IMPORTANT', 'Header row twice', { state: 'fixed', fixedBy: 2 }),
+      finding('src/d.ts', 7, 'NIT', 'Magic number'),
+    ]
+    const v = view(findings, { kept: 2 })
+    const review = treeRows(v, opts({ change: change(files, { rereview: ['src/a.ts'] }) }))
+    for (const r of review.filter(r => r.kind !== 'finding')) expect(width(rowText(r))).toBe(46)
+    expect(rowText(row(review, 'src/a.ts'))).toMatch(/^✓ M {5}a\.ts + \+86 −3 s1  ↻1  ✓1 {4}$/)
+    expect(part(row(review, 'src/a.ts'), '↻1')?.color).toBe('warning')
+    expect(row(review, 'src/a.ts').label).toBe('src/a.ts, step 1 built, modified, 86 lines added, 3 removed, 1 awaiting re-review, 1 fixed, open')
+    expect(row(review, 'src/a.ts').label).not.toContain('fixed, awaiting')
+    expect(row(review, 'src/').label).toBe('src/ folder, 6 files, 1 awaiting re-review, 1 fixed, 1 nit, open')
+    const awaiting = row(review, 'src/a.ts:41#0')
+    expect(rowText(awaiting)).toBe(`${' '.repeat(10)}↻ :41 Ignored argument`)
+    expect(awaiting.parts.find(p => p.text === '↻')?.color).toBe('warning')
+    expect(awaiting.label).toBe('important at src/a.ts:41: Ignored argument, awaiting re-review, folded')
+    // A file with no findings in the review still has no state word.
+    expect(row(review, 'src/b.ts').label).toBe('src/b.ts, step 2 not built yet, added, 12 lines added')
+    expect(keyText(treeHeader(v, 46, change(files, { rereview: ['src/a.ts'] }))?.key ?? []))
+      .toEqual(['key: ↻ awaiting re-review  ✓ fixed this run', '     n nit', 'key: ✓ built  ○ not yet  * unplanned'])
+    // Not changed since the round: ✗, as today.
+    expect(rowText(row(treeRows(v, opts({ change: change(files) })), 'src/a.ts'))).toMatch(/✗1  ✓1 {4}$/)
+    expect(awaitingOf(v, ['src/a.ts'])).toBe(1)
+    expect(awaitingOf(v, [])).toBe(0)
+    expect(awaitingOf(null, ['src/a.ts'])).toBe(0)
+    const reply = '[IMPORTANT] /repo/src/a.ts:40 — Pattern Category: ignored  Argument\n[IMPORTANT] src/d.ts:7 — Pattern Category: Magic number\n[NIT] src/a.ts:41 — Pattern Category: Ignored argument\n'
+    expect(awaitingFrom(reply, v, ['src/a.ts'], ['/repo'])).toBe(1)
+    expect(awaitingFrom(reply, v, [], ['/repo'])).toBe(0)
+    // A finding on a file the list doesn't hold keeps blank lead columns.
+    const elsewhere = treeRows(view([finding('lib/z.py', 5, 'NIT', 'x')]), opts({ change: change(files) }))
+    expect(rowText(row(elsewhere, 'lib/z.py'))).toMatch(/^ {8}z\.py +n1$/)
+
+    // Past 15 files, clean folders start folded; a folder with an open or ↻ finding, or an unplanned file, stays open.
+    const many = (n: number) => [
+      ...Array.from({ length: n }, (_, i) => changed(`clean/f${String(i).padStart(2, '0')}.ts`, 'M', 1, 0, [1])),
+      changed('bad/x.ts', 'M', 1, 0, [1]), changed('odd/u.ts', 'M', 1, 0, []), changed('fix/r.ts', 'M', 1, 0, [1]),
+    ]
+    const v2 = view([finding('bad/x.ts', 1, 'NIT', 'x'), finding('fix/r.ts', 2, 'IMPORTANT', 'y')])
+    const big = change(many(13), { rereview: ['fix/r.ts'] })
+    expect(isBigTree(v2, big)).toBe(true)
+    expect(isBigTree(v2, change(many(12)))).toBe(false)
+    expect(isBigTree(v2, null)).toBe(false)
+    const bigRows = treeRows(v2, opts({ change: big }))
+    expect(['bad/', 'clean/', 'fix/', 'odd/'].map(p => row(bigRows, p).isOpen)).toEqual([true, false, true, true])
+    expect(bigRows.some(r => r.key.startsWith('s:tree:clean/f'))).toBe(false)
+    expect(treeRows(v2, opts({ change: big, folds: { 's:tree:clean/': true } })).some(r => r.key === 's:tree:clean/f00.ts')).toBe(true)
+    expect(treeRows(v2, opts({ change: change(many(12), { rereview: ['fix/r.ts'] }) })).filter(r => r.kind === 'folder').every(r => r.isOpen)).toBe(true)
+  })
+
+  test("the change's columns give way in order: name, unplanned, step, then counts", () => {
+    const files = [changed('src/a-really-long-file-name.ts', 'M', 12345, 6789, []), changed('src/b.ts', 'M', 1, 0, [12])]
+    const v = view([finding('src/b.ts', 1, 'NIT', 'x')])
+    const at = (w: number) => treeRows(v, opts({ width: w, change: change(files) }))
+    const text = (rows: TreeRow[], path: string) => rowText(rows.find(r => r.key === `s:tree:${path}`) as TreeRow)
+    const long = 'src/a-really-long-file-name.ts'
+    // 60: the name is cut first, and everything else shows.
+    const wide = at(60)
+    expect(text(wide, long)).toMatch(/^\* M {5}a-r\S*…\S*\.ts unplanned \+12345 −6789 {12}$/)
+    expect(text(wide, 'src/b.ts')).toMatch(/ s12 {6}n1$/)
+    // 46: the unplanned word goes; the * and the label keep it.
+    const no = at(46)
+    expect(text(no, long)).not.toContain('unplanned')
+    expect(text(no, long)).toMatch(/^\* M /)
+    expect(no.find(r => r.key === `s:tree:${long}`)?.label).toContain('unplanned')
+    expect(text(no, 'src/b.ts')).toMatch(/ s12 {6}n1$/)
+    // 36: the step column goes.
+    const noStep = at(36)
+    expect(text(noStep, 'src/b.ts')).not.toContain('s12')
+    expect(text(noStep, 'src/b.ts')).toMatch(/\+1 {6}n1$/)
+    expect(text(noStep, 'src/')).toContain('2 files')
+    // 30: the line counts go, and the folder's file count with them.
+    const noCounts = at(30)
+    expect(text(noCounts, long)).not.toContain('+12345')
+    expect(text(noCounts, 'src/')).not.toContain('files')
+    expect(text(noCounts, 'src/b.ts')).toMatch(/b\.ts +n1$/)
+    for (const [w, rows] of [[60, wide], [46, no], [36, noStep], [30, noCounts]] as const) {
+      for (const r of rows.filter(r => r.kind !== 'finding')) expect(width(rowText(r))).toBe(w)
+      // The name keeps at least 4 columns.
+      expect(text(rows, long).slice(8).replace(/ .*$/, '').length).toBeGreaterThanOrEqual(4)
+    }
+  })
+
+  test("footprint names the latest voted round's severities, not reviewed yet, and as of", () => {
+    const head = `abc1234${'0'.repeat(33)}`
+    const list = (files: ChangedFile[], extra: Partial<FileList> = {}): FileList => ({ head, base: 'f'.repeat(40), since: '', recorded: 1763300000, files, ...extra })
+    const files = [changed('a.ts', 'M', 86, 3, [1]), changed('b.ts', 'A', 12, 0, [2]), changed('c.png', 'M', 'bin', 'bin', []), changed('d.ts', 'M', null, null, [3])]
+    const items = (fp: ReturnType<typeof footprint>) => fp?.parts.map(item => item.map(p => p.text).join(''))
+    const fresh = footprint(list(files), [], head)
+    // The planned-only d.ts isn't counted, and bin adds no lines.
+    expect(fresh?.files).toBe(3)
+    expect(items(fresh)).toEqual(['3 files', '+98 −3', 'not reviewed yet'])
+    expect(fresh?.words).toEqual(['3 files', '98 lines added, 3 removed', 'not reviewed yet'])
+    expect(fresh?.parts[1]?.find(p => p.text === '+98')?.color).toBe('success')
+    expect(fresh?.parts[1]?.find(p => p.text === '−3')?.color).toBe('error')
+    expect(fresh?.parts[2]?.[0]?.dim).toBe(true)
+    // The latest voted round, not a later one still reviewing.
+    const voted = footprint(list(files), [{ n: 1, findings: { important: 1, nit: 2, preExisting: 1 }, candidates: 4 }, { n: 2, findings: null, candidates: null }], head)
+    expect(items(voted)).toEqual(['3 files', '+98 −3', '1 important', '2 nits', '1 pre'])
+    expect(voted?.words).toEqual(['3 files', '98 lines added, 3 removed', '1 important', '2 nits', '1 pre-existing'])
+    expect(voted?.parts[2]?.[0]?.color).toBe('error')
+    expect(voted?.parts[3]?.[0]?.dim).toBe(true)
+    const clean = footprint(list(files), [{ n: 1, findings: { important: 1, nit: 0, preExisting: 0 }, candidates: 1 }, { n: 2, findings: { important: 0, nit: 0, preExisting: 0 }, candidates: 0 }], head)
+    expect(items(clean)?.at(-1)).toBe('no findings')
+    expect(clean?.parts.at(-1)?.[0]?.color).toBe('success')
+    // An old list says when it was recorded.
+    const old = footprint(list(files), [], `def5678${'0'.repeat(33)}`)
+    expect(items(old)?.at(-1)).toBe('as of abc1234')
+    expect(old?.parts.at(-1)?.[0]?.dim).toBe(true)
+    expect(old?.words.at(-1)).toBe('as of abc1234')
+    // Only planned rows: no files and no lines yet. Before the build (base '-'), no footprint.
+    expect(items(footprint(list([files[3] as ChangedFile]), [], head))).toEqual(['0 files', 'not reviewed yet'])
+    expect(footprint(list(files, { base: '' }), [], head)).toBeNull()
+    expect(items(footprint(list([changed('x.ts', 'D', 0, 7, [1])]), [], head))).toEqual(['1 file', '−7', 'not reviewed yet'])
   })
 
   test('keptFindings keeps a finding with no location', () => {
