@@ -6,19 +6,19 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Check, Findings, FindingsView, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, RoundKept, Section, Snapshot, Stage } from '../../types'
+import type { ChangedFile, Check, Findings, FindingsView, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, RoundKept, Section, Snapshot, Stage } from '../../types'
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, SLICE_AT, stageOf, stages, tokenCount,
-  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext,
+  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress,
 } from './task'
-import { confidenceRow, iconsOn, markText, markWords, roundKept, runEnds, trackFindings, treeHeader, treeRows } from './tree'
-import type { TreePart } from './tree'
+import { awaitingFrom, changeHeader, confidenceRow, iconsOn, isBigTree, markText, markWords, roundKept, runEnds, trackFindings, treeHeader, treeRows } from './tree'
+import type { TreeChange, TreePart } from './tree'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-14' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-15' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-3' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
 const reviews = atom({ plugin: 'quorum', key: 'reviews' } as const, [], { shape: 'reviews-2' })
@@ -138,19 +138,28 @@ const roundOf = (h: RoundFiles): Round => ({
 const treeOf = (history: RoundFiles[], roots: string[]): FindingsView | null =>
   trackFindings(history.flatMap(h => (h.survivors === null ? [] : [roundKept(h.n, h.survivors, h.disputes ?? '', null)])), roots, 'round')
 
-// One plan or code review round: its reviewers' replies, the voter's, what survived, and the findings tree over
-// the review's rounds so far.
-async function roundNow($: EngineInterface, dir: string, kind: 'plan' | 'review', round: number, of: number, risk: string, tree: FindingsView | null): Promise<Now> {
+// One plan or code review round: its reviewers' replies, the voter's, what survived, the findings tree over the
+// review's rounds so far, and how many of each reply's IMPORTANT findings are now awaiting re-review (`rereview`,
+// the paths the fix changed; `roots`, what a reply's paths are read against).
+async function roundNow($: EngineInterface, dir: string, kind: 'plan' | 'review', round: number, of: number, risk: string, tree: FindingsView | null, rereview: string[], roots: string[]): Promise<Now> {
   const files = await readFiles($, `${dir}/round-${round}`, REVIEW_FILES)
   const survivors = files['survivors.md']
+  const reviewers = roundReviewers(kind, risk, files)
+  const rereviewBy: Record<string, number> = {}
+  for (const r of reviewers) {
+    const reply = files[`${r.role}.md`]
+    const k = reply === undefined || rereview.length === 0 ? 0 : awaitingFrom(reply, tree, rereview, roots)
+    if (k > 0) rereviewBy[r.role] = k
+  }
   return {
     kind,
     round,
     of,
-    reviewers: roundReviewers(kind, risk, files),
+    reviewers,
     voter: reviewer('voter', files['votes.md']),
     survivors: survivors === undefined ? null : countFindings(survivors),
     tree,
+    rereviewBy,
   }
 }
 
@@ -159,8 +168,8 @@ async function roundNow($: EngineInterface, dir: string, kind: 'plan' | 'review'
 type Histories = { code: RoundFiles[]; plan: RoundFiles[]; roots: string[] }
 
 // What the current stage is doing, read from the files its skill saves.
-async function nowFor($: EngineInterface, dir: string, t: Pick<Snapshot, 'stage' | 'risk' | 'round' | 'maxRounds' | 'planRounds' | 'blindRuns'>, rd: string, h: Histories): Promise<Now> {
-  const codeRound = () => roundNow($, `${dir}/review`, 'review', t.round, t.maxRounds, t.risk, treeOf(h.code, h.roots))
+async function nowFor($: EngineInterface, dir: string, t: Pick<Snapshot, 'stage' | 'risk' | 'round' | 'maxRounds' | 'planRounds' | 'blindRuns' | 'codeView' | 'rereview'>, rd: string, h: Histories): Promise<Now> {
+  const codeRound = () => roundNow($, `${dir}/review`, 'review', t.round, t.maxRounds, t.risk, t.codeView, t.rereview, h.roots)
   switch (STAGES[t.stage]) {
     case 'Spec': {
       const files = await readFiles($, `${dir}/spec-review`, ['feasibility.md', 'improver.md'])
@@ -170,7 +179,7 @@ async function nowFor($: EngineInterface, dir: string, t: Pick<Snapshot, 'stage'
         reviewers: [reviewer('feasibility', files['feasibility.md']), reviewer('improver', files['improver.md'])],
       }
     }
-    case 'Plan': return roundNow($, `${dir}/plan-review`, 'plan', t.planRounds, 2, t.risk, treeOf(h.plan, h.roots))
+    case 'Plan': return roundNow($, `${dir}/plan-review`, 'plan', t.planRounds, 2, t.risk, treeOf(h.plan, h.roots), [], h.roots)
     case 'Build': return { kind: 'build' }
     case 'Review': return codeRound()
     case 'Blind test': {
@@ -219,6 +228,14 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
   const proofs = await readFiles($, dir, ['proof-final.md', 'proof-build.md'])
   const proofFile = proofs['proof-final.md'] !== undefined ? 'proof-final.md' : proofs['proof-build.md'] !== undefined ? 'proof-build.md' : ''
   const proof = proofFile ? parseProof(proofs[proofFile] ?? '', proofFile) : null
+  // The recorded change, and the code review's findings tree. A kept IMPORTANT on a file the list marks changed
+  // since the round sha is awaiting re-review only when the list was recorded after the round on show voted
+  // (`recorded` is in seconds, the mtime in milliseconds).
+  const files = parseFileList((await readOr($, `${dir}/files.tsv`)) ?? '')
+  const codeView = treeOf(histories.code, histories.roots)
+  const votedAt = codeView ? (await $.fs.stat(`${dir}/review/round-${codeView.round}/survivors.md`).catch(() => null))?.mtimeMs ?? null : null
+  const rereview = files && files.since !== '' && votedAt !== null && files.recorded * 1000 > votedAt
+    ? files.files.filter(f => f.fix === true).map(f => f.path) : []
 
   return {
     slug,
@@ -230,6 +247,8 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     isBug: scalar(fm, 'bug') === 'true',
     planSteps: countPlanSteps((await readOr($, `${dir}/plan.md`)) ?? ''),
     builtSteps: list(fm, 'built_steps').length,
+    builtList: list(fm, 'built_steps').map(Number).filter(n => Number.isInteger(n) && n > 0),
+    hasBuildProof: proofs['proof-build.md'] !== undefined,
     reviewerModel: scalar(fm, 'reviewer_model'),
     helperModel: scalar(fm, 'helper_model'),
     status,
@@ -245,7 +264,7 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     rounds: histories.code.map(roundOf),
     planReviewRounds: histories.plan.filter(h => h.exists).map(roundOf),
     next: nextStep(status, risk),
-    now: await nowFor($, dir, { stage, risk, round, maxRounds, planRounds, blindRuns }, rd, histories),
+    now: await nowFor($, dir, { stage, risk, round, maxRounds, planRounds, blindRuns, codeView, rereview }, rd, histories),
     spec: parseSpec(rd),
     checks: joinChecks(evalRows(evalMd), proof),
     proof,
@@ -253,6 +272,9 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     isProofStale: proof !== null && isStaleProof(proof.rev, head),
     expectedProof: expectedProof(status, stage),
     checksNote: proof ? '' : checksNoteFromLog(text),
+    files,
+    codeView,
+    rereview,
   }
 }
 
@@ -508,13 +530,13 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // Every status change goes through bin/quorum-state or quorum-active-task, so re-read after those. The dashboard
-  // only watches: if one of its hooks fails, the call goes on as if it weren't there.
+  // Every status change goes through bin/quorum-state or quorum-active-task, and quorum-files records the change, so
+  // re-read after those. The dashboard only watches: if one of its hooks fails, the call goes on as if it weren't there.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
     // `gh pr create` or a push can open or change the PR: look it up again now.
     const isPrCommand = /\bgh\s+pr\b|\bgit\s+push\b/.test(e.command)
-    if (isPrCommand || /quorum-(state|active-task|branch)|\.tasks\//.test(e.command)) await refresh($, maxRounds, isPrCommand)
+    if (isPrCommand || /quorum-(state|active-task|branch|files)|\.tasks\//.test(e.command)) await refresh($, maxRounds, isPrCommand)
     return ran
   }).catch(($, e, next) => next(e))
 
@@ -659,16 +681,20 @@ export const register: Register = (on, options) => {
     const partsOf = (key: string, parts: TreePart[]) => parts.map((p, i) => (
       <Text key={`${key}:${i}`} color={p.color} dimColor={p.dim} bold={p.bold}>{p.text}</Text>
     ))
-    const findingsTree = (id: string, view: FindingsView | null, isHigh: boolean, width: number) => {
-      const head = treeHeader(view, width)
-      if (!view || !head) return null
+    // With a recorded `change`, the tree holds its files too, and `header` (the Plan or Build one) replaces the
+    // findings header. Past 15 files a line says the clean folders start folded.
+    const findingsTree = (id: string, view: FindingsView | null, isHigh: boolean, width: number, change: TreeChange | null = null, header?: string) => {
+      const head = treeHeader(view, width, change)
+      if (!head) return null
+      const title = header ?? head.header
       return (
         <Box key={`${id}:tree`} flexDirection="column">
-          <Text key={`${id}:tree-header`} dimColor wrap="truncate-end">{head.header}</Text>
+          {title ? <Box key={`${id}:tree-header`}><Text dimColor wrap="truncate-end">{title}</Text></Box> : null}
+          {isBigTree(view, change) ? <Box key={`${id}:tree-big`}><Text dimColor wrap="truncate-end">clean folders folded (15+ files)</Text></Box> : null}
           {head.key.map((parts, i) => (
             <Box key={`${id}:tree-key-${i}`}><Text wrap="truncate-end">{partsOf(`${id}:tree-key-${i}`, parts)}</Text></Box>
           ))}
-          {treeRows(view, { scope: id, width, icons: iconsOn(fileIcons, e.surface), isHigh, folds }).flatMap(row => {
+          {treeRows(view, { scope: id, width, icons: iconsOn(fileIcons, e.surface), isHigh, folds, change }).flatMap(row => {
             // A finding dropped on dispute is drawn dim throughout.
             const isDim = row.kind === 'finding' && row.parts.every(p => p.dim)
             const confidence = row.kind === 'finding' && row.isOpen ? confidenceRow(row, width) : []
@@ -890,6 +916,14 @@ export const register: Register = (on, options) => {
     const rail = railFor(t, known)
     const n = t.now
     const spec = t.spec
+    // The recorded change as the tree joins it: `rows` of it, against the plan's steps. Null without a list.
+    const changeOf = (rows: ChangedFile[], rereview: string[]): TreeChange | null =>
+      t.files ? { files: rows, hasPlan: t.planSteps > 0, ...stepProgress(t), rereview } : null
+    // Plan: the planned files. Build, Review, and HALTED: the whole change, with the Build header until a round votes.
+    const planChange = changeOf((t.files?.files ?? []).filter(f => f.steps.length > 0), [])
+    const codeChange = changeOf(t.files?.files ?? [], t.rereview)
+    const buildHeader = codeChange ? changeHeader('build', codeChange, t.planSteps) : undefined
+    const codeTree = (view: FindingsView | null) => findingsTree(t.slug, view, t.risk === 'HIGH', treeWidth, codeChange, view ? undefined : buildHeader)
     const { title, ticket } = splitTicket(spec?.title || t.slug)
 
     const shown = new Set<string>([
@@ -983,7 +1017,9 @@ export const register: Register = (on, options) => {
               {n.reviewers.map(reviewerLine)}
               {/* While round N+1 reviews, the tree shows round N, whose drops aren't this round's. */}
               {voterLine(n.kind, n.survivors, n.round, n.of || t.maxRounds, t.status, n.tree?.round === n.round ? n.tree.dropped : 0)}
-              {findingsTree(t.slug, n.tree, t.risk === 'HIGH', treeWidth)}
+              {n.kind === 'plan'
+                ? findingsTree(t.slug, n.tree, t.risk === 'HIGH', treeWidth, planChange, planChange ? changeHeader('plan', planChange, t.planSteps) : undefined)
+                : codeTree(n.tree)}
             </Box>
           )}
           {n.kind === 'build' && (
@@ -994,6 +1030,7 @@ export const register: Register = (on, options) => {
                 if (!agent) return line(role, 'waiting', label, role === 'builder' ? 'implements plan.md' : 'runs every check after the build')
                 return line(role, agent.endedAt === null ? 'running' : 'done', label, `${agent.endedAt === null ? 'running' : 'took'} ${seconds(agent, clockNow)}`)
               })}
+              {codeTree(null)}
             </Box>
           )}
           {n.kind === 'blind' && (
@@ -1006,6 +1043,8 @@ export const register: Register = (on, options) => {
               {reportLine('a11y', n.blind.a11y, k => k ? `${k} IMPORTANT` : 'clean')}
               {reportLine('security', n.blind.security, k => k ? `${k} IMPORTANT` : 'clean')}
               {reportLine('triage', n.blind.caused, k => k ? `${plural(k, 'item')} caused by this change` : 'nothing caused by this change')}
+              {/* HALTED after a blind run: the Review tree, unfolded, under the blind test's rows. */}
+              {t.status === 'HALTED' && codeChange ? codeTree(t.codeView) : null}
             </Box>
           )}
           {n.kind === 'done' && !(known && known.number > 0) && (

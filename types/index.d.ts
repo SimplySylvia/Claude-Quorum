@@ -88,8 +88,9 @@ export type Spec = { title: string; goal: string; isUi: boolean; requirements: R
 // What the "Now" section shows for the current stage.
 export type Now =
   | { kind: 'spec'; requirements: number; reviewers: Reviewer[] }
-  // `tree`: the findings tree, for the latest round with a survivors.md (null before any).
-  | { kind: 'plan' | 'review'; round: number; of: number; reviewers: Reviewer[]; voter: Reviewer; survivors: Findings | null; tree: FindingsView | null }
+  // `tree`: the findings tree, for the latest round with a survivors.md (null before any). `rereviewBy`: by reviewer
+  // role, how many of its reply's IMPORTANT findings are now awaiting re-review (code review only).
+  | { kind: 'plan' | 'review'; round: number; of: number; reviewers: Reviewer[]; voter: Reviewer; survivors: Findings | null; tree: FindingsView | null; rereviewBy: Record<string, number> }
   | { kind: 'build' }
   | { kind: 'blind'; blind: Blind }
   | { kind: 'done' }
@@ -109,6 +110,9 @@ export type Snapshot = {
   // plan.md's step count, and how many state.md's built_steps lists: a plan of 4 or more is built a step at a time.
   planSteps: number
   builtSteps: number
+  // The steps built_steps lists, and whether proof-build.md exists (an unsliced build's steps are built once it does).
+  builtList: number[]
+  hasBuildProof: boolean
   status: string
   stage: number
   round: number
@@ -136,6 +140,11 @@ export type Snapshot = {
   // The proof the skills should have saved by now ('' while none is due), and the round log's line about the checks.
   expectedProof: string
   checksNote: string
+  // files.tsv, the task's recorded change (null when it's missing or malformed); the code review's findings tree;
+  // and the paths whose kept IMPORTANT finding the list shows changed since that round voted (awaiting re-review).
+  files: FileList | null
+  codeView: FindingsView | null
+  rereview: string[]
 }
 
 // A standalone review (/quorum:review), from .tasks/review-<id>/: its latest run's reviewers and voter, as for a

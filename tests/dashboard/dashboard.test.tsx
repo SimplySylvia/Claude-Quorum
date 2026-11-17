@@ -8,7 +8,7 @@ import {
   requirementState, roleOf,
   roundReviewers, slugFromHead, spendOf, stageOf, stages, tokenCount,
   keptFindings, countPlanSteps, normalizePath, modelMismatches, choiceLabel, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, latestRun, liveReview, shortRange,
-  plural, voterNext,
+  plural, voterNext, parseFileList,
 } from '../../hooks/dashboard/task'
 import {
   awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, footprint, iconsOn, isBigTree, markText, markWords, repoPath, roundKept, runEnds, splitLoc, trackFindings, treeHeader, treeRows,
@@ -340,6 +340,35 @@ describe('task helpers', () => {
     expect(ago(5 * 60_000, 0)).toBe('5m ago')
     expect(ago(3 * 3_600_000, 0)).toBe('3h ago')
     expect(ago(3 * 86_400_000, 0)).toBe('3d ago')
+  })
+
+  test('reads files.tsv strictly: a bad header or a short row is no list', () => {
+    const head = `# quorum-files 1 head=${'a'.repeat(40)} base=${'b'.repeat(40)} since=def456 recorded=1763300000`
+    const good = `${head}\nM\t86\t3\tsrc/a.ts\t-\t1,3\t1\nA\t-\t-\tsrc/b.ts\t-\t3\t0\nR\tbin\tbin\tdocs/café notes.md\told.md\t-\t-\n`
+    expect(parseFileList(good)).toEqual({
+      head: 'a'.repeat(40), base: 'b'.repeat(40), since: 'def456', recorded: 1763300000, files: [
+        { letter: 'M', added: 86, removed: 3, path: 'src/a.ts', oldPath: '', steps: [1, 3], fix: true },
+        { letter: 'A', added: null, removed: null, path: 'src/b.ts', oldPath: '', steps: [3], fix: false },
+        { letter: 'R', added: 'bin', removed: 'bin', path: 'docs/café notes.md', oldPath: 'old.md', steps: [], fix: null },
+      ],
+    })
+    // Before the build, and with no rows: `-` reads as ''.
+    expect(parseFileList(`# quorum-files 1 head=${'a'.repeat(40)} base=- since=- recorded=1\n`)).toEqual({ head: 'a'.repeat(40), base: '', since: '', recorded: 1, files: [] })
+    // A bad header, or any bad row, is no list.
+    for (const bad of [
+      '',
+      good.replace('# quorum-files 1 ', '# quorum-files 2 '),
+      good.replace(` recorded=1763300000`, ''),
+      good.replace(`head=${'a'.repeat(40)}`, 'head=abc1234'),
+      good.replace('since=def456', 'since=xyz'),
+      `${head}\nM\t86\tsrc/a.ts\n`,
+      `${head}\nM\t86\t3\tsrc/a.ts\t-\t1\t1\textra\n`,
+      `${head}\nX\t86\t3\tsrc/a.ts\t-\t1\t1\n`,
+      `${head}\nM\t8x\t3\tsrc/a.ts\t-\t1\t1\n`,
+      `${head}\nM\t86\t3\t\t-\t1\t1\n`,
+      `${head}\nM\t86\t3\tsrc/a.ts\t-\t1,,3\t1\n`,
+      `${head}\nM\t86\t3\tsrc/a.ts\t-\t1\t2\n`,
+    ]) expect(parseFileList(bad)).toBeNull()
   })
 })
 
@@ -2233,5 +2262,317 @@ test("the voter row's next step follows the pipeline: fix round, halts, converge
     Object.assign(files, inRuns(id, status, [{ end: 'b2b2b2b', survivors: imp }]))
     await $.tool.call({ tool: 'Write', file_path: `/repo/.tasks/${id}/state.md`, content: '' })
     expect(await voter()).toMatch(new RegExp(`^✗ Verifier vote\\s+kept ✗1 → ${next}$`))
+  }
+})
+
+// ---- The recorded change on the Now card
+
+// When a list was recorded, in unix seconds as `date +%s` gives it, and a survivors.md written 5 seconds before
+// that, in milliseconds as fs.stat gives it: a real pair, so a gate that forgets the `× 1000` fails.
+const RECORDED = 1763300000
+const VOTED_BEFORE = 1763299995000
+const LIST = '.tasks/export-csv/files.tsv'
+const PLAN = '.tasks/export-csv/plan.md'
+// A files.tsv as bin/quorum-files record writes it: the header, then `LETTER ADDED REMOVED PATH OLD_PATH STEPS FIX`.
+const fileRow = (letter: string, added: string, removed: string, path: string, steps = '-', fix = '-', old = '-') =>
+  [letter, added, removed, path, old, steps, fix].join('\t')
+const filesTsv = (rows: string[], o: { base?: string; since?: string; recorded?: number } = {}) =>
+  `# quorum-files 1 head=${'c'.repeat(40)} base=${o.base ?? 'b'.repeat(40)} since=${o.since ?? '-'} recorded=${o.recorded ?? RECORDED}\n${rows.map(r => `${r}\n`).join('')}`
+const planMd = (steps: number) => `# Plan\n\n## Steps\n${Array.from({ length: steps }, (_, i) => `${i + 1}. **Step ${i + 1}** — \`x\`\n`).join('')}`
+// state.md's built_steps, as quorum-state push writes them.
+const builtSteps = (...ns: number[]) => `built_steps:\n${ns.map(n => `  - "${n}"\n`).join('')}`
+// The Text a tree row draws `text` in: one of the parts inside its Button's Text, each holding its string.
+type Part = { props?: Record<string, unknown>; children: unknown[] }
+async function partOf(pane: Drawn, key: string, text: string): Promise<Part | undefined> {
+  const inner = ((await pane.find({ type: 'Button', key }))?.children[0] as Part | undefined)?.children ?? []
+  return inner.find((c): c is Part => typeof c === 'object' && c !== null && (c as Part).children.join('') === text)
+}
+
+test('a quorum-files command refreshes the dashboard', async ($, on) => {
+  const files = { ...inRounds([], { status: 'BUILDING', extra: builtSteps(1) }), [PLAN]: planMd(1), [LIST]: filesTsv([fileRow('A', '-', '-', 'src/a.ts', '1')]) }
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}src/a.ts`)).toMatch(/^✓ A {5}a\.ts +s1$/)
+  expect(await pane.find({ type: 'Button', key: `${TREE}src/b.ts` })).toBeUndefined()
+  await pane.unmount()
+
+  files[LIST] = filesTsv([fileRow('A', '12', '0', 'src/a.ts', '1'), fileRow('M', '1', '1', 'src/b.ts')])
+  await $.tool.call({ tool: 'Bash', command: 'quorum-files record' })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}src/a.ts`)).toMatch(/\+12 s1$/)
+  expect(await rowOf(pane, `${TREE}src/b.ts`)).toMatch(/^\* M {5}b\.ts +unplanned +\+1 −1 {3}$/)
+  await pane.unmount()
+})
+
+test('a file row reads progress, git letter, name, line counts, step, and marks, and folders show their file count', async ($, on) => {
+  const rows = [
+    fileRow('M', '86', '3', 'src/a.ts', '1'),
+    fileRow('A', '12', '0', 'src/b.ts', '2'),
+    fileRow('A', '-', '-', 'src/c.ts', '2'),
+    fileRow('M', '1', '1', 'src/d.ts'),
+    fileRow('M', 'bin', 'bin', 'img/logo.png', '1'),
+  ]
+  const task = (o: TreeFixture, rounds: string[] = [], list = rows) => ({ ...inRounds(rounds, o), [LIST]: filesTsv(list) })
+  // Step 1 is built and step 2 isn't.
+  const files: Record<string, string> = { ...task({ status: 'BUILDING', extra: builtSteps(1) }), [PLAN]: planMd(2) }
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}src/`)).toMatch(/^ {4}▾ src\/ +4 files {3}$/)
+  expect(await rowOf(pane, `${TREE}src/a.ts`)).toMatch(/^✓ M {5}a\.ts +\+86 −3 s1$/)
+  expect(await rowOf(pane, `${TREE}src/b.ts`)).toMatch(/^○ A {5}b\.ts +\+12 s2$/)
+  expect(await rowOf(pane, `${TREE}src/c.ts`)).toMatch(/^○ A {5}c\.ts +s2$/)
+  // Unplanned: the word before the counts, and no step.
+  expect(await rowOf(pane, `${TREE}src/d.ts`)).toMatch(/^\* M {5}d\.ts +unplanned +\+1 −1 {3}$/)
+  expect(await rowOf(pane, `${TREE}img/logo.png`)).toMatch(/^✓ M {5}logo\.png +bin s1$/)
+  // Colours: ✓ success; ○, *, and the word dim; the letter dim only while planned; +N success and −N error.
+  expect((await partOf(pane, `${TREE}src/a.ts`, '✓'))?.props?.color).toBe('success')
+  expect((await partOf(pane, `${TREE}src/b.ts`, '○'))?.props?.dimColor).toBe(true)
+  expect((await partOf(pane, `${TREE}src/d.ts`, '*'))?.props?.dimColor).toBe(true)
+  expect((await partOf(pane, `${TREE}src/d.ts`, 'unplanned'))?.props?.dimColor).toBe(true)
+  expect((await partOf(pane, `${TREE}src/c.ts`, 'A'))?.props?.dimColor).toBe(true)
+  expect(await partOf(pane, `${TREE}src/b.ts`, 'A')).toBeDefined()
+  expect((await partOf(pane, `${TREE}src/b.ts`, 'A'))?.props?.dimColor).toBeFalsy()
+  expect((await partOf(pane, `${TREE}src/a.ts`, '+86'))?.props?.color).toBe('success')
+  expect((await partOf(pane, `${TREE}src/a.ts`, '−3'))?.props?.color).toBe('error')
+  await pane.unmount()
+
+  // In review, a finding on a.ts adds its marks after the step, and the folder rolls it up.
+  await reload($, files, { ...task({ extra: builtSteps(1, 2) }, [survivorsMd(impAt('src/a.ts:3'))]), [PLAN]: planMd(2) })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}src/a.ts`)).toMatch(/^✓ M {5}a\.ts +\+86 −3 s1 {6}✗1$/)
+  expect(await rowOf(pane, `${TREE}src/a.ts:3#0`)).toMatch(/✗ :3 Unescaped CSV fields$/)
+  expect(await rowOf(pane, `${TREE}src/`)).toMatch(/ 4 files {9}✗1$/)
+  await pane.unmount()
+
+  // With no plan the progress column is gone.
+  const noSteps = rows.map(r => r.split('\t').map((f, i) => (i === 5 ? '-' : f)).join('\t'))
+  await reload($, files, task({ status: 'BUILDING' }, [], noSteps))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}src/a.ts`)).toMatch(/^M {5}a\.ts +\+86 −3 {3}$/)
+  expect(await rowOf(pane, `${TREE}src/d.ts`)).toMatch(/^M {5}d\.ts +\+1 −1 {3}$/)
+  await pane.unmount()
+
+  // A 3-step plan is built in one go: with no built_steps, its proof-build.md marks every planned file built.
+  await reload($, files, { ...task({ status: 'BUILDING' }), [PLAN]: planMd(3), '.tasks/export-csv/proof-build.md': PROOF })
+  pane = await $.ui.mount(ON_TERMINAL)
+  for (const f of ['src/a.ts', 'src/b.ts', 'src/c.ts', 'img/logo.png']) expect(await rowOf(pane, `${TREE}${f}`)).toMatch(/^✓ /)
+  expect(await rowOf(pane, `${TREE}src/d.ts`)).toMatch(/^\* /)
+  await pane.unmount()
+  // A 4-step plan is sliced: its steps are built only once built_steps names them.
+  await reload($, files, { ...task({ status: 'BUILDING' }), [PLAN]: planMd(4), '.tasks/export-csv/proof-build.md': PROOF })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}src/a.ts`)).toMatch(/^○ /)
+  await pane.unmount()
+})
+
+test('the line-count, step, and mark columns keep their minimum widths and line up when folders open or close', async ($, on) => {
+  // Where a row's line counts, step, and marks end, in columns. Each column is right-aligned, so a column that ends
+  // at the same column on every row starts at the same column too.
+  const ends = (text: string) => ({
+    count: /^.*(?:[+−]\d+|bin|\d+ files?)/.exec(text)?.[0].length ?? -1,
+    step: /^.*\bs\d+/.exec(text)?.[0].length ?? -1,
+    marks: /^.*[✗↻✓np]\d+/.exec(text)?.[0].length ?? -1,
+  })
+  // The narrowest values (+1, no step, one n1): the long name is cut to fill its room and is followed by one space,
+  // so what's left is the minimum widths: the line counts 7 (`     +1`), a space, the step 2, two spaces, the marks 6.
+  const long = `${'l'.repeat(40)}.ts`
+  const files: Record<string, string> = { ...inRounds([survivorsMd(nitAt('src/b.ts:1'))]), [LIST]: filesTsv([fileRow('M', '1', '0', `src/${long}`), fileRow('M', '1', '0', 'src/b.ts')]) }
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}src/${long}`)).toMatch(/^M {5}l+…l+\.ts {6}\+1 {11}$/)
+  expect(await rowOf(pane, `${TREE}src/b.ts`)).toMatch(/^M {5}b\.ts +\+1 {9}n1$/)
+  expect(cols(await rowOf(pane, `${TREE}src/${long}`) ?? '')).toBe(46)
+  await pane.unmount()
+
+  // The widest values, all in deep/: `+12345 −6789`, `s12`, and a two-mark block. Folding deep/ moves no column.
+  await reload($, files, {
+    ...inRounds([survivorsMd(impAt('deep/w.ts:3'), nitAt('deep/w.ts:5'), nitAt('top.ts:1'))], { extra: builtSteps(1) }),
+    [PLAN]: planMd(12),
+    [LIST]: filesTsv([fileRow('M', '12345', '6789', 'deep/w.ts', '12'), fileRow('M', '1', '0', 'top.ts', '1')]),
+  })
+  pane = await $.ui.mount(ON_TERMINAL)
+  const [folder = '', w = '', top = ''] = await Promise.all([`${TREE}deep/`, `${TREE}deep/w.ts`, `${TREE}top.ts`].map(async k => (await rowOf(pane, k)) ?? ''))
+  expect(w).toMatch(/ \+12345 −6789 s12  ✗1  n1$/)
+  expect(top).toMatch(/ {11}\+1  s1 {6}n1$/)
+  expect(folder).toMatch(/^ {4}▾ deep\/ +1 file {6}✗1  n1$/)
+  for (const row of [folder, w, top]) {
+    expect(ends(row).count).toBe(ends(w).count)
+    expect(ends(row).marks).toBe(46)
+  }
+  expect(ends(top).step).toBe(ends(w).step)
+  await pane.press({ key: `${TREE}deep/` })
+  expect(await pane.find({ type: 'Button', key: `${TREE}deep/w.ts` })).toBeUndefined()
+  expect(await rowOf(pane, `${TREE}top.ts`)).toBe(top)
+  expect(await rowOf(pane, `${TREE}deep/`)).toBe(folder.replace('▾', '▸'))
+  await pane.unmount()
+})
+
+test('the tree shows the planned files during Plan and the change so far during Build', async ($, on) => {
+  // Plan: the list holds only the planned rows, recorded before the build (`base=-`).
+  const planned = [fileRow('M', '-', '-', 'app/report.py', '1'), fileRow('A', '-', '-', 'app/util.py', '2'), fileRow('M', '-', '-', 'README.md', '2')]
+  const files: Record<string, string> = {
+    ...inRounds([survivorsMd(impAt('.tasks/export-csv/plan.md:14', 'Plan skips the docs step'))], { dir: 'plan-review' }),
+    [PLAN]: planMd(2),
+    [LIST]: filesTsv(planned, { base: '-' }),
+  }
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /Plan review, round 1 of 2/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^2 steps · 3 files, 1 new$/ })).toBeDefined()
+  expect(await treeKeys(pane)).toEqual([
+    `${TREE}.tasks/export-csv/`, `${TREE}.tasks/export-csv/plan.md`, `${TREE}.tasks/export-csv/plan.md:14#0`,
+    `${TREE}app/`, `${TREE}app/report.py`, `${TREE}app/util.py`, `${TREE}README.md`,
+  ])
+  expect(await rowOf(pane, `${TREE}.tasks/export-csv/plan.md:14#0`)).toMatch(/✗ :14 Plan skips the docs step$/)
+  expect(await rowOf(pane, `${TREE}app/report.py`)).toMatch(/^○ M {5}report\.py +s1 {8}$/)
+  expect(await rowOf(pane, `${TREE}app/util.py`)).toMatch(/^○ A {5}util\.py +s2 {8}$/)
+  expect((await partOf(pane, `${TREE}app/report.py`, 'M'))?.props?.dimColor).toBe(true)
+  await pane.unmount()
+
+  // Build: the change so far against the plan, with no findings.
+  const change = [fileRow('M', '40', '2', 'app/report.py', '1'), fileRow('A', '5', '0', 'app/util.py'), fileRow('M', '-', '-', 'README.md', '2'), fileRow('A', '-', '-', 'tests/test_report.py', '2')]
+  await reload($, files, { ...inRounds([], { status: 'BUILDING', extra: builtSteps(1) }), [PLAN]: planMd(2), [LIST]: filesTsv(change) })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^1 of 3 planned files changed · 1 unplanned$/ })).toBeDefined()
+  expect(await treeKeys(pane)).toEqual([`${TREE}app/`, `${TREE}app/report.py`, `${TREE}app/util.py`, `${TREE}tests/`, `${TREE}tests/test_report.py`, `${TREE}README.md`])
+  expect(await rowOf(pane, `${TREE}app/report.py`)).toMatch(/^✓ M {5}report\.py +\+40 −2 s1$/)
+  expect(await rowOf(pane, `${TREE}app/util.py`)).toMatch(/^\* A {5}util\.py +unplanned +\+5 {3}$/)
+  expect(await rowOf(pane, `${TREE}README.md`)).toMatch(/^○ M {3}README\.md +s2$/)
+  expect(await pane.find({ type: 'Text', text: /^the verifier kept/ })).toBeUndefined()
+  await pane.unmount()
+
+  // Spec has no tree, even with a list.
+  await reload($, files, { ...inRounds([], { status: 'DRAFT-AWAITING-VISUAL-SIGNOFF' }), [PLAN]: planMd(2), [LIST]: filesTsv(change) })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await treeKeys(pane)).toEqual([])
+  await pane.unmount()
+})
+
+test('during review the tree joins the recorded change with the findings of the round on show', async ($, on) => {
+  const list = filesTsv([fileRow('M', '40', '2', 'app/report.py', '1'), fileRow('A', '5', '0', 'app/util.py')])
+  const task = (rounds: (string | null)[], o: TreeFixture = {}) => ({ ...inRounds(rounds, { extra: builtSteps(1), ...o }), [PLAN]: planMd(1), [LIST]: list })
+  const kept = survivorsMd(impAt('app/report.py:42'), nitAt('app/cli.py:3'))
+  const files: Record<string, string> = task([kept])
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^the verifier kept these in round 1$/ })).toBeDefined()
+  // The finding on a recorded file sits under its row; the one on a file the list doesn't hold still shows.
+  expect(await treeKeys(pane)).toEqual([`${TREE}app/`, `${TREE}app/cli.py`, `${TREE}app/cli.py:3#0`, `${TREE}app/report.py`, `${TREE}app/report.py:42#0`, `${TREE}app/util.py`])
+  expect(await rowOf(pane, `${TREE}app/`)).toMatch(/ 3 files {5}✗1  n1$/)
+  expect(await rowOf(pane, `${TREE}app/report.py`)).toMatch(/^✓ M {5}report\.py +\+40 −2 s1  ✗1 {4}$/)
+  expect(await rowOf(pane, `${TREE}app/report.py:42#0`)).toMatch(/✗ :42 Unescaped CSV fields$/)
+  expect(await rowOf(pane, `${TREE}app/cli.py`)).toMatch(/^ {8}cli\.py +n1$/)
+  expect(await rowOf(pane, `${TREE}app/util.py`)).toMatch(/^\* A {5}util\.py +unplanned +\+5 {11}$/)
+  await pane.unmount()
+
+  // Before any round has voted, the header is the Build one.
+  await reload($, files, task([null]))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^1 of 1 planned file changed · 1 unplanned$/ })).toBeDefined()
+  expect(await treeKeys(pane)).toEqual([`${TREE}app/`, `${TREE}app/report.py`, `${TREE}app/util.py`])
+  await pane.unmount()
+
+  // HALTED during blind test: the Review tree, under the blind-test rows.
+  await reload($, files, task([kept], { status: 'HALTED', extra: `${builtSteps(1)}blind_runs: 1\n` }))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /Blind test, run 1/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^the verifier kept these in round 1$/ })).toBeDefined()
+  expect(await rowOf(pane, `${TREE}app/report.py`)).toMatch(/^✓ M {5}report\.py +\+40 −2 s1  ✗1 {4}$/)
+  await pane.unmount()
+})
+
+test('past 15 files clean folders start folded and folders with problems stay open', async ($, on) => {
+  const SURVIVORS_AT = '.tasks/export-csv/review/round-1/survivors.md'
+  const mtimes: Record<string, number> = { [SURVIVORS_AT]: VOTED_BEFORE }
+  // bad/ holds an open nit, fix/ an IMPORTANT whose file the fix changed (↻), odd/ an unplanned file; clean/ nothing.
+  const task = (clean: number) => ({
+    ...inRounds([survivorsMd(nitAt('bad/x.ts:1'), impAt('fix/r.ts:2'))], { extra: builtSteps(1) }),
+    [PLAN]: planMd(1),
+    [LIST]: filesTsv([
+      fileRow('M', '1', '0', 'bad/x.ts', '1', '0'),
+      ...Array.from({ length: clean }, (_, i) => fileRow('M', '1', '0', `clean/f${String(i).padStart(2, '0')}.ts`, '1', '0')),
+      fileRow('M', '1', '0', 'fix/r.ts', '1', '1'),
+      fileRow('M', '1', '0', 'odd/u.ts', '-', '0'),
+    ], { since: 'def456' }),
+  })
+  const leads = async (pane: Drawn) => Promise.all(['bad/', 'clean/', 'fix/', 'odd/'].map(async f => /^ *([▾▸])/.exec((await rowOf(pane, `${TREE}${f}`)) ?? '')?.[1]))
+  // 15 files: every folder starts open, as today.
+  const files: Record<string, string> = task(12)
+  world(on, files, '/repo', mtimes)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await leads(pane)).toEqual(['▾', '▾', '▾', '▾'])
+  expect(await pane.find({ type: 'Box', key: 'export-csv:tree-big' })).toBeUndefined()
+  await pane.unmount()
+
+  // 16 files: only clean/ starts folded, and the header says why.
+  await reload($, files, task(13))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await leads(pane)).toEqual(['▾', '▸', '▾', '▾'])
+  expect((await pane.find({ type: 'Box', key: 'export-csv:tree-big' }))?.text).toBe('clean folders folded (15+ files)')
+  expect(await rowOf(pane, `${TREE}fix/`)).toMatch(/↻1/)
+  expect(await pane.find({ type: 'Button', key: `${TREE}clean/f00.ts` })).toBeUndefined()
+  // A press opens it, and the choice is kept across a refresh.
+  await pane.press({ key: `${TREE}clean/` })
+  expect(await pane.find({ type: 'Button', key: `${TREE}clean/f00.ts` })).toBeDefined()
+  await pane.unmount()
+  await reload($, files, task(13))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect((await leads(pane))[1]).toBe('▾')
+  expect(await pane.find({ type: 'Button', key: `${TREE}clean/f00.ts` })).toBeDefined()
+  await pane.unmount()
+
+  // Recorded in the second round 1 voted, but before its survivors.md: no ↻, and fix/ stays open for its ✗.
+  mtimes[SURVIVORS_AT] = RECORDED * 1000 + 500
+  await reload($, files, task(13))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}fix/`)).toMatch(/✗1/)
+  expect(await rowOf(pane, `${TREE}fix/`)).not.toMatch(/↻/)
+  expect((await leads(pane))[2]).toBe('▾')
+  await pane.unmount()
+})
+
+test('no file row is wider than the card with every column and icons', { options: { file_icons: 'nerd' } }, async ($, on) => {
+  const long = `${'n'.repeat(67)}.ts`
+  const chain = 'first/alpha/bravo/charlie/delta/echo/foxtrot/golf/hotel/last'
+  // Round 1's IMPORTANT on app/x.py is fixed in round 2 (✓); round 2 keeps an IMPORTANT (✗), one on a file the fix
+  // changed (↻), a NIT, and a PRE-EXISTING.
+  const r2 = survivorsMd(impAt(`${chain}/${long}:12`), nitAt(`${chain}/b.png:1`), preAt('lib/old.py:4'), impAt('app/r.ts:5', 'Ignored argument'))
+  const files = {
+    ...inRounds([survivorsMd(impAt('app/x.py:3')), r2], { extra: builtSteps(1, 2, 3) }),
+    [PLAN]: planMd(12),
+    [LIST]: filesTsv([
+      fileRow('M', '3', '1', 'app/r.ts', '2', '1'),
+      fileRow('M', '2', '0', 'app/x.py', '1', '0'),
+      fileRow('M', 'bin', 'bin', `${chain}/b.png`, '3', '0'),
+      fileRow('M', '12345', '6789', `${chain}/${long}`, '12', '0'),
+      fileRow('M', '1', '1', 'lib/old.py', '-', '0'),
+    ], { since: 'def456' }),
+  }
+  world(on, files, '/repo', { '.tasks/export-csv/review/round-2/survivors.md': VOTED_BEFORE })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  for (const surface of ['terminal', 'vscode'] as const) {
+    const pane = await $.ui.mount({ ...PANE, surface })
+    const buttons = await treeButtons(pane)
+    const boxes = (await pane.findAll({ type: 'Box' })).filter(b => /:tree-(header|big|key-\d+)$/.test(b.key ?? ''))
+    expect(buttons.some(b => PUA.test(b.text))).toBe(surface === 'terminal')
+    for (const l of [...buttons.map(b => b.text), ...boxes.map(b => b.text)]) expect(cols(l)).toBeLessThanOrEqual(46)
+    const fileRows = buttons.filter(b => /\.(ts|py|png)$/.test(b.key ?? ''))
+    expect(fileRows).toHaveLength(5)
+    for (const m of ['✗1', '↻1', '✓1', 'n1', 'p1']) expect(fileRows.some(b => b.text.includes(m))).toBe(true)
+    // Each ends with its marks, and keeps at least 4 columns of its name.
+    for (const b of fileRows) {
+      expect(b.text).toMatch(/[✗↻✓np]\d+ *$/)
+      const key = b.key ?? ''
+      const name = bare(b.text).slice(4).replace(/^[\s▸▾]+/, '').split(' ')[0] ?? ''
+      expect(cols(name)).toBeGreaterThanOrEqual(4)
+      expect(name === key.slice(key.lastIndexOf('/') + 1) || name.includes('…')).toBe(true)
+    }
+    await pane.unmount()
   }
 })

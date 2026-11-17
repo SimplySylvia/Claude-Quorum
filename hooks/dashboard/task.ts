@@ -2,7 +2,7 @@
 // the stage rail, count findings the way bin/quorum-findings does, and read the specs, proofs, and reports the skills
 // save in .tasks/<slug>/. No `$` here, so tests can call them directly.
 
-import type { Blind, Check, Findings, Frontmatter, KeptFinding, Proof, PullRequest, QuorumAgent, Requirement, Reviewer, Section, Snapshot, Spec, Spend, Stage, Verdict } from '../../types'
+import type { Blind, ChangedFile, Check, FileList, Findings, Frontmatter, KeptFinding, Proof, PullRequest, QuorumAgent, Requirement, Reviewer, Section, Snapshot, Spec, Spend, Stage, Verdict } from '../../types'
 
 export const STAGES = ['Spec', 'Plan', 'Build', 'Review', 'Blind test', 'PR'] as const
 
@@ -535,4 +535,38 @@ export function problemsOf(t: Pick<Snapshot, 'proof' | 'checks' | 'isProofStale'
     t.isProofStale ? 'proof older than HEAD' : '',
     t.pending > 0 ? `${t.pending} pending` : '',
   ].filter(Boolean)
+}
+
+// .tasks/<slug>/files.tsv (bin/quorum-files record): its header, then one row per file, `LETTER ADDED REMOVED PATH
+// OLD_PATH STEPS FIX` tab-separated, `-` for an empty field. Strict: a bad header or any bad row is no list (null).
+export function parseFileList(text: string): FileList | null {
+  const [first = '', ...rest] = text.split('\n')
+  const h = /^# quorum-files 1 head=([0-9a-f]{40}) base=([0-9a-f]{40}|-) since=([0-9a-f]{4,40}|-) recorded=(\d+)$/.exec(first)
+  if (!h) return null
+  const dash = (v: string) => (v === '-' ? '' : v)
+  const lines = (v: string) => (v === '-' ? null : v === 'bin' ? 'bin' : Number(v))
+  const files: ChangedFile[] = []
+  for (const row of rest) {
+    if (row === '') continue
+    const f = row.split('\t')
+    const [letter = '', added = '', removed = '', path = '', oldPath = '', steps = '', fix = ''] = f
+    if (f.length !== 7 || !/^[MADR]$/.test(letter) || !/^(\d+|bin|-)$/.test(added) || !/^(\d+|bin|-)$/.test(removed)
+      || path === '' || oldPath === '' || !/^(-|\d+(,\d+)*)$/.test(steps) || !/^[01-]$/.test(fix)) return null
+    files.push({
+      letter: letter as ChangedFile['letter'],
+      added: lines(added),
+      removed: lines(removed),
+      path,
+      oldPath: dash(oldPath),
+      steps: steps === '-' ? [] : steps.split(',').map(Number),
+      fix: fix === '-' ? null : fix === '1',
+    })
+  }
+  return { head: h[1] ?? '', base: dash(h[2] ?? ''), since: dash(h[3] ?? ''), recorded: Number(h[4]), files }
+}
+
+// Which plan steps count as built: the ones built_steps lists, or, in a build that isn't sliced (it pushes no
+// built_steps), every step once proof-build.md exists.
+export function stepProgress(t: Pick<Snapshot, 'planSteps' | 'isFast' | 'builtList' | 'hasBuildProof'>): { built: number[]; allBuilt: boolean } {
+  return { built: t.builtList, allBuilt: !(t.planSteps >= SLICE_AT && !t.isFast) && t.hasBuildProof }
 }
