@@ -8,19 +8,21 @@
 # /opt/homebrew/bin/git, then /usr/local/bin/git (QUORUM_GIT_CANDIDATES, space-separated, replaces that list).
 # With none working, it runs plain `git` so the caller sees the real error.
 #
+# The probe is libexec/git-probe.sh's quorum_git_probe. It reuses an exported QUORUM_GIT_USE / QUORUM_GIT_PROBE only
+# when the key matches this process's own PATH (as given, before libexec/ is added) and candidates, and the value is
+# `git` or an executable absolute path; otherwise it probes and exports them. So a script that probes once before
+# starting children saves each child's `git --version`.
+#
 # Some git commands start git again as a child, found on PATH (git worktree add runs git branch, update-ref, and
 # reset), and in that sandbox a PATH lookup can't see Homebrew's git either. So with a candidate, PATH starts with
 # the plugin's libexec/, whose `git` runs the same candidate (QUORUM_REAL_GIT). Bash 3.2 compatible.
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-works() { "$1" --version >/dev/null 2>&1; }
+# shellcheck source=libexec/git-probe.sh
+. "$HERE/../libexec/git-probe.sh"
+quorum_git_probe
 
-if works git; then exec git "$@"; fi
-for candidate in ${QUORUM_GIT_CANDIDATES:-/opt/homebrew/bin/git /usr/local/bin/git}; do
-  if [ -x "$candidate" ] && works "$candidate"; then
-    export QUORUM_REAL_GIT="$candidate" PATH="$HERE/../libexec:$PATH"
-    exec "$candidate" "$@"
-  fi
-done
-exec git "$@"
+if [ "$QUORUM_GIT_USE" = git ]; then exec git "$@"; fi
+export QUORUM_REAL_GIT="$QUORUM_GIT_USE" PATH="$HERE/../libexec:$PATH"
+exec "$QUORUM_GIT_USE" "$@"

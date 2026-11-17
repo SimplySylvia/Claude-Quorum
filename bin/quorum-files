@@ -35,6 +35,8 @@ skip() { echo "quorum-files: $*; kept the earlier list" >&2; exit 0; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 # Through quorum-git, so a sandbox that hides the real git behind Apple's launcher doesn't break this script.
 git() { "$HERE/quorum-git" "$@"; }
+# shellcheck source=libexec/git-probe.sh
+. "$HERE/../libexec/git-probe.sh"
 TAB=$'\t' NL=$'\n'
 USAGE="usage: quorum-files record [--task SLUG]"
 
@@ -47,6 +49,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ "$cmd" = record ] || die "$USAGE"
+quorum_git_probe
 if [ -n "$task" ]; then
   printf '%s' "$task" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$' || die "invalid slug: $task"
 else

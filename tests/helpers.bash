@@ -12,3 +12,12 @@ make_repo() {
 }
 
 cleanup_repo() { rm -rf "$WORK"; }
+
+# git_shim DIR: write DIR/git, a counting git that appends its arguments to $GIT_LOG as one line, then runs the git
+# that was on PATH when the shim was made. Put DIR first on PATH (and in QUORUM_GIT_CANDIDATES) to count git calls.
+git_shim() {
+  local real; real=$(command -v git)
+  mkdir -p "$1"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "${GIT_LOG:-/dev/null}"\nexec "%s" "$@"\n' "$real" > "$1/git"
+  chmod +x "$1/git"
+}

@@ -32,6 +32,9 @@ die() { echo "quorum-branch: $*" >&2; exit 1; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 # Through quorum-git, so a sandbox that hides the real git behind Apple's launcher doesn't break this script.
 git() { "$HERE/quorum-git" "$@"; }
+# shellcheck source=libexec/git-probe.sh
+. "$HERE/../libexec/git-probe.sh"
+quorum_git_probe
 ROOT=$("$HERE/quorum-active-task" --root)
 MAIN=$("$HERE/quorum-active-task" --main)
 cd "$("$HERE/quorum-active-task" --code)"
