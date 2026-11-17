@@ -7,6 +7,8 @@
 #   quorum-active-task --root     print the repo root Quorum uses: where .tasks/ lives
 #   quorum-active-task --code     print the working tree the code is in: the root, or the git worktree you're in
 #   quorum-active-task --main     print the repository's main working tree
+#   quorum-active-task --all      the slug, root, code and main, one per line in that order, with an empty first
+#                                 line when there's no active task; exit 1 with no output when a path holds a newline
 #   quorum-active-task --list     every task (not standalone reviews): SLUG<TAB>STATUS<TAB>WORKTREE, one per line
 #
 # Resolution order: a feat/<slug> or fix/<slug> branch whose .tasks/<slug>/ exists, then .tasks/.active. In a
@@ -31,39 +33,108 @@ git() { "$HERE/quorum-git" "$@"; }
 . "$HERE/../libexec/git-probe.sh"
 quorum_git_probe
 
-toplevel() { git -C "$1" rev-parse --show-toplevel 2>/dev/null; }
-common_dir() { git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null; }
-# A linked worktree has its own git dir under the main one's worktrees/.
-is_linked() {
-  local d c
-  d=$(git -C "$1" rev-parse --path-format=absolute --git-dir 2>/dev/null) && c=$(common_dir "$1") && [ "$d" != "$c" ]
+# rp DIR: what git says about DIR, memoized for this run only (quorum-branch moves .tasks/ between runs). Sets RP_TOP,
+# RP_COMMON and RP_GITDIR, and RP_HAS_TOP / RP_HAS_DIRS to 1 when the work tree / the two git dirs are known. One
+# rev-parse for all three; a second for the two dirs only when there's no work tree; and when the line count is off
+# (a path holding a newline), the three separate calls this script made before. Call it in the main shell, never
+# inside $(...), or the memo entry is lost.
+MEMO_N=0
+rp() {
+  local key out i want got rest
+  if key=$(CDPATH='' cd -- "$1" 2>/dev/null && pwd -P && printf x); then key=${key%x}; key=${key%$'\n'}; else key=$1; fi
+  i=0
+  while [ "$i" -lt "$MEMO_N" ]; do
+    if [ "${MEMO_KEY[$i]}" = "$key" ]; then
+      RP_TOP=${MEMO_TOP[$i]}; RP_COMMON=${MEMO_COMMON[$i]}; RP_GITDIR=${MEMO_GITDIR[$i]}
+      RP_HAS_TOP=${MEMO_HAS_TOP[$i]}; RP_HAS_DIRS=${MEMO_HAS_DIRS[$i]}
+      return 0
+    fi
+    i=$((i + 1))
+  done
+  RP_TOP='' RP_COMMON='' RP_GITDIR='' RP_HAS_TOP=0 RP_HAS_DIRS=0
+  # want: the lines the call that succeeded should print (0 when neither did); got: the lines it printed.
+  if out=$(git -C "$key" rev-parse --show-toplevel --path-format=absolute --git-common-dir --git-dir 2>/dev/null); then
+    want=3
+  elif out=$(git -C "$key" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null); then
+    want=2
+  else
+    want=0
+  fi
+  got=0
+  if [ "$want" -gt 0 ]; then
+    rest=$out; got=1
+    while :; do
+      case "$rest" in *$'\n'*) rest=${rest#*$'\n'}; got=$((got + 1)) ;; *) break ;; esac
+    done
+  fi
+  if [ "$got" -ne "$want" ]; then
+    if out=$(git -C "$key" rev-parse --show-toplevel 2>/dev/null); then RP_TOP=$out; RP_HAS_TOP=1; fi
+    if out=$(git -C "$key" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+      RP_COMMON=$out
+      if out=$(git -C "$key" rev-parse --path-format=absolute --git-dir 2>/dev/null); then RP_GITDIR=$out; RP_HAS_DIRS=1; fi
+    fi
+  elif [ "$want" -eq 3 ]; then
+    RP_TOP=${out%%$'\n'*}; rest=${out#*$'\n'}; RP_COMMON=${rest%%$'\n'*}; RP_GITDIR=${rest#*$'\n'}
+    RP_HAS_TOP=1; RP_HAS_DIRS=1
+  elif [ "$want" -eq 2 ]; then
+    RP_COMMON=${out%%$'\n'*}; RP_GITDIR=${out#*$'\n'}; RP_HAS_DIRS=1
+  fi
+  MEMO_KEY[MEMO_N]=$key; MEMO_TOP[MEMO_N]=$RP_TOP; MEMO_COMMON[MEMO_N]=$RP_COMMON; MEMO_GITDIR[MEMO_N]=$RP_GITDIR
+  MEMO_HAS_TOP[MEMO_N]=$RP_HAS_TOP; MEMO_HAS_DIRS[MEMO_N]=$RP_HAS_DIRS
+  MEMO_N=$((MEMO_N + 1))
 }
+
+# These set TOP, COMMON and MAIN_TREE instead of printing, so the lookup stays in the main shell.
+toplevel() { rp "$1"; TOP=$RP_TOP; [ "$RP_HAS_TOP" = 1 ]; }
+common_dir() { rp "$1"; COMMON=$RP_COMMON; [ "$RP_HAS_DIRS" = 1 ]; }
+# A linked worktree has its own git dir under the main one's worktrees/.
+is_linked() { rp "$1"; [ "$RP_HAS_DIRS" = 1 ] && [ "$RP_GITDIR" != "$RP_COMMON" ]; }
 # The main working tree of the repository $1 is in: the folder holding its .git.
 main_tree() {
-  local c; c=$(common_dir "$1")
-  case "$c" in */.git) dirname "$c" ;; *) printf '%s\n' "$1" ;; esac
+  common_dir "$1" || true
+  case "$COMMON" in */.git) MAIN_TREE=$(dirname "$COMMON") ;; *) MAIN_TREE=$1 ;; esac
 }
 
 valid_slug() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$'; }
 
 if [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "$CLAUDE_PROJECT_DIR" ]; then project=$CLAUDE_PROJECT_DIR
-elif project=$(toplevel .); then :
+elif toplevel .; then project=$TOP
 else project=$(pwd)
 fi
 ROOT=$project
-if is_linked "$project"; then ROOT=$(main_tree "$project"); fi
+if is_linked "$project"; then main_tree "$project"; ROOT=$MAIN_TREE; fi
 MAIN=$ROOT
 
 # The code: the first of the current directory's worktree, the project's, and the root that is in the root's repo.
 CODE=$ROOT
-if repo=$(common_dir "$ROOT"); then
+if common_dir "$ROOT"; then
+  repo=$COMMON
   for dir in . "$project"; do
-    top=$(toplevel "$dir") || continue
-    if [ "$(common_dir "$top")" = "$repo" ]; then CODE=$top; break; fi
+    if ! toplevel "$dir"; then continue; fi
+    top=$TOP
+    common_dir "$top" || true
+    if [ "$COMMON" = "$repo" ]; then CODE=$top; break; fi
   done
 fi
 if [ "$CODE" != "$ROOT" ] && is_linked "$CODE" && [ -d "$CODE/.tasks" ] && [ ! -L "$CODE/.tasks" ]; then ROOT=$CODE; fi
 TASKS="$ROOT/.tasks"
+
+# Sets SLUG to the active task, or to empty when there's none.
+find_slug() {
+  local branch slug
+  SLUG=
+  branch=$(git -C "$CODE" branch --show-current 2>/dev/null || true)
+  case "$branch" in
+    feat/*|fix/*)
+      slug=${branch#*/}
+      if valid_slug "$slug" && [ -d "$TASKS/$slug" ]; then SLUG=$slug; return 0; fi ;;
+  esac
+  if ! is_linked "$CODE" && [ -f "$TASKS/.active" ]; then
+    slug=$(head -n 1 "$TASKS/.active" | tr -d '[:space:]')
+    if [ -n "$slug" ] && valid_slug "$slug" && [ -d "$TASKS/$slug" ]; then SLUG=$slug; fi
+  fi
+  return 0
+}
 
 case "${1:-}" in
   --root)
@@ -72,13 +143,17 @@ case "${1:-}" in
     printf '%s\n' "$CODE"; exit 0 ;;
   --main)
     printf '%s\n' "$MAIN"; exit 0 ;;
+  --all)
+    case "$ROOT$CODE$MAIN" in *$'\n'*) exit 1 ;; esac
+    find_slug
+    printf '%s\n%s\n%s\n%s\n' "$SLUG" "$ROOT" "$CODE" "$MAIN"; exit 0 ;;
   --list)
     for file in "$TASKS"/*/state.md; do
       [ -f "$file" ] || continue
       slug=$(basename "$(dirname "$file")")
-      [ "$("$HERE/quorum-state" --task "$slug" get kind 2>/dev/null)" = review ] && continue
-      printf '%s\t%s\t%s\n' "$slug" "$("$HERE/quorum-state" --task "$slug" get status 2>/dev/null)" \
-        "$("$HERE/quorum-state" --task "$slug" get worktree 2>/dev/null)"
+      [ "$("$HERE/quorum-state" --task "$slug" --root "$ROOT" get kind 2>/dev/null)" = review ] && continue
+      printf '%s\t%s\t%s\n' "$slug" "$("$HERE/quorum-state" --task "$slug" --root "$ROOT" get status 2>/dev/null)" \
+        "$("$HERE/quorum-state" --task "$slug" --root "$ROOT" get worktree 2>/dev/null)"
     done
     exit 0 ;;
   --set)
@@ -94,21 +169,7 @@ case "${1:-}" in
   *) die "unknown argument: $1" ;;
 esac
 
-branch=$(git -C "$CODE" branch --show-current 2>/dev/null || true)
-case "$branch" in
-  feat/*|fix/*)
-    slug=${branch#*/}
-    if valid_slug "$slug" && [ -d "$TASKS/$slug" ]; then
-      printf '%s\n' "$slug"; exit 0
-    fi ;;
-esac
-
-if ! is_linked "$CODE" && [ -f "$TASKS/.active" ]; then
-  slug=$(head -n 1 "$TASKS/.active" | tr -d '[:space:]')
-  if [ -n "$slug" ] && valid_slug "$slug" && [ -d "$TASKS/$slug" ]; then
-    printf '%s\n' "$slug"; exit 0
-  fi
-fi
-
+find_slug
+if [ -n "$SLUG" ]; then printf '%s\n' "$SLUG"; exit 0; fi
 echo "quorum-active-task: no active task (use a feat/<slug> or fix/<slug> branch, or run /quorum:spec-and-eval)" >&2
 exit 1
