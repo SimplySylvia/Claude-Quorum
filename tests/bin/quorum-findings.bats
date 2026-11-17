@@ -155,3 +155,115 @@ MD
   "$BIN/quorum-findings" check scoped.md
   cleanup_repo
 }
+
+# scope_repo: in the current repo, commit app/x.py and app/other.py (40 lines each) as the base, then change line 3
+# and give line 30 a noqa comment in app/x.py. Sets SBASE to the base commit. The [[ ]] checks in the scope tests end
+# in `|| return 1` because bash 3.2 doesn't stop a test on a failed [[ ]] that isn't its last command.
+scope_repo() {
+  mkdir -p app && seq 1 40 | sed 's/^/x = /' > app/x.py && cp app/x.py app/other.py
+  git add -A && git -c user.name=t -c user.email=t@example.com commit -qm base
+  SBASE=$(git rev-parse HEAD)
+  sed -i.bak '3s/.*/y = parse(row)/; 30s/.*/z = 1  # noqa: E501/' app/x.py && rm app/x.py.bak
+  git -c user.name=t -c user.email=t@example.com commit -qam change
+}
+
+@test "scope matches absolute, Windows, Git Bash and worktree paths like relative ones" {
+  make_repo
+  scope_repo
+  # A copy of the helpers whose quorum-active-task names a faked Windows root, C:/fake/w, for every mode.
+  T="$BATS_TEST_TMPDIR/plugin"
+  mkdir -p "$T/bin" "$T/libexec"
+  cp "$BIN/quorum-findings" "$BIN/quorum-git" "$T/bin/"
+  cp "$REPO_ROOT/libexec/git-probe.sh" "$REPO_ROOT/libexec/git" "$T/libexec/"
+  cat > "$T/bin/quorum-active-task" <<'SH'
+#!/bin/sh
+case "$1" in --all) printf '\nC:/fake/w\nC:/fake/w\nC:/fake/w\n' ;; *) echo C:/fake/w ;; esac
+SH
+  chmod +x "$T/bin/quorum-active-task"
+  # Each form cites a changed line (kept) and a file the range doesn't change (dropped).
+  forms=("" "$WORK/" "$(pwd -P)/" 'C:\fake\w\' "C:/fake/w/" "c:/fake/w/" "/c/fake/w/")
+  : > candidates.md
+  for i in "${!forms[@]}"; do
+    f=${forms[$i]}
+    printf '[IMPORTANT] %sapp/x.py:3 — Pattern Category: Kept %s\n\n' "$f" "$i" >> candidates.md
+    printf '[IMPORTANT] %sapp/other.py:3 — Pattern Category: Dropped %s\n\n' "$f" "$i" >> candidates.md
+  done
+  printf '[NIT] C:\\fake\\w\\app\\x.py:4 — backslashes kept as written\n' >> candidates.md
+  run --separate-stderr "$T/bin/quorum-findings" scope "$SBASE..HEAD" candidates.md
+  [ "$status" -eq 0 ]
+  for i in "${!forms[@]}"; do
+    f=${forms[$i]}
+    [[ "$output" == *"[IMPORTANT] ${f}app/x.py:3 — Pattern Category: Kept $i"* ]] || { echo "form $i ($f) not kept"; return 1; }
+    [[ "$output" != *"Dropped $i"* ]] || { echo "form $i ($f) not dropped"; return 1; }
+    [[ "$stderr" == *"DROP [IMPORTANT] ${f}app/other.py:3 — Pattern Category: Dropped $i — out of scope: the range doesn't change app/other.py"* ]] || { echo "form $i ($f): no DROP line"; return 1; }
+  done
+  [[ "$output" == *'[NIT] C:\fake\w\app\x.py:4 — backslashes kept as written'* ]] || return 1
+  [ "$("$BIN/quorum-findings" count IMPORTANT <<<"$output")" = 7 ]
+
+  # A task worktree: its path, under the main tree's .claude/worktrees/, strips to the worktree-relative path,
+  # not to .claude/worktrees/demo/app/x.py under the main tree.
+  mkdir -p .claude/hooks
+  printf '# Project\n' > CLAUDE.md
+  printf '# Review\n' > REVIEW.md
+  printf '#!/usr/bin/env bash\nexit 0\n' > .claude/hooks/verify-completion.sh
+  printf '.tasks/\ncandidates.md\n' > .gitignore
+  git add -A && git -c user.name=t -c user.email=t@example.com commit -qm bootstrap
+  "$BIN/quorum-state" --task demo init MEDIUM BUILDING
+  "$BIN/quorum-active-task" --set demo
+  "$BIN/quorum-branch" start demo --worktree >/dev/null
+  wt="$(pwd -P)/.claude/worktrees/demo"
+  cd "$wt"
+  base=$(git rev-parse HEAD)
+  sed -i.bak '5s/.*/w = 2/' app/x.py && rm app/x.py.bak
+  git -c user.name=t -c user.email=t@example.com commit -qam "in the worktree"
+  printf '%s\n' "[IMPORTANT] $wt/app/x.py:5 — Pattern Category: In the worktree" "" \
+    "[IMPORTANT] $wt/app/other.py:5 — Pattern Category: Untouched in the worktree" > "$BATS_TEST_TMPDIR/wt.md"
+  run --separate-stderr "$BIN/quorum-findings" scope "$base..HEAD" "$BATS_TEST_TMPDIR/wt.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[IMPORTANT] $wt/app/x.py:5 — Pattern Category: In the worktree"* ]] || return 1
+  [[ "$output" != *"Untouched"* ]] || return 1
+  [[ "$stderr" == *"Untouched in the worktree — out of scope: the range doesn't change app/other.py"* ]] || return 1
+  cd "$WORK"
+  cleanup_repo
+}
+
+@test "scope keeps an absolute .tasks path and treats roots as literal text" {
+  make_repo
+  # A repo whose path holds regex characters: as a pattern, a.b+c[d] would match aXbbcd.
+  P=$(pwd -P)
+  mkdir 'a.b+c[d]' && cd 'a.b+c[d]'
+  git init -q -b main
+  scope_repo
+  cat > "$BATS_TEST_TMPDIR/c.md" <<MD
+[IMPORTANT] $WORK/a.b+c[d]/.tasks/demo/plan.md:4 — Pattern Category: Plan drift
+
+[IMPORTANT] $P/a.b+c[d]/app/x.py:3 — Pattern Category: Exact root
+
+[IMPORTANT] $P/aXbbcd/app/x.py:3 — Pattern Category: Pattern root
+
+[IMPORTANT] $P/a.b+c[d]2/app/x.py:3 — Pattern Category: Longer name
+MD
+  run --separate-stderr "$BIN/quorum-findings" scope "$SBASE..HEAD" "$BATS_TEST_TMPDIR/c.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[IMPORTANT] $WORK/a.b+c[d]/.tasks/demo/plan.md:4 — Pattern Category: Plan drift"* ]] || return 1
+  [[ "$output" == *"Pattern Category: Exact root"* ]] || return 1
+  [[ "$output" != *"Pattern root"* && "$output" != *"Longer name"* ]] || return 1
+  [[ "$stderr" == *"Pattern root — out of scope: the range doesn't change $P/aXbbcd/app/x.py"* ]] || return 1
+  [[ "$stderr" == *"Longer name — out of scope: the range doesn't change $P/a.b+c[d]2/app/x.py"* ]] || return 1
+  cd "$WORK"
+  cleanup_repo
+}
+
+@test "scope reads a cited file's lint-ignore line from the repo root when run from a subdirectory" {
+  make_repo
+  scope_repo
+  mkdir -p .tasks/demo/review/round-1
+  printf '%s\n' "[NIT] app/x.py:30 — long line" > .tasks/demo/review/round-1/candidates.md
+  cd .tasks/demo/review/round-1
+  run --separate-stderr "$BIN/quorum-findings" scope "$SBASE..HEAD" candidates.md
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"app/x.py:30"* ]] || return 1
+  [[ "$stderr" == *"DROP [NIT] app/x.py:30 — long line — out of scope: line 30 has a lint-ignore comment"* ]] || return 1
+  cd "$WORK"
+  cleanup_repo
+}

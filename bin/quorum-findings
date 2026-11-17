@@ -25,7 +25,9 @@
 #                                           more than 3 lines from a changed one, or whose line has a lint-ignore
 #                                           comment (noqa, eslint-disable, nolint, @ts-ignore, #[allow(, ...).
 #                                           [PRE-EXISTING] findings, and findings citing .tasks/ or no file:line,
-#                                           always stay. Run it from the working tree the range is in.
+#                                           always stay. Run it from the working tree the range is in. It strips
+#                                           the repo's roots from absolute, Windows and Git Bash paths before
+#                                           matching, and reads the cited file from the repo root.
 #
 # Lines starting with anything else (for example "DROP" lines from the verifier-voter) are not findings.
 set -euo pipefail
@@ -120,13 +122,45 @@ case "$cmd" in
     range=${1:-}; shift || true
     [ -n "$range" ] || die "scope needs a git range"
     diff=$(git diff -U0 --no-color --no-ext-diff "$range") || die "can't diff $range"
+    # The roots a finding's absolute path may start with: this tree's top, the current directory both ways, and the
+    # task's root, code and main trees. Passed through ENVIRON, since awk -v would read their backslashes as escapes.
+    top=$(git rev-parse --show-toplevel 2>/dev/null) || top=
+    if all=$("$HERE/quorum-active-task" --all 2>/dev/null); then task_roots=$(printf '%s\n' "$all" | sed -n '2,4p')
+    else task_roots=$(for m in --root --code --main; do "$HERE/quorum-active-task" "$m" 2>/dev/null || true; done); fi
+    roots=$(printf '%s\n' "$top" "$(pwd)" "$(pwd -P)" "$task_roots")
     # The changed lines, as PATH<TAB>FIRST<TAB>LAST per hunk of the new side; then the findings.
-    awk -F '\t' -v win=3 '
-      function lines_of(path,   l, n) {
+    QF_ROOTS=$roots QF_TOP=$top awk -F '\t' -v win=3 '
+      function lines_of(path,   l, n, f) {
         if (path in loaded) return
-        loaded[path] = 1; n = 0
-        while ((getline l < path) > 0) text[path, ++n] = l
-        close(path)
+        loaded[path] = 1; n = 0; f = (top == "" ? path : top "/" path)
+        while ((getline l < f) > 0) text[path, ++n] = l
+        close(f)
+      }
+      # A root is a drive form when it starts X: or /x/ (or is just /x): its first two characters, the drive, then
+      # compare case-insensitively, and the rest as literal text.
+      function drive_len(r) { return (r ~ /^[A-Za-z]:/ || r ~ /^\/[A-Za-z](\/|$)/) ? 2 : 0 }
+      function add_root(r) { if (r != "" && !(r in isroot)) { isroot[r] = 1; root[++nr] = r } }
+      # PATH without the longest root it starts with (the root, then /), or PATH itself.
+      function strip(p,   i, r, d, best) {
+        best = 0
+        for (i = 1; i <= nr; i++) {
+          r = root[i]; d = drive_len(r)
+          if (length(r) <= best || length(p) <= length(r) || substr(p, length(r) + 1, 1) != "/") continue
+          if (tolower(substr(p, 1, d)) != tolower(substr(r, 1, d)) || substr(p, d + 1, length(r) - d) != substr(r, d + 1)) continue
+          best = length(r)
+        }
+        return best ? substr(p, best + 2) : p
+      }
+      BEGIN {
+        top = ENVIRON["QF_TOP"]
+        m = split(ENVIRON["QF_ROOTS"], rs, "\n")
+        for (i = 1; i <= m; i++) {
+          r = rs[i]; gsub(/\\/, "/", r); sub(/\/+$/, "", r)
+          if (r == "") continue
+          add_root(r)
+          if (r ~ /^[A-Za-z]:(\/|$)/) add_root("/" tolower(substr(r, 1, 1)) substr(r, 3))
+          else if (r ~ /^\/[A-Za-z](\/|$)/) add_root(toupper(substr(r, 2, 1)) ":" substr(r, 3))
+        }
       }
       function emit(r,   m, b, i) {
         if (k++) print ""; print head[r]; m = split(body[r], b, "\037"); for (i = 1; i <= m; i++) if (b[i] != "") print b[i]
@@ -134,10 +168,16 @@ case "$cmd" in
       FNR == NR { nh++; hp[nh] = $1; hs[nh] = $2; he[nh] = $3; changed[$1] = 1; next }
       {
         r = FNR; tag[r] = $1; head[r] = $2; body[r] = $3; why = ""
-        if ($1 != "PRE-EXISTING" && match($2, /^\[[A-Z-]+\] [^ :]+:[0-9]+/)) {
-          loc = substr($2, index($2, "] ") + 2); path = loc; sub(/:.*/, "", path)
+        # The location token, with \ read as / and a leading X:/ drive set aside, must still read PATH:LINE.
+        loc = ""; drive = ""
+        if ($1 != "PRE-EXISTING" && $2 ~ /^\[[A-Z-]+\] /) {
+          loc = substr($2, index($2, "] ") + 2); sub(/ .*/, "", loc); gsub(/\\/, "/", loc)
+          if (loc ~ /^[A-Za-z]:\//) { drive = substr(loc, 1, 2); loc = substr(loc, 3) }
+        }
+        if (loc ~ /^[^ :]+:[0-9]+/) {
+          path = loc; sub(/:.*/, "", path); path = strip(drive path)
           n = loc; sub(/^[^:]*:/, "", n); sub(/[^0-9].*$/, "", n); n += 0
-          if (path !~ /^\.tasks\//) {
+          if (path !~ /^\.tasks\// && path !~ /\/\.tasks\//) {
             if (!(path in changed)) why = "the range doesn'"'"'t change " path
             else {
               near = 0
