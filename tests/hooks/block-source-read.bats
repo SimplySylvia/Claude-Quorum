@@ -99,9 +99,8 @@ bash_cmd() { call Bash "$(jq -n --arg c "$1" '{command: $c}')" "${2-quorum:blind
 
 @test "known gap stays documented: an interpreter given a script file is allowed" {
   # Running code is how a user runs the app, so `python3 script.py` is allowed even if the script reads source.
-  printf "print(open('app/report.py').read())\n" > /tmp/quorum-peek-$$.py
-  run bash_cmd "python3 /tmp/quorum-peek-$$.py"
-  rm -f /tmp/quorum-peek-$$.py
+  printf "print(open('app/report.py').read())\n" > "$BATS_TEST_TMPDIR/quorum-peek.py"
+  run bash_cmd "python3 $BATS_TEST_TMPDIR/quorum-peek.py"
   [ "$status" -eq 0 ]
 }
 
