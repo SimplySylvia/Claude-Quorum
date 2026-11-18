@@ -39,14 +39,16 @@ copy with `/plugin marketplace update`.
   docked pane can prevent.
 - **`Plan steps` in the Now card.** In Plan and Build the Now card lists the plan's steps, each as
   `○ 2 Export endpoint  ✗1  2 files · req 1, 2`: its mark (`✓` built, `●` being built, `○` not yet), its title, the
-  plan review's findings on its lines (in Plan), the files it names, and its requirements. A press highlights the
-  step's files in the tree with a `▎` and a bold name, holding their folders open. From Review on the list folds to
+  plan review's findings on its lines (in Plan), the files it names, and its requirements. A press marks the step's
+  row with a `▎` and a bold title and highlights its files in the tree the same way, holding their folders open,
+  and each file's label adds `in step N` for screen readers. From Review on the list folds to
   one `▸ Plan steps  3 of 3 built` row, kept open or folded per task; from Blind test on, a press on a step opens the
   folded Files row too.
 - **`● editing` in the file tree.** In Build and review, the file an agent last changed with Write, Edit, or
   NotebookEdit flashes for 2.5 s and then keeps `●` and `editing` until another file is edited, that agent's
   turn ends, or the task leaves Build and review, with its folders held open. A file the list doesn't have yet shows
-  as a live `● editing unplanned` row until the next record. Edits made through Bash don't show.
+  as a live `● editing unplanned` row until its edit clears or a record lists it. Edits made through Bash don't
+  show.
 - **The stop check skips an unchanged tree.** After a pass, the Stop hook writes a key for the tree the checks ran
   in to `.tasks/<task>/verify-pass`: `HEAD`, the staged and unstaged diffs, the untracked files outside `.tasks/`,
   the verify script, `verify_timeout_s` and the plugin version. A later stop with the same key exits at once without

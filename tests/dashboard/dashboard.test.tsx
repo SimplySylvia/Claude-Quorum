@@ -3358,9 +3358,15 @@ test('pressing a step highlights its files and opens their folders, and a second
   for (const key of STEP2) expect(await pane.find({ type: 'Button', key })).toBeUndefined()
   const before = await indexOf(pane, B)
   expect(before).toBeGreaterThan(-1)
+  const stepBefore = (await stepRow(pane, 2)) ?? ''
+  expect(stepBefore).toMatch(/^○ 2 Two /)
 
   // Step 2: its files are lit, and the folders above them are held open, in place.
   await pane.press({ key: `${STEP}2` })
+  // The step's own row is marked as its files are, in place: a `▎` in the space before its bold title.
+  expect(await stepRow(pane, 2)).toBe(stepBefore.replace('2 Two', '2▎Two'))
+  expect((await partOf(pane, `${STEP}2`, 'Two'))?.props?.bold).toBe(true)
+  for (const n of [1, 3, 4]) expect(await stepRow(pane, n)).not.toContain('▎')
   expect(await rowOf(pane, B)).toMatch(/▾ b\//)
   expect(await indexOf(pane, B)).toBe(before)
   expect((await pane.find({ type: 'Button', key: B }))?.props.label).toContain('held open for step 2')
@@ -3373,6 +3379,8 @@ test('pressing a step highlights its files and opens their folders, and a second
 
   // A second press clears both.
   await pane.press({ key: `${STEP}2` })
+  expect(await stepRow(pane, 2)).toBe(stepBefore)
+  expect((await partOf(pane, `${STEP}2`, 'Two'))?.props?.bold).not.toBe(true)
   expect(await rowOf(pane, B)).toMatch(/▸ b\//)
   expect(await indexOf(pane, B)).toBe(before)
   expect((await pane.find({ type: 'Button', key: B }))?.props.label).not.toContain('held open')

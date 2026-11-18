@@ -339,10 +339,11 @@ const STEP_MARKS = MARKS.filter(m => m.field !== 'fixed')
 // `1`, `1 and 2`, `1, 2 and 3`.
 const andList = (ns: number[]) => (ns.length < 2 ? ns.join('') : `${ns.slice(0, -1).join(', ')} and ${ns.at(-1)}`)
 
-// The step rows, `width` wide: the mark, the number right-aligned, the title cut at its end, then a right-hand block
-// as wide on every row so its columns line up: the finding marks, `K files` (none without files.tsv), and
-// ` · req 1, 2`. When the title would get fewer than 12 columns, the requirements give way first, cut at the end,
-// and go once fewer than 6 columns are left for them; the marks and files never shrink.
+// The step rows, `width` wide: the mark, the number right-aligned, the title cut at its end (bold after a `▎` when
+// selected), then a right-hand block as wide on every row so its columns line up: the finding marks, `K files`
+// (none without files.tsv), and ` · req 1, 2`. When the title would get fewer than 12 columns, the requirements
+// give way first, cut at the end, and go once fewer than 6 columns are left for them; the marks and files never
+// shrink.
 export function stepRows(lines: StepLine[], width: number): { n: number; parts: TreePart[]; label: string }[] {
   const numWidth = Math.max(0, ...lines.map(l => cellWidth(String(l.n))))
   const marks = lines.map(l => STEP_MARKS.filter(m => l.findings?.[m.field])
@@ -368,8 +369,9 @@ export function stepRows(lines: StepLine[], width: number): { n: number; parts: 
     ]
     const left: TreePart[] = [
       markPart(l.mark, STEP_COLOR[l.mark]),
-      { text: ` ${' '.repeat(numWidth - cellWidth(String(l.n)))}${l.n} ` },
-      { text: cutEnd(l.title, width - leadWidth - 1 - widthOf(right)) },
+      // A selected step's bar takes the space before its bold title, as a lit file's does, so nothing moves.
+      { text: ` ${' '.repeat(numWidth - cellWidth(String(l.n)))}${l.n}${l.isSelected ? '▎' : ' '}` },
+      { text: cutEnd(l.title, width - leadWidth - 1 - widthOf(right)), ...(l.isSelected ? { bold: true } : {}) },
     ]
     const label = [
       `step ${l.n}`,

@@ -74,8 +74,9 @@ the file being edited is marked as it happens (see [the file being edited](#the-
   tree, and the dashboard remembers the choice. It shows once the build has started; before that, the Review tree
   stays. The `▸ Plan steps` row sits above it, and pressing a step opens the Files row so its files show
   highlighted.
-- **A press on a step** highlights the files it names: each gets a `▎` before its bold name and `in step N` in its
-  label, and the folders above them stay open. The hint under the list's title changes from
+- **A press on a step** marks the step's own row with a `▎` before its bold title, in place, and highlights the
+  files it names: each gets a `▎` before its bold name, and its label, which a screen reader reads, adds
+  `in step N`. The folders above them stay open. The hint under the list's title changes from
   `press a step to highlight its files` to `step N's files are highlighted`. Steps can be pressed only where a tree
   of recorded files is drawn under them. Pressing the same step again clears
   it, pressing another switches to it, and a step that names no files selects nothing. The choice isn't kept across
@@ -121,8 +122,8 @@ In Build and review, a file of the project that an agent changes with Write, Edi
 - **In Build,** a file whose steps are all built, none of them the one being built, shows its own mark instead. In
   review, the edited file always shows `●`.
 - **A file the list doesn't have yet** shows as a live row under its folders, `● editing unplanned` (no
-  `unplanned` in a task with no plan), with no letter, line counts, or step, until the next record replaces it. It's
-  never written to `files.tsv`.
+  `unplanned` in a task with no plan), with no letter, line counts, or step. The row goes when its edit clears, as
+  above; if a record lists the file first, the recorded row replaces it. It's never written to `files.tsv`.
 - **Edits made through Bash** (`sed`, codemods, scripts) don't show, since Claude Code doesn't report which files
   they touch. Neither do edits under `.tasks/` or outside the project.
 
