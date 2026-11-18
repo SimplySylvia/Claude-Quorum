@@ -3,7 +3,7 @@
 // save in .tasks/<slug>/. No `$` here, so tests can call them directly.
 
 import type { Blind, ChangedFile, Check, FileList, Findings, Frontmatter, KeptFinding, PlanStep, Proof, PullRequest, QuorumAgent, Requirement, Reviewer, Section, Snapshot, Spec, Spend, Stage, Verdict } from '../../types'
-import { repoPath, slashes } from './tree'
+import { cellWidth, cutEnd, repoPath, slashes } from './tree'
 
 export const STAGES = ['Spec', 'Plan', 'Build', 'Review', 'Blind test', 'PR'] as const
 
@@ -593,10 +593,38 @@ export function openByDefault(t: Snapshot): Record<Section, boolean> {
   }
 }
 
-// What's wrong, briefly, for the band: failing checks, a stale proof, pending findings.
-export function problemsOf(t: Pick<Snapshot, 'proof' | 'checks' | 'isProofStale' | 'pending'>): string[] {
+// The Requirements row's note for its first unmet requirement and how many more: `R<n> <title> unmet, and K more`.
+// It sits `beside` the summary when it fits there; otherwise on its own `line` under the row, where only the title is
+// cut, and left out when fewer than 2 columns are left for it.
+export function unmetNote(first: Requirement, more: number, beside: number, line: number): { beside: string; under: string } {
+  const tail = ` unmet${more > 0 ? `, and ${more} more` : ''}`
+  const note = `R${first.n} ${first.title}${tail}`
+  if (cellWidth(note) <= beside) return { beside: note, under: '' }
+  const room = line - cellWidth(`R${first.n} `) - cellWidth(tail)
+  return { beside: '', under: room < 2 ? `R${first.n}${tail}` : `R${first.n} ${cutEnd(first.title, room)}${tail}` }
+}
+
+// The requirements a current proof leaves unmet, in rd.md order, once the review has converged: what the stepper,
+// the details line, the Now title and the band name. A stale proof's failures may already be fixed, so none count.
+export function unmetNow(t: Pick<Snapshot, 'spec' | 'checks' | 'proof' | 'isProofStale' | 'status'>): string[] {
+  if (!t.proof || t.isProofStale || !['CONVERGED', 'BLIND-TEST', 'READY', 'AWAITING-HUMAN'].includes(t.status)) return []
+  const verdicts = t.proof.verdicts
+  return (t.spec?.requirements ?? []).filter(r => requirementState(r.n, t.checks, verdicts).state === 'fail').map(r => r.n)
+}
+
+// Those requirements in a few words, for the band and the Now title (`short`), and for the details line.
+export function unmetWords(ns: string[]): { short: string; details: string } {
+  return ns.length === 1
+    ? { short: `R${ns[0]} unmet`, details: `converged with requirement ${ns[0]} unmet` }
+    : { short: `${ns.length} unmet`, details: `converged with ${plural(ns.length, 'requirement')} unmet` }
+}
+
+// What's wrong, briefly, for the band: an unmet requirement, failing checks, a stale proof, pending findings.
+export function problemsOf(t: Pick<Snapshot, 'spec' | 'status' | 'proof' | 'checks' | 'isProofStale' | 'pending'>): string[] {
   const failing = t.proof ? t.checks.filter(c => c.result === 'FAIL').length : 0
+  const unmet = unmetNow(t)
   return [
+    unmet.length > 0 ? unmetWords(unmet).short : '',
     failing ? `✗ ${failing} check${failing === 1 ? '' : 's'} failing` : '',
     t.isProofStale ? 'proof older than HEAD' : '',
     t.pending > 0 ? `${t.pending} pending` : '',

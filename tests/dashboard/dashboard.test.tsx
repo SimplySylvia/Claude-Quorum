@@ -8,7 +8,7 @@ import {
   requirementState, roleOf,
   roundReviewers, slugFromHead, spendOf, stageOf, stages, tokenCount,
   keptFindings, countPlanSteps, normalizePath, modelMismatches, choiceLabel, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, latestRun, liveReview, shortRange,
-  plural, voterNext, parseFileList, parsePlanSteps, editPath,
+  plural, voterNext, parseFileList, parsePlanSteps, editPath, unmetNote,
 } from '../../hooks/dashboard/task'
 import {
   awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, footprint, iconsOn, isBigTree, markText, markWords, repoPath, roundKept, isEditShown, runEnds, splitLoc, stepFindings, stepRows, trackFindings, treeHeader, treeRows,
@@ -1029,7 +1029,7 @@ test('the pane opens with what the task is: title, goal, requirements, and what 
   await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/proof-build.md', content: PROOF })
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   // A failed requirement opens the section by itself.
-  expect(await pane.find({ type: 'Text', text: /^2\/3 met$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^2 of 3 met$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^✗ 2  Commas are quoted$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^✓ 3  Docs: add export to README\.md\.$/ })).toBeDefined()
   await pane.unmount()
@@ -1046,7 +1046,7 @@ test('the pane opens with what the task is: title, goal, requirements, and what 
   files['.tasks/export-csv/proof-final.md'] = FINAL
   await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/proof-final.md', content: FINAL })
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await pane.find({ type: 'Text', text: /^2\/3 met$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^2 of 3 met$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^✗ 2  Commas are quoted  PARTIAL  quotes commas, not quotes inside a field$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^✓ 1  export writes a CSV of every customer\.  rows 1 pass; app\/export\.py:12 is called from main\(\)$/ })).toBeDefined()
   await pane.unmount()
@@ -1193,6 +1193,226 @@ test('a proof from before HEAD is flagged as possibly out of date', async ($, on
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ type: 'Text', text: /^proof-build\.md ran at 1a2b3c4, before HEAD \(9999999\): these results may be out of date$/ })).toBeDefined()
   await pane.unmount()
+})
+
+// ---- The unmet requirement
+
+// A task whose rd.md has these requirement titles, eval.md a check for each one but `unchecked`, and the given
+// proofs. HEAD is `head`, by default the proofs' commit, 1a2b3c4….
+const AT_HEAD = `1a2b3c4${'0'.repeat(33)}`
+const rdWith = (titles: string[]) => `# Export customers as CSV\n\n- **Slug:** \`export-csv\`\n\n## Goal\nUsers can export.\n\n## Requirements\n${titles.map((t, i) => `${i + 1}. **${t}.** More words.\n`).join('')}\n## Non-goals\n- No Excel output.\n`
+const evalWith = (n: number, unchecked: number[] = []) =>
+  `# Eval\n\n## Task checks\n| # | Requirement | Command | Passes when |\n|---|---|---|---|\n${Array.from({ length: n }, (_, i) => i + 1).filter(i => !unchecked.includes(i)).map(i => `| ${i} | r${i} | \`check ${i}\` | ok |\n`).join('')}`
+// A proof at 1a2b3c4: every check in `pass` passes and every one in `fail` fails; `verdicts` adds a final proof's table.
+const proofWith = (pass: number[], fail: number[] = [], verdicts: Record<number, string> = {}) =>
+  `Proof: export-csv at 1a2b3c4\nResult: ${fail.length} FAIL\n\n| # | Check | Result | Evidence |\n|---|---|---|---|\n| fast | bash .claude/hooks/verify-completion.sh | PASS | ok |\n${[...pass.map(i => [i, 'PASS']), ...fail.map(i => [i, 'FAIL'])].map(([i, r]) => `| ${i} | check ${i} | ${r} | x |\n`).join('')}${Object.keys(verdicts).length ? `\n## Requirements\n| Req | Verdict | Evidence |\n|---|---|---|\n${Object.entries(verdicts).map(([n, v]) => `| ${n} | ${v} | x |\n`).join('')}` : ''}`
+const FOUR = ['Rows', 'Commas', 'Totals', 'Help']
+function reqTask(status: string, o: { titles?: string[]; unchecked?: number[]; build?: string; final?: string; head?: string } = {}): Record<string, string> {
+  const titles = o.titles ?? FOUR
+  const files: Record<string, string> = {
+    ...repo(status),
+    '.git/refs/heads/feat/export-csv': `${o.head ?? AT_HEAD}\n`,
+    '.tasks/export-csv/rd.md': rdWith(titles),
+    '.tasks/export-csv/eval.md': evalWith(titles.length, o.unchecked),
+  }
+  if (o.build !== undefined) files['.tasks/export-csv/proof-build.md'] = o.build
+  if (o.final !== undefined) files['.tasks/export-csv/proof-final.md'] = o.final
+  return files
+}
+const REQS = 'toggle-requirements'
+
+test('the Requirements row names the unmet requirement and is never green while one is unmet', async ($, on) => {
+  const WIDE = { ...ON_TERMINAL, props: { ...ON_TERMINAL.props, bodyColumns: 100 } }
+  const files = reqTask('IN_REVIEW', { final: proofWith([1, 2, 3, 4], [], { 1: 'MET', 2: 'MET', 3: 'PARTIAL', 4: 'MET' }) })
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const color = async (pane: Drawn, summary: string) => (await pane.find({ type: 'Text', text: new RegExp(`^${summary}$`) }))?.props.color
+  const row = async (pane: Drawn) => pane.find({ type: 'Button', key: REQS })
+
+  // A final proof gives requirement 3 PARTIAL: red, named, and the fold opens by itself.
+  let pane = await $.ui.mount(WIDE)
+  expect(await color(pane, '3 of 4 met')).toBe('error')
+  expect((await row(pane))?.text).toBe('▾ Requirements   3 of 4 met  R3 Totals unmet')
+  expect((await row(pane))?.props.label).toBe('Requirements, 3 of 4 met, R3 Totals unmet, open')
+  await pane.press({ key: REQS })
+  expect((await row(pane))?.props.label).toBe('Requirements, 3 of 4 met, R3 Totals unmet, folded')
+  await pane.unmount()
+
+  // Two unmet: the first in rd.md order, and how many more.
+  await reload($, files, reqTask('IN_REVIEW', { final: proofWith([1, 2, 3, 4], [], { 1: 'MET', 2: 'PARTIAL', 3: 'MISSING', 4: 'MET' }) }))
+  pane = await $.ui.mount(WIDE)
+  expect(await color(pane, '2 of 4 met')).toBe('error')
+  expect((await row(pane))?.text).toContain('2 of 4 met  R2 Commas unmet, and 1 more')
+  await pane.unmount()
+
+  // No final proof, and a build proof's check for requirement 3 fails: unmet, but amber.
+  await reload($, files, reqTask('IN_REVIEW', { build: proofWith([1, 2, 4], [3]) }))
+  pane = await $.ui.mount(WIDE)
+  expect(await color(pane, '3 of 4 met')).toBe('warning')
+  expect((await row(pane))?.text).toContain('3 of 4 met  R3 Totals unmet')
+  await pane.unmount()
+
+  // None unmet, but requirement 4's check hasn't run: amber, and no unmet note.
+  await reload($, files, reqTask('IN_REVIEW', { build: proofWith([1, 2, 3]) }))
+  pane = await $.ui.mount(WIDE)
+  expect(await color(pane, '3 of 4 met')).toBe('warning')
+  expect((await row(pane))?.text).not.toContain('unmet')
+  await pane.unmount()
+
+  // Every requirement met: green.
+  await reload($, files, reqTask('IN_REVIEW', { build: proofWith([1, 2, 3, 4]) }))
+  pane = await $.ui.mount(WIDE)
+  expect(await color(pane, '4 of 4 met')).toBe('success')
+  expect((await row(pane))?.text).not.toContain('unmet')
+  await pane.unmount()
+
+  // A requirement with no check, and none unmet, keeps today's note.
+  await reload($, files, reqTask('IN_REVIEW', { unchecked: [4], build: proofWith([1, 2, 3]) }))
+  pane = await $.ui.mount(WIDE)
+  expect(await color(pane, '3 of 4 met')).toBe('warning')
+  expect((await row(pane))?.text).toContain('3 of 4 met  4 has no check')
+  await pane.unmount()
+
+  // A verdict for a requirement rd.md doesn't have is never looked at.
+  await reload($, files, reqTask('IN_REVIEW', { final: proofWith([1, 2, 3, 4], [], { 1: 'MET', 2: 'MET', 3: 'MET', 4: 'MET', 9: 'PARTIAL' }) }))
+  pane = await $.ui.mount(WIDE)
+  expect(await color(pane, '4 of 4 met')).toBe('success')
+  expect((await row(pane))?.text).not.toContain('unmet')
+  await pane.unmount()
+
+  // No proof: the summary reads as today, and the row is given no label, so it's read by its drawn words.
+  await reload($, files, reqTask('IN_REVIEW'))
+  pane = await $.ui.mount(WIDE)
+  expect(await color(pane, '4 in rd\\.md')).toBe('inactive')
+  expect((await row(pane))?.props.label).toBe('▸ Requirements   4 in rd.md')
+  await pane.unmount()
+})
+
+test('the unmet requirement note keeps R, unmet and the count and never overflows', async ($, on) => {
+  const LONG = `E${'x'.repeat(89)}`
+  const twelve = (r10: string) => Array.from({ length: 12 }, (_, i) => (i === 9 ? r10 : i === 10 ? 'Other' : `Req ${i + 1}`))
+  const upTo12 = (skip: number[]) => Array.from({ length: 12 }, (_, i) => i + 1).filter(i => !skip.includes(i))
+  const files = reqTask('IN_REVIEW', { titles: twelve(LONG), build: proofWith(upTo12([10, 11]), [10, 11]) })
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  // The note on its own line under the row (a Text's key isn't reported, so it's found by its text and its cut).
+  const note = async (pane: Drawn) => (await pane.findAll({ type: 'Text' })).find(t => /^  R\d+ /.test(t.text) && t.props.wrap === 'truncate-end')?.text
+
+  // (i) R10 and R11 unmet, R10's title 90 characters: the note moves under the row, its title cut.
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^10 of 12 met$/ })).toBeDefined()
+  const row = (await pane.find({ type: 'Button', key: REQS }))?.text ?? ''
+  expect(row).toBe('▾ Requirements   10 of 12 met')
+  const under = (await note(pane)) ?? ''
+  expect(under.startsWith('  R10 E')).toBe(true)
+  for (const part of ['R10', '…', ' unmet', ', and 1 more']) expect(under).toContain(part)
+  expect(under.endsWith(' unmet, and 1 more')).toBe(true)
+  expect(cols(row)).toBeLessThanOrEqual(50)
+  expect(cols(under)).toBeLessThanOrEqual(50)
+  expect((await pane.find({ type: 'Button', key: REQS }))?.props.label).toBe(`Requirements, 10 of 12 met, R10 ${LONG} unmet, and 1 more, open`)
+  await pane.unmount()
+
+  // (ii) Only R10 unmet, title CSV: it fits beside the summary (19 columns of room, a 13-column note).
+  await reload($, files, reqTask('IN_REVIEW', { titles: twelve('CSV'), build: proofWith(upTo12([10]), [10]) }))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^11 of 12 met$/ })).toBeDefined()
+  expect((await pane.find({ type: 'Button', key: REQS }))?.text).toBe('▾ Requirements   11 of 12 met  R10 CSV unmet')
+  expect(await note(pane)).toBeUndefined()
+  await pane.unmount()
+
+  // (iii) Every requirement unmet, R1's title 30 characters.
+  await reload($, files, reqTask('IN_REVIEW', { titles: ['A'.repeat(30), 'B', 'C', 'D'], build: proofWith([], [1, 2, 3, 4]) }))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^0 of 4 met$/ })).toBeDefined()
+  const all = (await note(pane)) ?? ''
+  expect(all.startsWith('  R1 ')).toBe(true)
+  expect(all.endsWith(' unmet, and 3 more')).toBe(true)
+  expect(cols(all)).toBeLessThanOrEqual(50)
+  await pane.unmount()
+
+  // unmetNote directly, with R10 first and 1 more.
+  const r10 = (title: string) => ({ n: '10', title })
+  expect(unmetNote(r10('CSV'), 1, 60, 80)).toEqual({ beside: 'R10 CSV unmet, and 1 more', under: '' })
+  expect(unmetNote(r10('Export the CSV files'), 1, 5, 80)).toEqual({ beside: '', under: 'R10 Export the CSV files unmet, and 1 more' })
+  const cut = unmetNote(r10(LONG), 1, 5, 30)
+  expect(cut.beside).toBe('')
+  expect(cut.under.startsWith('R10 E')).toBe(true)
+  expect(cut.under.endsWith(' unmet, and 1 more')).toBe(true)
+  expect(cut.under).toContain('…')
+  expect(cellWidth(cut.under)).toBe(30)
+  expect(unmetNote(r10(LONG), 1, 5, 24).under).toBe('R10 E… unmet, and 1 more')
+  expect(unmetNote(r10(LONG), 1, 5, 23).under).toBe('R10 unmet, and 1 more')
+  expect(unmetNote(r10(LONG), 1, 5, 22).under).toBe('R10 unmet, and 1 more')
+  expect(unmetNote(r10('CSV'), 0, 60, 80)).toEqual({ beside: 'R10 CSV unmet', under: '' })
+})
+
+test('from CONVERGED on a requirement unmet by a current proof shows on the stepper, the details line, the Now title and the band', async ($, on) => {
+  const files = reqTask('CONVERGED', { build: proofWith([1, 2, 4], [3]) })
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  // What the four places draw, and the Requirements row, with the project's files swapped for `next`.
+  const look4 = async (next: Record<string, string>) => {
+    await reload($, files, next)
+    const pane = await $.ui.mount(ON_TERMINAL)
+    const texts = await pane.findAll({ type: 'Text' })
+    // The stepper's Review stage: its glyph, then its name and round.
+    const review = texts.find(t => /^ ─ \S?Review( \d+\/\d+)?$/.test(t.text))
+    const details = texts.find(t => /^converged with/.test(t.text))?.text
+    const title = texts.find(t => t.text.startsWith('Now · '))?.text ?? ''
+    const requirements = (await pane.find({ type: 'Button', key: REQS }))?.text ?? ''
+    await pane.unmount()
+    const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    const problem = (await band.findAll({ type: 'Text' })).find(t => t.props.color === 'error')?.text ?? ''
+    await band.unmount()
+    return { review: review?.text ?? '', reviewColor: review?.props.color, details, title, problem, requirements }
+  }
+  const unchanged = (r: Awaited<ReturnType<typeof look4>>) => {
+    expect(r.review).not.toContain('!')
+    expect(r.reviewColor).not.toBe('warning')
+    expect(r.details).toBeUndefined()
+    expect(r.title).not.toContain('unmet')
+    expect(r.problem).not.toContain('unmet')
+  }
+
+  // A proof at HEAD fails requirement 3's check, in each status from CONVERGED on.
+  for (const status of ['CONVERGED', 'BLIND-TEST', 'READY', 'AWAITING-HUMAN']) {
+    const r = await look4(reqTask(status, { build: proofWith([1, 2, 4], [3]) }))
+    expect(r.review).toContain('!Review')
+    expect(r.reviewColor).toBe('warning')
+    expect(r.details?.startsWith('converged with requirement 3 unmet')).toBe(true)
+    expect(r.title.endsWith(' · R3 unmet')).toBe(true)
+    expect(r.problem.startsWith('R3 unmet')).toBe(true)
+  }
+
+  // Two unmet: counted.
+  const two = await look4(reqTask('CONVERGED', { build: proofWith([1, 4], [2, 3]) }))
+  expect(two.details?.startsWith('converged with 2 requirements unmet')).toBe(true)
+  expect(two.title.endsWith(' · 2 unmet')).toBe(true)
+  expect(two.problem.startsWith('2 unmet')).toBe(true)
+
+  // Still in review: nothing changes.
+  unchanged(await look4(reqTask('IN_REVIEW', { build: proofWith([1, 2, 4], [3]) })))
+
+  // A stale proof doesn't count, whether a failing check or a PARTIAL verdict decides; the Requirements row still
+  // names R3.
+  const STALE = '9'.repeat(40)
+  for (const status of ['CONVERGED', 'BLIND-TEST']) {
+    const failing = await look4(reqTask(status, { build: proofWith([1, 2, 4], [3]), head: STALE }))
+    unchanged(failing)
+    expect(failing.requirements).toContain('R3 Totals unmet')
+    const partial = await look4(reqTask(status, { final: proofWith([1, 2, 3, 4], [], { 1: 'MET', 2: 'MET', 3: 'PARTIAL', 4: 'MET' }), head: STALE }))
+    unchanged(partial)
+    expect(partial.requirements).toContain('R3 Totals unmet')
+  }
+  // That PARTIAL proof-final.md at HEAD counts.
+  const partial = await look4(reqTask('CONVERGED', { final: proofWith([1, 2, 3, 4], [], { 1: 'MET', 2: 'MET', 3: 'PARTIAL', 4: 'MET' }) }))
+  expect(partial.title.endsWith(' · R3 unmet')).toBe(true)
+  expect(partial.problem.startsWith('R3 unmet')).toBe(true)
+
+  // Every requirement met, one with no check only, or a verdict for a requirement rd.md doesn't have: nothing.
+  unchanged(await look4(reqTask('CONVERGED', { build: proofWith([1, 2, 3, 4]) })))
+  unchanged(await look4(reqTask('CONVERGED', { unchecked: [4], build: proofWith([1, 2, 3]) })))
+  unchanged(await look4(reqTask('CONVERGED', { final: proofWith([1, 2, 3, 4], [], { 1: 'MET', 2: 'MET', 3: 'MET', 4: 'MET', 9: 'PARTIAL' }) })))
 })
 
 test('the spec and blind-test stages show their own reports', async ($, on) => {
@@ -4048,7 +4268,7 @@ test('a Write or Edit under .tasks given with backslashes refreshes the task', a
   files['.tasks/export-csv/proof-build.md'] = PROOF
   await $.tool.call({ tool: 'Write', file_path: 'C:\\repo\\.tasks\\export-csv\\proof-build.md', content: PROOF })
   let pane = await $.ui.mount(ON_TERMINAL)
-  expect(await pane.find({ type: 'Text', text: /^2\/3 met$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^2 of 3 met$/ })).toBeDefined()
   await pane.unmount()
 
   // Round 2's vote lands as an Edit of its survivors file.

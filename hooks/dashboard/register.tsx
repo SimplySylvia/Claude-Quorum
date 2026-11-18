@@ -10,9 +10,9 @@ import type { ChangedFile, Check, Findings, FindingsView, Now, OtherTask, PullRe
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, parsePlanSteps, SLICE_AT, stageOf, stages, tokenCount,
-  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep, editPath,
+  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep, editPath, unmetNote, unmetNow, unmetWords,
 } from './task'
-import { awaitingFrom, awaitingOf, changeHeader, confidenceRow, footprint, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows } from './tree'
+import { awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, footprint, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows } from './tree'
 import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
 
 const PANE = 'quorum-dashboard'
@@ -405,12 +405,14 @@ async function lookupPr($: EngineInterface, t: Snapshot, force: boolean) {
   await update($, pr, () => found)
 }
 
-// What the stepper can't say: the fast path, the mockup sign-off, the plan's rounds and approval, the blind-test runs, and a drafted
-// PR before one is open. One line under the stepper.
+// What the stepper can't say: a requirement a current proof leaves unmet, the fast path, the mockup sign-off, the plan's
+// rounds and approval, the blind-test runs, and a drafted PR before one is open. One line under the stepper.
 function stageDetails(t: Snapshot, known: PullRequest | null): string {
   const plan = [t.planRounds ? `${t.planRounds} plan review round${t.planRounds === 1 ? '' : 's'}` : '',
     t.planApproved ? `approved ${t.planApproved}` : ''].filter(Boolean).join(', ')
+  const unmet = unmetNow(t)
   return [
+    unmet.length > 0 ? unmetWords(unmet).details : '',
     t.isBug ? 'bug fix: proven when its reproduction passes and fails without the fix' : '',
     t.isFast ? 'fast path: no plan round, one reviewer' : '',
     t.signoff ? `mockup signed off ${t.signoff}` : '',
@@ -862,9 +864,12 @@ export const register: Register = (on, options) => {
       : { tasks: true, requirements: false, checks: false, rounds: false, reviews: true, spend: false, agents: false }
     const scope = t?.slug ?? ''
     const isOpen = (id: Section) => folds[`${scope}:${id}`] ?? defaults[id]
-    // `name`: the toggle's label, when its on-screen summary isn't in words; its state goes last.
-    const fold = (id: Section, label: string, summary: [string, string], note: string, body: () => unknown, name?: string) => {
+    // `name`: the toggle's label, when its on-screen summary isn't in words or its note may be cut or moved under the
+    // row; its state goes last. `layout`: the note as drawn, beside the summary or on its own line under the row; the
+    // label keeps the whole `note`.
+    const fold = (id: Section, label: string, summary: [string, string], note: string, body: () => unknown, name?: string, layout?: { beside: string; under: string }) => {
       const open = isOpen(id)
+      const beside = layout ? layout.beside : note
       return (
         <Box key={`section-${id}`} flexDirection="column">
           <Button
@@ -877,8 +882,9 @@ export const register: Register = (on, options) => {
             <Text dimColor>{open ? '▾ ' : '▸ '}</Text>
             <Text bold>{label.padEnd(15)}</Text>
             <Text color={summary[1]}>{summary[0]}</Text>
-            {note ? <Text color={defaults[id] ? 'warning' : undefined} dimColor={!defaults[id]}>  {note}</Text> : null}
+            {beside ? <Text color={defaults[id] ? 'warning' : undefined} dimColor={!defaults[id]}>  {beside}</Text> : null}
           </Button>
+          {layout?.under ? <Text key={`${id}-note`} color={defaults[id] ? 'warning' : undefined} dimColor={!defaults[id]} wrap="truncate-end">  {layout.under}</Text> : null}
           {open ? <Box flexDirection="column" marginLeft={2}>{body() as never}</Box> : null}
         </Box>
       )
@@ -1142,8 +1148,22 @@ export const register: Register = (on, options) => {
     const command = nextCommand(next)
 
 
-    const failedRequirement = requirements.find(r => r.state === 'fail')
+    const failedRequirements = requirements.filter(r => r.state === 'fail')
     const uncheckedRequirement = requirements.find(r => r.state === 'none')
+    // With a proof, `M of N met`: red when a final proof's verdict leaves one unmet, amber while anything else is.
+    const requirementsSummary: [string, string] = t.proof
+      ? [`${met} of ${requirements.length} met`, met === requirements.length ? 'success' : failedRequirements.some(r => r.verdict) ? 'error' : 'warning']
+      : isReported ? [`${requirements.length} reported passing`, 'subtle'] : [`${requirements.length} in rd.md`, 'inactive']
+    // The first unmet requirement, beside the summary, or under the row when it doesn't fit within the pane.
+    const columns = e.props.bodyColumns ?? 50
+    const [firstFailed] = failedRequirements
+    const requirementsLayout = firstFailed
+      ? unmetNote(firstFailed, failedRequirements.length - 1, columns - 17 - cellWidth(requirementsSummary[0]) - 2, columns - 2)
+      : undefined
+    // The label reads the whole note: unmetNote with unlimited room keeps it beside, uncut.
+    const requirementsNote = firstFailed ? unmetNote(firstFailed, failedRequirements.length - 1, Infinity, Infinity).beside
+      : uncheckedRequirement ? `${uncheckedRequirement.n} has no check` : ''
+    const unmet = unmetNow(t)
     const checksSummary: [string, string] = t.proof
       ? [`${passed}/${t.checks.length} pass`, passed === t.checks.length ? 'success' : 'error']
       : t.expectedProof ? ['no proof saved', 'warning']
@@ -1175,7 +1195,8 @@ export const register: Register = (on, options) => {
           {spec?.goal ? <Text dimColor wrap="truncate-end">{spec.goal}</Text> : null}
           <Text>
             {rail.map((s, i) => {
-              const [glyph, color] = GLYPH[s.state]
+              // From CONVERGED on, a requirement a current proof leaves unmet turns Review's tick into a `!`.
+              const [glyph, color] = s.name === 'Review' && unmet.length > 0 ? ['!', 'warning'] : GLYPH[s.state]
               const sliced = t.planSteps >= SLICE_AT && !t.isFast && s.state === 'active'
               const label = s.name === 'Review' && t.round > 0 ? `${s.name} ${t.round}/${t.maxRounds}`
                 : s.name === 'Build' && sliced ? `${s.name} ${t.builtSteps}/${t.planSteps}` : s.name
@@ -1202,6 +1223,7 @@ export const register: Register = (on, options) => {
           <Text wrap="truncate-end">
             <Text bold>Now · </Text>
             <Text bold color={nowColor}>{nowTitle(n, t.maxRounds)}</Text>
+            {unmet.length > 0 ? <Text color="warning"> · {unmetWords(unmet).short}</Text> : null}
           </Text>
           {/* Before the first round, and in Plan throughout, the steps sit under the title, so the reviewer and voter
               rows run straight into the tree's header. */}
@@ -1265,10 +1287,7 @@ export const register: Register = (on, options) => {
         {reviewCard}
 
         <Box flexDirection="column" gap={1}>
-          {requirements.length > 0 && fold('requirements', 'Requirements',
-            t.proof ? [`${met}/${requirements.length} met`, met === requirements.length ? 'success' : 'warning']
-              : isReported ? [`${requirements.length} reported passing`, 'subtle'] : [`${requirements.length} in rd.md`, 'inactive'],
-            failedRequirement ? `✗ ${failedRequirement.n} ${failedRequirement.title}` : uncheckedRequirement ? `${uncheckedRequirement.n} has no check` : '',
+          {requirements.length > 0 && fold('requirements', 'Requirements', requirementsSummary, requirementsNote,
             () => [
               isReported ? <Text key="reported" dimColor>From the round log, not a saved proof</Text> : null,
               ...requirements.map(r => {
@@ -1289,7 +1308,7 @@ export const register: Register = (on, options) => {
                 ...spec.nonGoals.slice(0, 4).map((g, i) => <Text key={`non-${i}`} dimColor wrap="truncate-end">- {g}</Text>),
                 spec.nonGoals.length > 4 ? <Text key="non-more" dimColor>and {spec.nonGoals.length - 4} more in rd.md</Text> : null,
               ] : []),
-            ])}
+            ], t.proof ? `Requirements, ${requirementsSummary[0]}` : undefined, requirementsLayout)}
 
           {fold('checks', 'Checks', checksSummary, checksNote, () => [
             t.proof && !t.isProofStale ? <Text key="proof" dimColor>{t.proof.file}{t.proof.rev ? ` at ${t.proof.rev}` : ''}</Text> : null,
