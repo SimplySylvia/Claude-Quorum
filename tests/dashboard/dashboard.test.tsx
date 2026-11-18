@@ -3055,22 +3055,30 @@ test('during Plan the Now card lists the steps with their files and requirements
   world(on, files)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
-  // Round 1: after the voter row and before the tree, a row per step and the hint.
+  // Round 1: directly under the Now title and before the reviewer rows, a row per step and the hint; the tree's
+  // header follows the voter row, so it doesn't read as the steps' header.
   let pane = await $.ui.mount(ON_TERMINAL)
   expect(await stepRow(pane, 1)).toMatch(/^○ 1 Read the rows +1 file · req 1, 2$/)
   expect(await stepRow(pane, 2)).toMatch(/^○ 2 Quote commas +2 files · req 2 {3}$/)
   expect(await stepRow(pane, 3)).toMatch(/^○ 3 Docs +1 file {11}$/)
   for (const n of [1, 2, 3]) expect(cols((await stepRow(pane, n)) ?? '')).toBe(46)
   let all = await texts(pane)
-  const voter = all.findIndex(x => /Verifier vote/.test(x))
+  const title = all.findIndex(x => x.startsWith('Now · '))
   const header = all.indexOf('Plan steps')
   const hint = all.indexOf('press a step to highlight its files')
+  const replied = all.findIndex(x => / replied$/.test(x))
+  const voter = all.findIndex(x => /Verifier vote/.test(x))
   const tree = all.indexOf('3 steps · 3 files, 1 new')
-  expect(voter).toBeGreaterThan(-1)
-  expect(header).toBeGreaterThan(voter)
-  expect(hint).toBeGreaterThan(header)
+  expect(title).toBeGreaterThan(-1)
+  expect(all.slice(title + 1, header).every(x => all[title]?.includes(x))).toBe(true)
+  expect(header).toBeGreaterThan(title)
+  expect(hint).toBe(header + 1)
   expect(all.findIndex(x => /^○ 1 Read the rows/.test(x))).toBeGreaterThan(hint)
-  expect(tree).toBeGreaterThan(all.findIndex(x => /^○ 3 Docs/.test(x)))
+  expect(replied).toBeGreaterThan(all.findIndex(x => /^○ 3 Docs/.test(x)))
+  expect(voter).toBeGreaterThan(replied)
+  // The tree's header is the first row after the voter row's own texts.
+  expect(tree).toBeGreaterThan(voter)
+  expect(all.slice(voter + 1, tree).every(x => all[voter]?.includes(x))).toBe(true)
   await pane.unmount()
 
   // Before the first round: directly under the Now title, with no hint.

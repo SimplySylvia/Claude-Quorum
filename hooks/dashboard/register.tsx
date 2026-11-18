@@ -1116,6 +1116,7 @@ export const register: Register = (on, options) => {
         </Box>
       )
     }
+    const isPlanning = n.kind === 'plan' && t.status === 'PLANNING'
     const { title, ticket } = splitTicket(spec?.title || t.slug)
 
     const shown = new Set<string>([
@@ -1202,7 +1203,9 @@ export const register: Register = (on, options) => {
             <Text bold>Now · </Text>
             <Text bold color={nowColor}>{nowTitle(n, t.maxRounds)}</Text>
           </Text>
-          {(n.kind === 'plan' || n.kind === 'review') && n.round === 0 && stepsPart({ isPressable: false })}
+          {/* Before the first round, and in Plan throughout, the steps sit under the title, so the reviewer and voter
+              rows run straight into the tree's header. */}
+          {(n.kind === 'plan' || n.kind === 'review') && (n.round === 0 || isPlanning) && stepsPart({ isPressable: n.round > 0 && t.files !== null })}
           {n.kind === 'spec' && <Text dimColor>{plural(n.requirements, 'requirement')} in rd.md · {plural(taskChecks, 'check')} in eval.md</Text>}
           {n.kind === 'spec' && n.reviewers.map(r => reviewerLine(r))}
           {(n.kind === 'plan' || n.kind === 'review') && n.round > 0 && (
@@ -1213,7 +1216,7 @@ export const register: Register = (on, options) => {
               {n.reviewers.map(r => reviewerLine(r, n.tree?.round === n.round ? n.rereviewBy[r.role] ?? 0 : 0))}
               {/* While round N+1 reviews, the tree shows round N, whose drops aren't this round's. */}
               {roundVoter(n)}
-              {stepsPart({ isPressable: t.files !== null, filesKey: n.kind === 'review' && filesRow ? filesKey : undefined })}
+              {isPlanning ? null : stepsPart({ isPressable: t.files !== null, filesKey: n.kind === 'review' && filesRow ? filesKey : undefined })}
               {n.kind === 'plan'
                 ? findingsTree(t.slug, n.tree, t.risk === 'HIGH', treeWidth, planChange, planChange ? changeHeader('plan', planChange, t.planSteps) : undefined, selectedStep)
                 : filesRow ?? codeTree(n.tree)}

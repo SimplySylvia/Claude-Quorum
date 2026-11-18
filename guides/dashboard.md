@@ -52,14 +52,14 @@ at their save points (see [Repository layout](reference.md) in the reference), s
 `.tasks/` and never runs git. The tree changes only when a stage records, with one exception: in Build and review,
 the file being edited is marked as it happens (see [the file being edited](#the-file-being-edited)).
 
-- **Plan:** under the plan review's reviewer and voter rows, a **Plan steps** list, one row per step of `plan.md`,
+- **Plan:** directly under the Now card's title, a **Plan steps** list, one row per step of `plan.md`,
   such as `○ 2 Export endpoint  ✗1  2 files · req 1, 2`: the step's mark, its number and title, the plan review's
   findings on the step's lines, how many files the step names, and the requirements it serves. `K files` counts
   every file the step names, changed or not, and is left out until the plan records its list; `req …` is left out
   for a step that names no requirements. A plan finding is counted on the step whose lines hold it, and is still
-  listed under `.tasks/<slug>/plan.md` in the tree. Before the first plan-review round, the list sits under the Now
-  card's title, and its rows can't be pressed, since no tree is drawn yet. Below it, a header such as
-  `4 steps · 9 files, 3 new`, then the files the plan's steps name, with the plan review's findings under
+  listed under `.tasks/<slug>/plan.md` in the tree. Before the first plan-review round, its rows can't be pressed,
+  since no tree is drawn yet. Below the list come the plan review's reviewer and voter rows, then the tree: a header
+  such as `4 steps · 9 files, 3 new`, then the files the plan's steps name, with the plan review's findings under
   `.tasks/<slug>/plan.md`.
 - **Build:** the same Plan steps list above the tree, without finding marks: `✓` a built step, `●` the step being
   built (the one `quorum-plan next` gives, while a builder runs), and `○` one not built yet. Then a header such as
