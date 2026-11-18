@@ -1784,6 +1784,43 @@ describe('findings tree helpers', () => {
     expect(cutChain('a/b/c/d/', 6)).toBe('a/…/d/')
   })
 
+  test('an open security finding hangs its wrapped title and copy path under its title, as a plain one does', () => {
+    const title = 'Spreadsheet formulas in exported cells run when the file is opened in Excel'
+    const v = view([
+      finding('app/report.py', 41, 'IMPORTANT', title, { confidence: 92 }),
+      finding('app/report.py', 44, 'IMPORTANT', title, { confidence: 92, security: 'injection' }),
+    ])
+    const rows = treeRows(v, opts({ folds: { 's:tree:app/report.py:41#0': true, 's:tree:app/report.py:44#0': true } }))
+    const at = (line: number) => rows.find(r => r.key === `s:tree:app/report.py:${line}#0`) as TreeRow
+    const lead = (s: string) => s.length - s.trimStart().length
+    // The column the title starts at, its wrapped lines' column, and the copy line's column.
+    const columns = (f: TreeRow) => ({
+      title: rowText(f).indexOf('Spreadsheet'),
+      more: f.more.map(lead),
+      copy: lead(confidenceRow(f, 46).map(p => p.text).join('')),
+    })
+    const plain = at(41)
+    const security = at(44)
+    expect(rowText(security)).toContain(':44 security Spreadsheet')
+    const s = columns(security)
+    expect(security.more.length).toBeGreaterThan(0)
+    expect(s.more).toEqual(security.more.map(() => s.title))
+    expect(s.copy).toBe(s.title)
+    // Every line fits the card, and the title reads in full.
+    for (const l of [rowText(security), ...security.more]) expect(width(l)).toBeLessThanOrEqual(46)
+    expect([rowText(security).slice(s.title), ...security.more.map(l => l.trim())].join(' ')).toBe(title)
+    // A plain finding is unchanged: its title, wrapped lines and copy path share the column after `:41 `.
+    const p = columns(plain)
+    expect(p.title).toBe(s.title - 'security '.length)
+    expect(p.more).toEqual(plain.more.map(() => p.title))
+    expect(p.copy).toBe(p.title)
+    expect([rowText(plain), ...plain.more]).toEqual([
+      '      ✗ :41 Spreadsheet formulas in exported',
+      '            cells run when the file is opened',
+      '            in Excel',
+    ])
+  })
+
   test('treeHeader wraps the key and keeps the header when nothing is kept', () => {
     expect(treeHeader(null, 46)).toBeNull()
     expect(treeHeader(view([], { kept: 0 }), 46)).toEqual({ header: 'the verifier kept nothing in round 1', key: [] })

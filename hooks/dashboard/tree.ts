@@ -744,11 +744,13 @@ export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
       const where = f.line === null ? '(no location)' : `:${f.line}`
       const status = f.state === 'fixed' ? `${view?.unit} ${f.round} → fixed by ${view?.unit} ${f.fixedBy}` : isDropped ? `dropped on dispute in ${view?.unit} ${f.round}` : ''
       const prefix: TreePart[] = [{ text: indent, dim: isDropped }, glyph, { text: ` ${where} `, dim: true }]
-      const room = o.width - widthOf(prefix)
       // A security finding's word before its title: in error while open, muted once fixed or dropped.
       const word: TreePart[] = f.security === null ? [] : [f.state === 'open' ? { text: 'security ', color: 'error' } : { text: 'security ', dim: true }]
+      // The title's column: its wrapped lines hang there, and confidenceRow puts the copy path there too.
+      const hang = widthOf(prefix) + widthOf(word)
+      const room = o.width - hang
       const full = status ? `${status}: ${f.title}` : f.title
-      const lines = isOpen ? wrap(full, room - widthOf(word), room) : [cutEnd(status || f.title, room - widthOf(word))]
+      const lines = isOpen ? wrap(full, room, room) : [cutEnd(status || f.title, room)]
       const body = { text: lines[0] ?? '', ...(isDropped ? { dim: true } : {}) }
       const loc = f.path ? `${f.path}${f.line === null ? '' : `:${f.line}`}` : ''
       rows.push({
@@ -757,7 +759,7 @@ export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
         isOpen,
         label: [`${TAG_WORD[f.tag]} ${loc ? `at ${loc}` : 'with no location'}: ${f.title}`, ...(f.security === null ? [] : [`security: ${f.security}`]), ...(status ? [status] : []), ...(awaits ? ['awaiting re-review'] : []), stateWord(isOpen)].join(', '),
         parts: fit([...prefix, ...word, body], o.width),
-        more: lines.slice(1).map(l => `${' '.repeat(widthOf(prefix))}${l}`),
+        more: lines.slice(1).map(l => `${' '.repeat(hang)}${l}`),
         copy: f.path && f.line !== null ? `${f.path}:${f.line}` : null,
         confidence: f.confidence,
       })
