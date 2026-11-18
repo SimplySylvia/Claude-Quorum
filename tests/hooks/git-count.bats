@@ -7,7 +7,6 @@ teardown() { if [ -n "${WORK:-}" ]; then cleanup_repo; fi; }
 
 @test "the five PreToolUse hooks spawn at most 25 git processes for one Bash call" {
   run bash "$REPO_ROOT/assets/src/bench-hooks.sh"
-  echo "$output"
   [ "$status" -eq 0 ]
   last=$(printf '%s\n' "$output" | tail -n 1)
   [[ "$last" =~ ^total\ ([0-9]+)\ git\ [0-9]+\ ms$ ]]
@@ -30,7 +29,6 @@ teardown() { if [ -n "${WORK:-}" ]; then cleanup_repo; fi; }
   export GIT_LOG="$BATS_TEST_TMPDIR/git.log"
   : > "$GIT_LOG"
   run "$BIN/quorum-state" --task demo --root "$WORK" get status
-  cat "$GIT_LOG"
   [ "$status" -eq 0 ]
   [ "$output" = BUILDING ]
   [ "$(wc -l < "$GIT_LOG")" -le 1 ]

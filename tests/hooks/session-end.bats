@@ -47,6 +47,5 @@ end() { jq -n --arg s "$1" --arg c "${2:-$WORK}" '{session_id: $s, cwd: $c, hook
   [ "$status" -eq 0 ]
   [ ! -e .tasks/.map-sessions/s1 ] && [ ! -e .tasks/.run-sessions/s1 ]
   [ -f .tasks/.map-sessions/s2 ] && [ -f .tasks/.run-sessions/s2 ]
-  echo "versions: $(grep -c -- '--version' "$GIT_LOG")"; cat "$GIT_LOG"
   [ "$(grep -c -- '--version' "$GIT_LOG")" -le 1 ]
 }

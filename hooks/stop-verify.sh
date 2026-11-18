@@ -85,7 +85,7 @@ timeout_s=${CLAUDE_PLUGIN_OPTION_VERIFY_TIMEOUT_S:-300}
 case "$timeout_s" in ''|*[!0-9]*) timeout_s=300 ;; esac
 
 out=$(mktemp); marker="$out.timeout"; keyf="$out.key"
-trap 'rm -f "$out" "$marker" "$keyf" "$keyf.paths" "$keyf.diff" "$keyf.others" "$keyf.hashes"' EXIT
+trap 'rm -f "$out" "$marker" "$keyf" "$keyf.paths" "$keyf.diff" "$keyf.others"' EXIT
 
 KTREE=${VERIFY%/.claude/hooks/verify-completion.sh}
 STAMP="$ROOT/.tasks/$task/verify-pass"
@@ -135,8 +135,7 @@ stop_key() {
   done <"$keyf.others" >>"$keyf" || return 1
   printf 'VERIFY %s\n' "$VERIFY" >>"$keyf"
   printf '%s\n' "$VERIFY" >>"$keyf.paths"
-  kgit hash-object --no-filters --stdin-paths <"$keyf.paths" >"$keyf.hashes" 2>/dev/null || return 1
-  cat "$keyf.hashes" >>"$keyf" || return 1
+  kgit hash-object --no-filters --stdin-paths <"$keyf.paths" >>"$keyf" 2>/dev/null || return 1
   t=$(jq -r .version "$HERE/../.claude-plugin/plugin.json" 2>/dev/null) || return 1
   printf 'KTREE %s\ntimeout %s\nversion %s\n' "$KTREE" "$timeout_s" "$t" >>"$keyf" || return 1
   t=$(kgit hash-object --stdin <"$keyf" 2>/dev/null) && [ -n "$t" ] || return 1

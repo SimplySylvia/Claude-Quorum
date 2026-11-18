@@ -50,6 +50,5 @@ ran() {
   run env -u QUORUM_GIT_USE -u QUORUM_GIT_PROBE PATH="$SHIM:$PATH" QUORUM_GIT_CANDIDATES="$SHIM/git" bash -c 'printf "%s" "$1" | "$2/record-pr.sh"' _ "$in" "$HOOKS"
   [ "$status" -eq 0 ]
   [ "$("$BIN/quorum-state" --task demo get pr)" = "https://github.com/acme/app/pull/7" ]
-  echo "versions: $(grep -c -- '--version' "$GIT_LOG")"; cat "$GIT_LOG"
   [ "$(grep -c -- '--version' "$GIT_LOG")" -le 1 ]
 }

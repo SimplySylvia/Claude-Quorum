@@ -46,7 +46,6 @@ teardown() { cleanup_repo; }
   P="$BATS_TEST_TMPDIR/shim:$PATH" C="$BATS_TEST_TMPDIR/shim/git"
   run env PATH="$P" QUORUM_GIT_CANDIDATES="$C" QUORUM_GIT_USE=git QUORUM_GIT_PROBE="$P"$'\n'"$C" "$BIN/quorum-git" rev-parse HEAD
   [ "$status" -eq 0 ]
-  cat "$GIT_LOG"
   [ $(wc -l < "$GIT_LOG") -eq 1 ]
   ! grep -q -- '--version' "$GIT_LOG"
 }
@@ -101,7 +100,6 @@ teardown() { cleanup_repo; }
   run env -u QUORUM_GIT_USE -u QUORUM_GIT_PROBE PATH="$BATS_TEST_TMPDIR/shim:$PATH" QUORUM_GIT_CANDIDATES="$BATS_TEST_TMPDIR/shim/git" \
     "$T/bin/quorum-state" --task demo get status
   [ "$status" -eq 0 ]; [ "$output" = BUILDING ]
-  echo "versions: $(grep -c -- '--version' "$GIT_LOG")"; echo "child saw: $(cat "$CHILD_LOG")"
   [ "$(grep -c -- '--version' "$GIT_LOG")" -le 1 ]
   [ -s "$CHILD_LOG" ]; ! grep -qv '^git$' "$CHILD_LOG"
 }
