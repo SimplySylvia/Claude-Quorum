@@ -61,3 +61,34 @@ state() { CLAUDE_PROJECT_DIR="$DEMO/$1" "$BIN/quorum-state" --task csv-export "$
   mtime=$(stat -c %Y "$survivors" 2>/dev/null || stat -f %m "$survivors")
   [ -n "$recorded" ] && [ "$mtime" -lt "$recorded" ]
 }
+
+@test "done: the dashboard fixtures match the files the demo writes" {
+  run "$SCRIPT" "$DEMO/done" --stage done
+  [ "$status" -eq 0 ]
+  # The fixture's placeholders, in the order its header comment gives: the time, then full SHAs, then short ones.
+  run python3 -I -c '
+import json, os, re, sys
+fixture, task = sys.argv[1], sys.argv[2]
+lines = open(fixture, encoding="utf-8").readlines() if os.path.exists(fixture) else []
+line = [l for l in lines if l.startswith("export const DEMO_DONE = ")]
+want = json.loads(line[0].split(" = ", 1)[1].rstrip().rstrip(";")) if line else {}
+def norm(s):
+    s = re.sub(r"recorded=[0-9]+", "recorded=<time>", s)
+    s = re.sub(r"[0-9a-f]{40}", "<sha>", s)
+    return re.sub(r"(?<![0-9A-Za-z])[0-9a-f]{7,39}(?![0-9A-Za-z])", "<short>", s)
+keys = ["state.md", "rd.md", "eval.md", "proof-final.md", "files.tsv", "blind/blind-1.md", "blind/triage-1.md",
+        "review/round-1/survivors.md", "review/round-2/survivors.md"]
+bad = 0
+for k in keys:
+    got = norm(open(task + "/" + k, encoding="utf-8").read())
+    if k not in want:
+        print("missing: " + k); bad = 1
+    elif want[k] != got:
+        print("differs: " + k); bad = 1
+    if k == "files.tsv" and not got.split("\n", 1)[0].endswith("recorded=<time>"):
+        print("bad header: files.tsv"); bad = 1
+sys.exit(bad)
+' "$REPO_ROOT/tests/dashboard/fixtures/demo-done.ts" "$DEMO/done/.tasks/csv-export"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}

@@ -15,6 +15,7 @@ import {
 } from '../../hooks/dashboard/tree'
 import type { TreeChange, TreeRow } from '../../hooks/dashboard/tree'
 import type { ChangedFile, FileList, FindingsView, TreeFinding } from '../../types'
+import { DEMO_DONE } from './fixtures/demo-done'
 import { DEMO_PLAN, DEMO_PLAN_SHOW } from './fixtures/demo-plan'
 
 const state = (status: string, extra = '') => `---
@@ -4646,5 +4647,43 @@ test('the blind test row is a Button labelled in words', async ($, on) => {
   await pane.press({ key: BLIND_FOLD })
   expect(await label(pane)).toBe('Blind test, run 2, no report, 0 blockers, 0 caused, folded')
   expect((await blindButton(pane))?.text.startsWith('▸ Blind test  ')).toBe(true)
+  await pane.unmount()
+})
+
+test('the demo handoff shows the blind run row, the stamped checks and the fixed security finding', async ($, on) => {
+  // The demo's --stage done files, their placeholders filled in: one commit, DEMO_HEAD, stands for every SHA.
+  const DEMO_HEAD = '0123456789abcdef0123456789abcdef01234567'
+  const restore = (text: string) => text.split('<time>').join('2000000000').split('<sha>').join(DEMO_HEAD).split('<short>').join(DEMO_HEAD.slice(0, 7))
+  const files: Record<string, string> = {
+    '.git/HEAD': 'ref: refs/heads/feat/csv-export\n',
+    '.git/refs/heads/feat/csv-export': `${DEMO_HEAD}\n`,
+    '.tasks/csv-export/plan.md': DEMO_PLAN,
+  }
+  for (const [name, text] of Object.entries(DEMO_DONE)) files[`.tasks/csv-export/${name}`] = restore(text)
+  expect(parseFileList(files['.tasks/csv-export/files.tsv'] ?? '')).not.toBeNull()
+  world(on, files)
+  on('process.run', () => { throw new Error('gh: command not found') })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount(AT_80)
+
+  // With the PR recorded, the clean blind run's row sits directly under the Now title, folded.
+  const row = (await pane.find({ type: 'Button', key: 'csv-export:blind' }))?.text
+  expect(row).toBe('▸ Blind test  run 1 · reached · 0 blockers · 0 caused')
+  const all = await texts(pane)
+  const title = all.findIndex(x => x.startsWith('Now · '))
+  expect(title).toBeGreaterThan(-1)
+  expect(all.slice(title + 1, all.indexOf(row ?? ''))).toEqual(['Now · ', 'Waiting for you'])
+  // The final proof ran at HEAD, and says so.
+  expect(await pane.find({ type: 'Text', text: `6/6 pass @ ${DEMO_HEAD.slice(0, 7)}` })).toBeDefined()
+
+  // Round 1's security finding, fixed by round 2, in the opened Files tree with its word muted.
+  await pane.press({ key: 'csv-export:files' })
+  const report = 'csv-export:tree:app/report.py'
+  const fixed = `${report}:44#0`
+  if (await pane.find({ type: 'Button', key: report }) === undefined) await pane.press({ key: 'csv-export:tree:app/' })
+  if (await pane.find({ type: 'Button', key: fixed }) === undefined) await pane.press({ key: report })
+  expect(await rowOf(pane, fixed)).toMatch(/✓ :44 security round 1 → fixed by round 2/)
+  expect(await labelAt(pane, fixed)).toContain('CSV formula injection, security: injection')
+  expect((await partsAt(pane, fixed)).find(p => p.text === 'security ')?.props.dimColor).toBe(true)
   await pane.unmount()
 })

@@ -5,7 +5,8 @@
 #
 # DEST becomes the sales-app fixture, bootstrapped for Quorum, on the branch feat/csv-export, with a MEDIUM task
 # "csv-export" whose files are what the skills would have saved by then:
-#   review  (default) code review round 2: two reviewers replied, two to go; round 1 sent one finding back
+#   review  (default) code review round 2: two reviewers replied, two to go; round 1 sent two findings back, one of
+#           them a security finding
 #   blind   the review converged and blind test run 1 is in: goal reached, friction triaged
 #   done    AWAITING-HUMAN: a passing proof-final.md at HEAD, pr.md drafted, and the PR recorded
 # At every stage, a second task, "summary-dollars" (LOW), is building in its own git worktree, so the pane's Other
@@ -199,10 +200,14 @@ state set status IN_REVIEW
 # ---------------------------------------------------------------- code review round 1 (stage 4)
 r1="$task/review/round-1"; mkdir -p "$r1"
 cat > "$r1/logic.md" <<'MD'
-Summary: 1 IMPORTANT, 1 NIT, 0 PRE-EXISTING
+Summary: 2 IMPORTANT, 1 NIT, 0 PRE-EXISTING
 
 [IMPORTANT] app/report.py:41 — Pattern Category: Ignored argument
 Mechanism: export calls load() with no path, so `export tests/data/two.json` prints data/sales.json instead.
+
+[IMPORTANT] app/report.py:44 — Pattern Category: CSV formula injection
+Security: injection
+Mechanism: a customer named `=HYPERLINK(...)` is written as is, so a spreadsheet runs it as a formula.
 
 [NIT] app/report.py:44 — the writer's lineterminator could be a named constant.
 MD
@@ -215,10 +220,14 @@ echo 'Summary: 0 issues found. Ready to land.' > "$r1/patterns.md"
 echo 'Summary: 0 issues found. Ready to land.' > "$r1/docs.md"
 cat "$r1/logic.md" "$r1/architecture.md" > "$r1/candidates.md"
 cat > "$r1/votes.md" <<'MD'
-Summary: 1 IMPORTANT, 1 NIT, 0 PRE-EXISTING
+Summary: 2 IMPORTANT, 1 NIT, 0 PRE-EXISTING
 
 [IMPORTANT] app/report.py:41 — Pattern Category: Ignored argument
 Mechanism: export calls load() with no path, so `export tests/data/two.json` prints data/sales.json instead.
+
+[IMPORTANT] app/report.py:44 — Pattern Category: CSV formula injection
+Security: injection
+Mechanism: a customer named `=HYPERLINK(...)` is written as is, so a spreadsheet runs it as a formula.
 
 [NIT] app/report.py:44 — the writer's lineterminator could be a named constant.
 
@@ -231,10 +240,10 @@ state push round_shas "$(git rev-parse --short HEAD)"
 state log <<'MD'
 
 ## Round 1
-Summary: 1 IMPORTANT, 1 NIT, 0 PRE-EXISTING. Ignored argument: export read the default file. Sent to the builder.
+Summary: 2 IMPORTANT, 1 NIT, 0 PRE-EXISTING. Ignored argument and CSV formula injection (security). Sent to the builder.
 MD
-printf '\n# export honors DATA_FILE\n' >> app/report.py
-commit "Honor DATA_FILE in export"
+printf '\n# export honors DATA_FILE\n# export escapes cells that start with = + - @\n' >> app/report.py
+commit "Honor DATA_FILE and escape formula cells in export"
 # the dashboard shows a fix as awaiting re-review when the list is newer than the round's survivors.md
 touch -t 202001010000 "$r1/survivors.md"
 record
