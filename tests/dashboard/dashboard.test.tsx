@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'claude-code/testing'
+import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { ElementQuery, Engine, FoundElement } from 'claude-code/testing'
 
@@ -8,7 +8,7 @@ import {
   requirementState, roleOf,
   roundReviewers, slugFromHead, spendOf, stageOf, stages, tokenCount,
   keptFindings, countPlanSteps, normalizePath, modelMismatches, choiceLabel, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, latestRun, liveReview, shortRange,
-  plural, voterNext, parseFileList, parsePlanSteps,
+  plural, voterNext, parseFileList, parsePlanSteps, editPath,
 } from '../../hooks/dashboard/task'
 import {
   awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, footprint, iconsOn, isBigTree, markText, markWords, repoPath, roundKept, isEditShown, runEnds, splitLoc, stepFindings, stepRows, trackFindings, treeHeader, treeRows,
@@ -133,7 +133,9 @@ const settle = async () => {
 // Stands for the engine beneath the plugin: a project at /repo holding the files in `files`, each last changed at
 // `mtimes[path]` (1 when not given). Folders are the ones those paths imply.
 // `links`: absolute folders that list as symbolic links, as a task's folder in the main tree does once it has a worktree.
-function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Record<string, number> = {}, links: string[] = []) {
+// `o.cwd`: the session's cwd, read on each call (`root` when not given); `o.clock: false` leaves `clock.now` and
+// `clock.every` to the test, so `mock.clock(on)` can drive time (the engine takes one unmatched hook per event).
+function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Record<string, number> = {}, links: string[] = [], o: { cwd?: string; clock?: false } = {}) {
   const seen = { status: [] as (string | undefined)[], toasts: [] as string[], opened: 0, ticks: 0, live: [] as string[], copied: [] as string[], filled: [] as string[], draft: '', reads: [] as string[] }
   // Paths are relative to `root`, or absolute (a worktree's session reads the main working tree's .tasks/).
   const abs = (path: string) => (path.startsWith('/') ? path : `${root}/${path}`)
@@ -165,10 +167,13 @@ function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Re
     return { value: { kind: 'file' as const, size: 0, mtimeMs: mtime(e.path), isLink: false } }
   })
   on('session.root', () => ({ value: root }))
+  on('session.cwd', () => ({ value: o.cwd ?? root }))
   on('session.id', () => ({ value: 'sess-a' }))
   on('agent.list', () => ({ value: seen.live.map(id => ({ id, description: '', type: 'quorum:code-reviewer', status: 'running' as const })) }))
   // Each period of $.clock.every is one dispatch; refusing the first ends that interval, so this counts intervals.
-  on('clock.every', () => { seen.ticks++; return { deny: 'test' } })
+  if (o.clock !== false) on('clock.every', () => { seen.ticks++; return { deny: 'test' } })
+  // A $.clock.after timer fires at once on the fixed clock.
+  if (o.clock !== false) on('clock.after', () => ({ value: undefined }))
   on('fs.read', (_, e) => {
     seen.reads.push(e.path)
     const text = file(e.path)
@@ -176,7 +181,7 @@ function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Re
     return { value: text }
   })
   on('fs.exists', (_, e) => { seen.reads.push(e.path); return { value: file(e.path) !== undefined } })
-  on('clock.now', () => ({ value: 1_000 }))
+  if (o.clock !== false) on('clock.now', () => ({ value: 1_000 }))
   on('ui.status', (_, e) => { seen.status.push(e.text); return { value: undefined } })
   on('ui.toast', (_, e) => { seen.toasts.push(e.text); return { value: undefined } })
   on('ui.open', () => { seen.opened++; return { value: { isPlaced: true } } })
@@ -3551,4 +3556,295 @@ test('in Build the edit shows on a file only while one of its steps is unbuilt o
   expect(isEditShown('u.ts', ch, true, null)).toBe(true)
   expect(isEditShown('app/new.ts', ch, true, null)).toBe(true)
   expect(isEditShown('a.ts', ch, false, null)).toBe(true)
+})
+
+// ---- The file being edited, from tool.call
+
+// A Build at step 1 built: step 2 names app/a.ts, app/b.ts and the notebook, and wt.ts sits in the task's worktree.
+const EDIT_PLAN = '# Plan\n\n## Steps\n1. **One** — `x`\n2. **Two** — `app`\n'
+const EDIT_FILES = [fileRow('M', '1', '0', 'app/a.ts', '2'), fileRow('M', '1', '0', 'app/b.ts', '2'), fileRow('A', '1', '0', 'nb/x.ipynb', '2'), fileRow('M', '1', '0', 'wt.ts', '2')]
+const editTask = (status = 'BUILDING', extra = builtSteps(1)): Record<string, string> =>
+  ({ ...inRounds([], { status, extra: `${extra}worktree: /wt/export-csv\n` }), [PLAN]: EDIT_PLAN, [LIST]: filesTsv(EDIT_FILES) })
+const BUILDER = { prompt: 'Build step 2', description: 'b1', subagentType: 'quorum:builder', parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' as const }, background: false, fork: false }
+// The tree rows that carry the dot, by path, and whether a row is lit.
+const dotted = async (pane: Drawn) => (await treeButtons(pane)).filter(b => b.text.startsWith('●')).map(b => (b.key ?? '').slice(TREE.length))
+const barred = async (pane: Drawn) => (await treeButtons(pane)).filter(b => b.text.includes('▎')).map(b => (b.key ?? '').slice(TREE.length))
+const edit = ($: Engine, file_path: string, agentId?: string) =>
+  $.tool.call({ tool: 'Edit', file_path, old_string: 'a', new_string: 'b', ...(agentId ? { agentId } : {}) })
+const finish = ($: Engine, agentId?: string) =>
+  $.turn.complete({ ...(agentId ? { agentId } : {}), turnId: 'x', answer: 'done', reason: 'answer', durationMs: 1, isAborted: false })
+async function look<T>($: Engine, read: (pane: Drawn) => Promise<T>): Promise<T> {
+  const pane = await $.ui.mount(ON_TERMINAL)
+  const out = await read(pane)
+  await pane.unmount()
+  return out
+}
+
+test('an Edit, Write, or NotebookEdit in Build or review marks that file, and denied, failed, .tasks, and other-stage calls do not', async ($, on) => {
+  const files = editTask()
+  const o: { cwd?: string } = {}
+  // The Edit tool's answer beneath the dashboard: answered (by the world's tool.call), refused, or an error.
+  // Registered before world(), so it sits above the world's own tool.call hook.
+  let answer: 'ok' | 'deny' | 'error' = 'ok'
+  on('tool.call', { tool: 'Edit' }, (_, e, next) => (answer === 'deny' ? { deny: 'refused' } : answer === 'error' ? { isError: true as const, result: 'boom' } : next(e)))
+  world(on, files, '/repo', {}, [], o)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  // Nothing marked: a denied call, a failed one, a path under .tasks/, and paths under none of the roots.
+  answer = 'deny'
+  await edit($, '/repo/app/a.ts')
+  answer = 'error'
+  await edit($, '/repo/app/a.ts')
+  answer = 'ok'
+  await edit($, '/repo/.tasks/export-csv/notes.md')
+  await edit($, '/elsewhere/x.ts')
+  await edit($, '/repo/../etc/x.ts')
+  expect(await look($, dotted)).toEqual([])
+  expect(await look($, async p => p.find({ type: 'Text', text: /editing/ }))).toBeUndefined()
+
+  // An absolute path under the repo, then a Write, a relative path, a NotebookEdit, a ./ path, and the worktree.
+  await edit($, '/repo/app/a.ts')
+  expect(await look($, dotted)).toEqual(['app/a.ts'])
+  expect(await look($, async p => rowOf(p, `${TREE}app/a.ts`))).toContain('editing')
+  expect(await look($, async p => (await p.find({ type: 'Button', key: `${TREE}app/a.ts` }))?.props.label)).toMatch(/^app\/a\.ts, editing, /)
+  await $.tool.call({ tool: 'Write', file_path: '/repo/app/b.ts', content: '' })
+  expect(await look($, dotted)).toEqual(['app/b.ts'])
+  await edit($, 'app/a.ts')
+  expect(await look($, dotted)).toEqual(['app/a.ts'])
+  await $.tool.call({ tool: 'NotebookEdit', notebook_path: '/repo/nb/x.ipynb', new_source: '' })
+  expect(await look($, dotted)).toEqual(['nb/x.ipynb'])
+  await edit($, './app/b.ts')
+  expect(await look($, dotted)).toEqual(['app/b.ts'])
+  await edit($, '/wt/export-csv/wt.ts')
+  expect(await look($, dotted)).toEqual(['wt.ts'])
+
+  // The cwd isn't the root: a relative path is read against the cwd, so no live a.ts row appears at the top.
+  o.cwd = '/repo/app'
+  await edit($, 'a.ts')
+  expect(await look($, dotted)).toEqual(['app/a.ts'])
+  expect(await look($, async p => p.find({ type: 'Button', key: `${TREE}a.ts` }))).toBeUndefined()
+  expect(await look($, async p => p.find({ type: 'Text', text: /editing unplanned/ }))).toBeUndefined()
+  o.cwd = undefined
+
+  // A Write under .tasks/ still refreshes the task.
+  files[LIST] = filesTsv([...EDIT_FILES, fileRow('A', '2', '0', 'app/c.ts', '2')])
+  await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/files.tsv', content: '' })
+  expect(await look($, async p => rowOf(p, `${TREE}app/c.ts`))).toMatch(/c\.ts/)
+
+  // In PLANNING an Edit records nothing, even once the task is back in Build.
+  await reload($, files, editTask('PLANNING', ''))
+  await edit($, '/repo/app/b.ts')
+  await reload($, files, editTask())
+  expect(await look($, dotted)).toEqual([])
+
+  // editPath on its own: either slash, `.` and `..` resolved, and nothing outside the roots or under .tasks/.
+  expect(editPath('a.ts', '/repo/app', ['/repo'])).toBe('app/a.ts')
+  expect(editPath('a.ts', 'C:\\repo\\app', ['C:\\repo'])).toBe('app/a.ts')
+  expect(editPath('C:\\repo\\.\\app\\a.ts', 'C:\\repo', ['C:\\repo'])).toBe('app/a.ts')
+  expect(editPath('.\\app\\a.ts', 'C:\\repo', ['C:\\repo'])).toBe('app/a.ts')
+  expect(editPath('C:\\repo\\..\\other\\x.ts', 'C:\\repo', ['C:\\repo'])).toBeNull()
+  expect(editPath('C:\\repo\\app\\..\\.tasks\\s\\plan.md', 'C:\\repo', ['C:\\repo'])).toBeNull()
+  expect(editPath('/repo/app/../../etc/x', '/repo', ['/repo'])).toBeNull()
+  expect(editPath('/repo', '/repo', ['/repo'])).toBeNull()
+})
+
+test('the edited file flashes for 2.5 s then keeps its dot until another file is edited or its agent finishes', async ($, on) => {
+  const files = editTask()
+  world(on, files, '/repo', {}, [], { clock: false })
+  const clock = mock.clock(on)
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const words = async (p: Drawn) => (await p.findAll({ type: 'Text' })).some(t => /\bediting\b/.test(t.text))
+
+  // A builder's edit: the dot, the word, and the lit row.
+  await edit($, '/repo/app/a.ts', 'b1')
+  expect(await look($, dotted)).toEqual(['app/a.ts'])
+  expect(await look($, words)).toBe(true)
+  expect(await look($, barred)).toEqual(['app/a.ts'])
+  expect(await look($, async p => isLit(p, `${TREE}app/a.ts`))).toBe(true)
+  // 2.5 s on: the highlight is gone, the dot and the word stay.
+  await clock.advance(2500)
+  expect(await look($, barred)).toEqual([])
+  expect(await look($, dotted)).toEqual(['app/a.ts'])
+  expect(await look($, words)).toBe(true)
+  // Another agent finishing leaves them; another file edited moves them; the editing agent finishing clears them.
+  await finish($, 'b2')
+  expect(await look($, dotted)).toEqual(['app/a.ts'])
+  await edit($, '/repo/app/b.ts', 'b1')
+  expect(await look($, dotted)).toEqual(['app/b.ts'])
+  await finish($, 'b1')
+  expect(await look($, dotted)).toEqual([])
+  expect(await look($, words)).toBe(false)
+
+  // A main-session edit clears on a turn.complete with no agentId.
+  await edit($, '/repo/app/a.ts')
+  expect(await look($, dotted)).toEqual(['app/a.ts'])
+  await finish($)
+  expect(await look($, dotted)).toEqual([])
+
+  // Crossed pairs: a subagent's edit outlives the main session's turn, and a main-session edit outlives a subagent's.
+  await edit($, '/repo/app/a.ts', 'b1')
+  await finish($)
+  expect(await look($, dotted)).toEqual(['app/a.ts'])
+  expect(await look($, words)).toBe(true)
+  await edit($, '/repo/app/b.ts')
+  await finish($, 'b1')
+  expect(await look($, dotted)).toEqual(['app/b.ts'])
+  expect(await look($, words)).toBe(true)
+
+  // Leaving Build and review clears them, and coming back to review shows no old edit.
+  await reload($, files, editTask('CONVERGED'))
+  expect(await look($, dotted)).toEqual([])
+  expect(await look($, words)).toBe(false)
+  await reload($, files, { ...inRounds([survivorsMd(nitAt('app/a.ts:1'))], { extra: builtSteps(1) }), [PLAN]: EDIT_PLAN, [LIST]: filesTsv(EDIT_FILES) })
+  expect(await look($, async p => rowOf(p, `${TREE}app/b.ts`))).toBeDefined()
+  expect(await look($, dotted)).toEqual([])
+  expect(await look($, words)).toBe(false)
+})
+
+test('the flash schedules one redraw and leaves no timer running', async ($, on) => {
+  const files = editTask()
+  world(on, files, '/repo', {}, [], { clock: false })
+  // The engine takes one unmatched hook per event, so a counting hook can't sit beside mock.clock's own: mock.clock
+  // registers through this `on`, which counts each clock.after (its ms) and clock.every before mock.clock answers it.
+  const afters: number[] = []
+  let everies = 0
+  const register = on as unknown as (event: string, ...rest: unknown[]) => void
+  const counting = ((event: string, ...rest: unknown[]) => {
+    const answer = rest.pop() as (_: unknown, e: { ms: number }, ...more: unknown[]) => unknown
+    register(event, ...rest, (_: unknown, e: { ms: number }, ...more: unknown[]) => {
+      if (event === 'clock.after') afters.push(e.ms)
+      if (event === 'clock.every') everies++
+      return answer(_, e, ...more)
+    })
+  }) as unknown as typeof on
+  const clock = mock.clock(counting)
+  let redraws = 0
+  on('ui.invalidate', (_, e, next) => { redraws++; return next(e) })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const ticks = everies
+
+  // 1. An edit at 0 ms: one redraw timer, no interval.
+  await edit($, '/repo/app/a.ts')
+  expect(afters).toEqual([2500])
+  expect(everies).toBe(ticks)
+  // 2. A second edit at 1000 ms schedules its own.
+  await clock.set(1000)
+  await edit($, '/repo/app/b.ts')
+  expect(afters).toEqual([2500, 2500])
+  const before = redraws
+  // 3. The first edit's deadline: its timer was cancelled, so nothing redraws and b.ts still flashes.
+  await clock.set(2500)
+  expect(redraws).toBe(before)
+  expect(await look($, barred)).toEqual(['app/b.ts'])
+  // 4. The second's: exactly one redraw, and the flash is over while the dot stays.
+  await clock.set(3500)
+  expect(redraws).toBe(before + 1)
+  expect(await look($, barred)).toEqual([])
+  expect(await look($, dotted)).toEqual(['app/b.ts'])
+  // 5. No timer left.
+  const after = redraws
+  await clock.advance(10000)
+  expect(redraws).toBe(after)
+  expect(everies).toBe(ticks)
+})
+
+test('in Build a file whose steps are all built and not being built shows its progress mark, not editing', async ($, on) => {
+  // app/a.ts is step 1's only; app/b.ts is step 2's.
+  const plan = '# Plan\n\n## Steps\n1. **One** — `a`\n2. **Two** — `b`\n'
+  const rows = [fileRow('M', '1', '0', 'app/a.ts', '1'), fileRow('M', '1', '0', 'app/b.ts', '2')]
+  const at = (extra: string) => ({ ...inRounds([], { status: 'BUILDING', extra }), [PLAN]: plan, [LIST]: filesTsv(rows) })
+  const files: Record<string, string> = at('')
+  world(on, files)
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.description }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ tool_use_id: 'b1', ...BUILDER })
+
+  // Step 1 is being built: its file shows the dot.
+  await edit($, '/repo/app/a.ts', 'b1')
+  expect(await look($, dotted)).toEqual(['app/a.ts'])
+  // Step 1 built, step 2 being built: a.ts shows ✓, no dot and no editing.
+  files['.tasks/export-csv/state.md'] = at(builtSteps(1))['.tasks/export-csv/state.md'] ?? ''
+  await $.tool.call({ tool: 'Bash', command: 'quorum-state --task export-csv push built_steps 1' })
+  const row = await look($, async p => rowOf(p, `${TREE}app/a.ts`))
+  expect(row).toMatch(/^✓ M/)
+  expect(row).not.toContain('editing')
+  expect(await look($, dotted)).toEqual([])
+  // A file of step 2, the one being built, keeps the dot.
+  await edit($, '/repo/app/b.ts', 'b1')
+  expect(await look($, dotted)).toEqual(['app/b.ts'])
+  expect(await look($, async p => rowOf(p, `${TREE}app/b.ts`))).toContain('editing')
+})
+
+test('in review an edited planned file shows the dot and editing even though its steps are built', async ($, on) => {
+  // An unsliced plan with a passing build proof: every step is built.
+  const counted = STEPS_FILES.map(r => r.replace('\t-\t-\t', '\t1\t0\t'))
+  world(on, { ...inRounds([survivorsMd(nitAt('app/report.py:1'))]), [PLAN]: STEPS_PLAN, [LIST]: filesTsv(counted), '.tasks/export-csv/proof-build.md': PROOF })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  expect(await look($, async p => rowOf(p, `${TREE}README.md`))).toMatch(/^✓/)
+  await edit($, '/repo/README.md')
+  expect(await look($, dotted)).toEqual(['README.md'])
+  expect(await look($, async p => rowOf(p, `${TREE}README.md`))).toContain('editing')
+  expect(await look($, async p => (await p.find({ type: 'Button', key: `${TREE}README.md` }))?.props.label)).toMatch(/^README\.md, editing, /)
+})
+
+test('an edited file missing from the list shows as a live unplanned row until the next record', async ($, on) => {
+  const files: Record<string, string> = { ...inRounds([], { status: 'BUILDING', extra: builtSteps(1, 2, 3) }), [PLAN]: STEPS_PLAN, [LIST]: filesTsv(STEPS_FILES) }
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const before = JSON.stringify(files)
+  await edit($, '/repo/app/new.ts')
+  // Under app/, ● with no letter, the name, and editing unplanned, with no counts or step.
+  const live = await look($, async p => rowOf(p, `${TREE}app/new.ts`))
+  // The fixed clock keeps the flash on, so the lead's last column may hold its bar.
+  expect(live).toMatch(/^● {6}[ ▎]new\.ts +editing unplanned *$/)
+  expect(await look($, treeKeys)).toContain(`${TREE}app/new.ts`)
+  // The edit wrote nothing.
+  expect(JSON.stringify(files)).toBe(before)
+  // The next record replaces it with the recorded row: its letter and counts.
+  files[LIST] = filesTsv([...STEPS_FILES, fileRow('A', '7', '0', 'app/new.ts', '-')])
+  await $.tool.call({ tool: 'Bash', command: 'quorum-files record' })
+  const recorded = await look($, async p => rowOf(p, `${TREE}app/new.ts`))
+  expect(recorded).toMatch(/^● A +[ ▎]new\.ts +editing unplanned +\+7/)
+})
+
+test('the current edit and step selection are not stored', async ($, on) => {
+  const files = editTask()
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await edit($, '/repo/app/a.ts')
+  let pane = await $.ui.mount(ON_TERMINAL)
+  await pane.press({ key: `${STEP}2` })
+  expect(await stepLabel(pane, 2)).toContain('selected')
+  expect(await dotted(pane)).toEqual(['app/a.ts'])
+  expect((await barred(pane)).length).toBeGreaterThan(0)
+  await pane.unmount()
+
+  // A new session on the same stored atoms: no dot, no highlight, no selection.
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await dotted(pane)).toEqual([])
+  expect(await barred(pane)).toEqual([])
+  expect(await stepLabel(pane, 2)).not.toContain('selected')
+  expect(await stepLabel(pane, 2)).toMatch(/^step 2, /)
+  await pane.unmount()
+})
+
+test('a Write or Edit under .tasks given with backslashes refreshes the task', async ($, on) => {
+  const files: Record<string, string> = repo('IN_REVIEW')
+  world(on, files)
+  await $.session.start({ cwd: 'C:\\repo', surface: 'terminal', isInteractive: true })
+  files['.tasks/export-csv/proof-build.md'] = PROOF
+  await $.tool.call({ tool: 'Write', file_path: 'C:\\repo\\.tasks\\export-csv\\proof-build.md', content: PROOF })
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^2\/3 met$/ })).toBeDefined()
+  await pane.unmount()
+
+  // Round 2's vote lands as an Edit of its survivors file.
+  expect(await look($, async p => p.find({ type: 'Text', text: /^✗ Verifier vote\s+kept ✗1 n1/ }))).toBeUndefined()
+  files['.tasks/export-csv/review/round-2/survivors.md'] = SURVIVORS
+  await $.tool.call({ tool: 'Edit', file_path: 'C:\\repo\\.tasks\\export-csv\\review\\round-2\\survivors.md', old_string: 'a', new_string: 'b' })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^✗ Verifier vote\s+kept ✗1 n1/ })).toBeDefined()
+  await pane.unmount()
 })

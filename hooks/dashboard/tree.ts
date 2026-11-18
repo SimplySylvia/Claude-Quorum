@@ -38,7 +38,7 @@ export type TreeOptions = { scope: string; width: number; icons: boolean; isHigh
 
 // ---- Paths
 
-const slashes = (text: string) => text.replace(/\\/g, '/')
+export const slashes = (text: string) => text.replace(/\\/g, '/')
 
 // A finding's path, repo-relative: backslashes read as `/`, a leading `./` dropped, then the longest root it sits
 // under stripped, only at a `/` boundary. A path under no root stays as written. No `..` is resolved and nothing

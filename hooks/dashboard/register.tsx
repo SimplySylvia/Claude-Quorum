@@ -10,10 +10,10 @@ import type { ChangedFile, Check, Findings, FindingsView, Now, OtherTask, PullRe
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, parsePlanSteps, SLICE_AT, stageOf, stages, tokenCount,
-  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep,
+  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep, editPath,
 } from './task'
-import { awaitingFrom, awaitingOf, changeHeader, confidenceRow, footprint, iconsOn, isBigTree, markText, markWords, roundKept, runEnds, stepFindings, stepRows, trackFindings, treeHeader, treeRows } from './tree'
-import type { StepLine, TreeChange, TreePart } from './tree'
+import { awaitingFrom, awaitingOf, changeHeader, confidenceRow, footprint, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows } from './tree'
+import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
@@ -33,6 +33,19 @@ const clock = atom({ plugin: 'quorum', key: 'now' } as const, 0)
 let ticker: Timer | null = null
 // The plan step whose files the tree highlights, chosen by a press on its row. Kept in memory only, never stored.
 let selected: { slug: string; n: number } | null = null
+// The file being edited (repo-relative), by which agent (null for the main session) and when, kept in memory only.
+// `flash` is the timer that redraws once its highlight is over.
+type Edit = { slug: string; path: string; agentId: string | null; at: number }
+let edit: Edit | null = null
+let flash: Timer | null = null
+const FLASH_MS = 2500
+// The statuses an edit is recorded and shown in: Build and the code review's fix rounds.
+const EDIT_STATUSES = ['BUILDING', 'IN_REVIEW']
+function clearEdit() {
+  flash?.cancel()
+  flash = null
+  edit = null
+}
 
 // Statuses worth interrupting for.
 const TOASTS: Record<string, string> = {
@@ -462,6 +475,7 @@ async function refresh($: EngineInterface, maxRounds: number, forcePr = false): 
   const before = await read($, task)
   const after = await snapshot($, maxRounds, before)
   await update($, task, () => after)
+  if (edit && (!after || after.slug !== edit.slug || !EDIT_STATUSES.includes(after.status))) clearEdit()
   const session = await $.session.id().catch(() => '')
   const sessionRoot = await $.session.root()
   const { tasksRoot } = await gitPaths($, sessionRoot)
@@ -498,6 +512,30 @@ async function settleAgents($: EngineInterface) {
   keepTicking($, all)
 }
 
+// Record a successful Edit, Write or NotebookEdit of a file of the task, in Build or review, as its current edit:
+// it flashes for FLASH_MS, with one timer that redraws when the flash ends. Reads no files, and never throws.
+async function noteEdit($: EngineInterface, rawPath: string, agentId: string | undefined, ran: { deny?: string; isError?: true }) {
+  try {
+    if (ran.deny !== undefined || ran.isError) return
+    const t = await read($, task)
+    if (!t || !EDIT_STATUSES.includes(t.status)) return
+    const cwd = await $.session.cwd().catch(() => $.session.root())
+    const path = editPath(rawPath, cwd, t.roots)
+    if (path === null) return
+    edit = { slug: t.slug, path, agentId: agentId ?? null, at: await $.clock.now() }
+    flash?.cancel()
+    // A superseded timer was cancelled; the guard keeps one that still fires from clearing a newer one.
+    const mine: Timer = $.clock.after(FLASH_MS, () => {
+      if (flash === mine) flash = null
+      $.ui.invalidate('ui.render')
+    })
+    flash = mine
+    $.ui.invalidate('ui.render')
+  } catch {
+    // The dashboard only watches: a failed note leaves the last edit as it was.
+  }
+}
+
 function open($: EngineInterface, focus?: true) {
   return $.ui.open({ id: PANE, title: 'Quorum', ...(focus ? { focus } : {}) })
 }
@@ -511,6 +549,7 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: COMMAND, description: "Show or hide the Quorum task dashboard" })
     await settleAgents($)
     selected = null
+    clearEdit()
     // The band above the prompt says it all, so Quorum keeps no status line; clear one an earlier version set.
     $.ui.status(undefined)
     if ((await refresh($, maxRounds)) || liveReview(await read($, reviews))) void open($)
@@ -549,16 +588,25 @@ export const register: Register = (on, options) => {
     return ran
   }).catch(($, e, next) => next(e))
 
-  // Reviewers' replies, proofs, and blind-test reports are saved with Write (or fixed with Edit).
+  // Reviewers' replies, proofs, and blind-test reports are saved with Write (or fixed with Edit), with either slash.
+  // Any other file a Write, Edit or NotebookEdit changes in Build or review is the file being edited.
   on('tool.call', { tool: 'Write' }, async ($, e, next) => {
     const ran = await next(e)
-    if (e.file_path.includes('/.tasks/')) await refresh($, maxRounds)
+    if (slashes(e.file_path).includes('/.tasks/')) await refresh($, maxRounds)
+    await noteEdit($, e.file_path, e.agentId, ran)
     return ran
   }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'Edit' }, async ($, e, next) => {
     const ran = await next(e)
-    if (e.file_path.includes('/.tasks/')) await refresh($, maxRounds)
+    if (slashes(e.file_path).includes('/.tasks/')) await refresh($, maxRounds)
+    await noteEdit($, e.file_path, e.agentId, ran)
+    return ran
+  }).catch(($, e, next) => next(e))
+
+  on('tool.call', { tool: 'NotebookEdit' }, async ($, e, next) => {
+    const ran = await next(e)
+    await noteEdit($, e.notebook_path, e.agentId, ran)
     return ran
   }).catch(($, e, next) => next(e))
 
@@ -600,6 +648,11 @@ export const register: Register = (on, options) => {
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    // The agent that made the edit finished its turn: the main session's (no agentId) for its own edits.
+    if (edit && edit.agentId === (e.agentId ?? null)) {
+      clearEdit()
+      $.ui.invalidate('ui.render')
+    }
     if (e.agentId !== undefined) {
       const id = e.agentId
       const now = await $.clock.now()
@@ -695,9 +748,9 @@ export const register: Register = (on, options) => {
     ))
     // With a recorded `change`, the tree holds its files too, and `header` (the Plan or Build one) replaces the
     // findings header. Past 15 files a line says the clean folders start folded.
-    // `selected`: the plan step whose files are highlighted, their folders held open.
-    const findingsTree = (id: string, view: FindingsView | null, isHigh: boolean, width: number, change: TreeChange | null = null, header?: string, selected: number | null = null) => {
-      const head = treeHeader(view, width, change)
+    // `selected`: the plan step whose files are highlighted, their folders held open. `edit`: the file being edited.
+    const findingsTree = (id: string, view: FindingsView | null, isHigh: boolean, width: number, change: TreeChange | null = null, header?: string, selected: number | null = null, edit: TreeEdit | null = null) => {
+      const head = treeHeader(view, width, change, edit)
       if (!head) return null
       const title = header ?? head.header
       return (
@@ -707,7 +760,7 @@ export const register: Register = (on, options) => {
           {head.key.map((parts, i) => (
             <Box key={`${id}:tree-key-${i}`}><Text wrap="truncate-end">{partsOf(`${id}:tree-key-${i}`, parts)}</Text></Box>
           ))}
-          {treeRows(view, { scope: id, width, icons: iconsOn(fileIcons, e.surface), isHigh, folds, change, selected }).flatMap(row => {
+          {treeRows(view, { scope: id, width, icons: iconsOn(fileIcons, e.surface), isHigh, folds, change, selected, edit }).flatMap(row => {
             // A finding dropped on dispute is drawn dim throughout.
             const isDim = row.kind === 'finding' && row.parts.every(p => p.dim)
             const confidence = row.kind === 'finding' && row.isOpen ? confidenceRow(row, width) : []
@@ -948,7 +1001,16 @@ export const register: Register = (on, options) => {
     const isStepsDrawn = !t.isFast && t.steps.length > 0 && (t.status === 'PLANNING' || t.status === 'BUILDING' || (FOLDED_STEPS.includes(t.status) && isStepsOpen))
     const isTreeUnder = n.kind !== 'spec' && !((n.kind === 'plan' || n.kind === 'review') && n.round === 0)
     const selectedStep = isStepsDrawn && isTreeUnder && t.files !== null && selected?.slug === t.slug && t.steps.some(s => s.n === selected?.n) ? selected.n : null
-    const codeTree = (view: FindingsView | null) => findingsTree(t.slug, view, t.risk === 'HIGH', treeWidth, codeChange, view ? undefined : buildHeader, selectedStep)
+    // A step is being built while a builder runs for the task, not for this session's standalone review (FIXING).
+    const progress = stepProgress(t)
+    const isBuilding = t.status === 'BUILDING' && crew.some(a => a.role === 'builder' && a.endedAt === null) && rv?.status !== 'FIXING'
+    const beingBuilt = isBuilding ? buildingStep(t.steps, progress) : null
+    // The file being edited, in Build and review, while it flashes and after; in Build not on a file whose steps
+    // are all built and none being built (isEditShown).
+    const shownEdit: TreeEdit | null = edit && edit.slug === t.slug && EDIT_STATUSES.includes(t.status) && codeChange && isEditShown(edit.path, codeChange, t.status === 'BUILDING', beingBuilt)
+      ? { path: edit.path, isFlash: clockNow - edit.at < FLASH_MS }
+      : null
+    const codeTree = (view: FindingsView | null) => findingsTree(t.slug, view, t.risk === 'HIGH', treeWidth, codeChange, view ? undefined : buildHeader, selectedStep, shownEdit)
     // The footprint: the change's files, lines, and latest verdict, once the build has a base. Each item is its own
     // Text after a ` · `, so a wrapped line breaks only between items.
     const fp = t.files ? footprint(t.files, t.rounds, t.head, awaitingOf(t.codeView, t.rereview)) : null
@@ -988,11 +1050,7 @@ export const register: Register = (on, options) => {
       if (n.tree && last && !n.survivors) return voterLine(n.kind, last, n.tree.round, of, t.status, n.tree.dropped, awaiting, `round ${n.tree.round}: `)
       return voterLine(n.kind, n.survivors, n.round, of, t.status, 0)
     }
-    // The plan's steps, in Plan and Build. A step is being built while a builder runs for the task, not for this
-    // session's standalone review (FIXING), and in Plan it carries the plan review's open findings on its lines.
-    const progress = stepProgress(t)
-    const isBuilding = t.status === 'BUILDING' && crew.some(a => a.role === 'builder' && a.endedAt === null) && rv?.status !== 'FIXING'
-    const beingBuilt = isBuilding ? buildingStep(t.steps, progress) : null
+    // The plan's steps, in Plan and Build; in Plan a step carries the plan review's open findings on its lines.
     const stepLines = (): StepLine[] => t.steps.map(s => ({
       n: s.n,
       title: s.title,

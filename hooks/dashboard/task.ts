@@ -3,6 +3,7 @@
 // save in .tasks/<slug>/. No `$` here, so tests can call them directly.
 
 import type { Blind, ChangedFile, Check, FileList, Findings, Frontmatter, KeptFinding, PlanStep, Proof, PullRequest, QuorumAgent, Requirement, Reviewer, Section, Snapshot, Spec, Spend, Stage, Verdict } from '../../types'
+import { repoPath, slashes } from './tree'
 
 export const STAGES = ['Spec', 'Plan', 'Build', 'Review', 'Blind test', 'PR'] as const
 
@@ -468,6 +469,19 @@ export function normalizePath(path: string): string {
     else out.push(part)
   }
   return `/${out.join('/')}`
+}
+
+// The repo-relative path an Edit, Write or NotebookEdit changed, or null when it is outside the task. Either slash
+// reads as `/`; a relative path is joined to the session's cwd; `.` and `..` are resolved in the POSIX and the
+// `X:/` form (a `..` past the top stops there), which repoPath leaves alone. Null when the path is a root itself,
+// under none of them, or under .tasks/.
+export function editPath(raw: string, cwd: string, roots: string[]): string | null {
+  const isAbs = (p: string) => p.startsWith('/') || /^[A-Za-z]:\//.test(p)
+  const p = slashes(raw)
+  const joined = isAbs(p) ? p : `${slashes(cwd)}/${p}`
+  const abs = /^[A-Za-z]:\//.test(joined) ? `${joined.slice(0, 2)}${normalizePath(joined.slice(2))}` : normalizePath(joined)
+  const rel = repoPath(abs, roots)
+  return rel === '' || isAbs(rel) || rel.startsWith('.tasks/') ? null : rel
 }
 
 // Statuses a task has once its work is done, or stopped for a redesign.
