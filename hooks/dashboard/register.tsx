@@ -18,10 +18,10 @@ import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-16' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-17' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-3' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
-const reviews = atom({ plugin: 'quorum', key: 'reviews' } as const, [], { shape: 'reviews-2' })
+const reviews = atom({ plugin: 'quorum', key: 'reviews' } as const, [], { shape: 'reviews-3' })
 const otherTasks = atom({ plugin: 'quorum', key: 'others' } as const, [], { shape: 'others-1' })
 // Sections and findings-tree rows the person opened or closed in the pane, by `<slug>:<section>`, or
 // `<scope>:tree:<path>` for a tree row (`<scope>` is the task's slug or the review's id).

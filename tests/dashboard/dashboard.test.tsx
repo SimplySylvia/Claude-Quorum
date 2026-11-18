@@ -714,8 +714,8 @@ Mechanism: a comma splits a row.
 DROP [IMPORTANT] app/report.py:5 — (b) handled by the caller
 `)
   expect(kept).toEqual([
-    { tag: 'IMPORTANT', loc: 'app/report.py:42', title: 'Unescaped CSV fields', confidence: 95 },
-    { tag: 'NIT', loc: 'app/report.py:7', title: 'naming', confidence: null },
+    { tag: 'IMPORTANT', loc: 'app/report.py:42', title: 'Unescaped CSV fields', confidence: 95, security: null },
+    { tag: 'NIT', loc: 'app/report.py:7', title: 'naming', confidence: null, security: null },
   ])
 })
 
@@ -1250,7 +1250,7 @@ describe('findings tree helpers', () => {
   const width = (text: string) => [...text].reduce((n, c) => n + (/[\uE000-\uF8FF\u{F0000}-\u{FFFFD}]/u.test(c) ? 2 : 1), 0)
   const rowText = (r: TreeRow) => r.parts.map(p => p.text).join('')
   const finding = (path: string, line: number | null, tag: TreeFinding['tag'], title: string, extra: Partial<TreeFinding> = {}): TreeFinding =>
-    ({ path, line, tag, title, confidence: null, state: 'open', round: 1, fixedBy: null, ...extra })
+    ({ path, line, tag, title, confidence: null, security: null, state: 'open', round: 1, fixedBy: null, ...extra })
   const view = (findings: TreeFinding[], extra: Partial<FindingsView> = {}): FindingsView => ({ unit: 'round', round: 1, kept: findings.length, dropped: 0, findings, ...extra })
   const opts = (extra: Partial<Parameters<typeof treeRows>[1]> = {}) => ({ scope: 's', width: 46, icons: false, isHigh: false, folds: {}, ...extra })
 
@@ -1644,8 +1644,8 @@ describe('findings tree helpers', () => {
 
   test('keptFindings keeps a finding with no location', () => {
     expect(keptFindings('[NIT] Summary wording\n[IMPORTANT] app/x.py:3 — Pattern Category: Real\n')).toEqual([
-      { tag: 'NIT', loc: '', title: 'Summary wording', confidence: null },
-      { tag: 'IMPORTANT', loc: 'app/x.py:3', title: 'Real', confidence: null },
+      { tag: 'NIT', loc: '', title: 'Summary wording', confidence: null, security: null },
+      { tag: 'IMPORTANT', loc: 'app/x.py:3', title: 'Real', confidence: null, security: null },
     ])
     expect(keptFindings('[NIT] Summary wording\n').length).toBe(countFindings('[NIT] Summary wording\n').nit)
   })
@@ -2896,6 +2896,179 @@ test('a kept important finding whose file changed since the round shows as await
   await pane.unmount()
 })
 
+// ---- Security findings in the tree
+
+// A kept IMPORTANT with a `Security: <kind>` line under its header.
+const secAt = (loc: string, title: string, kind = 'injection') => `${impAt(loc, title)}\nSecurity: ${kind}`
+// A tree row's drawn parts, each a Text inside its Button's Text: its text and its props.
+type Part = { children?: unknown[]; props?: Record<string, unknown> }
+const partsAt = async (pane: Drawn, key: string) =>
+  (((await pane.find({ type: 'Button', key }))?.children[0] as Part | undefined)?.children ?? [] as unknown[])
+    .map(c => ({ text: ((c as Part).children ?? []).join(''), props: (c as Part).props ?? {} }))
+const labelAt = async (pane: Drawn, key: string) => (await pane.find({ type: 'Button', key }))?.props.label as string | undefined
+const treeKeyLine = async (pane: Drawn, id = 'export-csv') => (await pane.find({ type: 'Box', key: `${id}:tree-key-0` }))?.text
+
+test('a security finding shows its word, a ! on the counts above it, and the key', async ($, on) => {
+  const R1 = '.tasks/export-csv/review/round-1/survivors.md'
+  const two = survivorsMd(impAt('app/report.py:42'), secAt('app/report.py:44', 'CSV formula injection'))
+  const files = inRounds([two])
+  world(on, files, '/repo', { [R1]: VOTED_BEFORE })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  // The finding row: `security` in error before its title, and its kind in the label.
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}app/report.py:44#0`)).toMatch(/✗ :44 security CSV formula injection$/)
+  expect((await partsAt(pane, `${TREE}app/report.py:44#0`)).find(p => p.text === 'security ')?.props.color).toBe('error')
+  expect(await labelAt(pane, `${TREE}app/report.py:44#0`)).toContain('CSV formula injection, security: injection')
+  expect(await rowOf(pane, `${TREE}app/report.py:42#0`)).toMatch(/✗ :42 Unescaped CSV fields$/)
+  // The file and folder above it: `✗2!`, the ! in error, and the count in words.
+  expect(await rowOf(pane, `${TREE}app/report.py`)).toMatch(/ ✗2!$/)
+  expect(await rowOf(pane, `${TREE}app/`)).toMatch(/ ✗2!$/)
+  expect((await partsAt(pane, `${TREE}app/report.py`)).find(p => p.text === '!')?.props.color).toBe('error')
+  expect(await labelAt(pane, `${TREE}app/report.py`)).toContain('2 important, 1 of them security')
+  expect(await labelAt(pane, `${TREE}app/`)).toContain('2 important, 1 of them security')
+  expect(await treeKeyLine(pane)).toBe('key: ✗ important  ! security')
+  await pane.unmount()
+
+  // The builder's fix is awaiting re-review (the list is newer than the round's survivors): `↻2!`.
+  const awaiting = {
+    ...inRounds([two], { extra: builtSteps(1) }),
+    [PLAN]: planMd(1),
+    [LIST]: filesTsv([fileRow('M', '4', '1', 'app/report.py', '1', '1')], { since: 'def456' }),
+  }
+  await reload($, files, awaiting)
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}app/report.py`)).toMatch(/ ↻2!$/)
+  expect(await rowOf(pane, `${TREE}app/`)).toMatch(/ ↻2!$/)
+  expect(await labelAt(pane, `${TREE}app/report.py`)).toContain('2 awaiting re-review, 1 of them security')
+  expect(await treeKeyLine(pane)).toBe('key: ↻ awaiting re-review  ! security')
+  await pane.unmount()
+
+  // Without the Security: line, no ! and no word, and the key has no `! security`.
+  const plain = survivorsMd(impAt('app/report.py:42'), impAt('app/report.py:44', 'CSV formula injection'))
+  await reload($, files, inRounds([plain]))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect((await allRows(pane)).some(t => t.includes('!') || t.includes('security'))).toBe(false)
+  expect(await treeKeyLine(pane)).toBe('key: ✗ important')
+  await pane.unmount()
+
+  // A Unicode kind is read verbatim into the label.
+  await reload($, files, inRounds([survivorsMd(secAt('app/report.py:44', 'CSV formula injection', 'injection — “quoted”'))]))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await labelAt(pane, `${TREE}app/report.py:44#0`)).toContain('security: injection — “quoted”')
+  await pane.unmount()
+
+  // A NIT with a Security: line shows the word, but only IMPORTANT counts get a !, so no key entry either.
+  await reload($, files, inRounds([survivorsMd(`${nitAt('app/report.py:7')}\nSecurity: injection`)]))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}app/report.py:7#0`)).toMatch(/n :7 security Naming$/)
+  expect(await rowOf(pane, `${TREE}app/report.py`)).not.toContain('!')
+  expect(await rowOf(pane, `${TREE}app/`)).not.toContain('!')
+  expect(await treeKeyLine(pane)).toBe('key: n nit')
+  await pane.unmount()
+
+  // An IMPORTANT with no file:line goes under `other`, with the word and `✗1!`.
+  await reload($, files, inRounds([survivorsMd('[IMPORTANT] Pattern Category: No auth\nSecurity: auth bypass')]))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}:other`)).toMatch(/other +✗1!$/)
+  expect(await rowOf(pane, `${TREE}:other:#0`)).toMatch(/✗ \(no location\) security No auth$/)
+  expect(await labelAt(pane, `${TREE}:other:#0`)).toContain('with no location: No auth, security: auth bypass')
+  await pane.unmount()
+
+  // A Security: line after a blank line and a prose line belongs to no finding.
+  await reload($, files, inRounds([survivorsMd(`${impAt('app/report.py:44', 'CSV formula injection')}\n\nThe export is fine otherwise.\nSecurity: injection`)]))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect((await allRows(pane)).some(t => t.includes('!') || t.includes('security'))).toBe(false)
+  await pane.unmount()
+
+  // Read as quorum-findings reads it: a key line after a blank line still belongs to the finding; an empty kind is
+  // no kind, and the first kind stands.
+  expect(keptFindings('[IMPORTANT] a.py:1 — Pattern Category: X\nConfidence: 90\n\nSecurity: xss\nSecurity: other\n').map(f => f.security)).toEqual(['xss'])
+  expect(keptFindings('[IMPORTANT] a.py:1 — Pattern Category: X\nSecurity:   \n').map(f => f.security)).toEqual([null])
+  expect(keptFindings('[IMPORTANT] a.py:1 — Pattern Category: X\n## Dropped\nSecurity: xss\n').map(f => f.security)).toEqual([null])
+})
+
+test('a fixed or dropped security finding keeps its word muted and adds no !', async ($, on) => {
+  // Round 2 no longer keeps round 1's security finding: fixed.
+  const files = inRounds([survivorsMd(impAt('app/report.py:42'), secAt('app/report.py:44', 'CSV formula injection')), survivorsMd(impAt('app/report.py:42'))])
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}app/report.py:44#0`)).toMatch(/✓ :44 security round 1 → fixed by round/)
+  const fixed = (await partsAt(pane, `${TREE}app/report.py:44#0`)).find(p => p.text === 'security ')
+  expect(fixed?.props.dimColor).toBe(true)
+  expect(fixed?.props.color).toBeUndefined()
+  expect(await rowOf(pane, `${TREE}app/report.py`)).toMatch(/ ✗1 {2}✓1$/)
+  expect(await rowOf(pane, `${TREE}app/`)).not.toContain('!')
+  expect(await labelAt(pane, `${TREE}app/report.py`)).not.toContain('security')
+  expect(await treeKeyLine(pane)).toBe('key: ✗ important  ✓ fixed this run')
+  await pane.unmount()
+
+  // Dropped on dispute in round 1: dim throughout, the word included, and no !.
+  const drop = { 1: 'DROP [IMPORTANT] app/x.py:3 — (b) handled by the caller\n' }
+  await reload($, files, inRounds([survivorsMd(secAt('app/x.py:3', 'SQL injection')), survivorsMd(nitAt('lib/z.py:5'))], { disputes: drop }))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}app/x.py:3#0`)).toMatch(/^ {6}· :3 security dropped on dispute in/)
+  const parts = await partsAt(pane, `${TREE}app/x.py:3#0`)
+  expect(parts.find(p => p.text === 'security ')?.props.dimColor).toBe(true)
+  expect(parts.every(p => p.props.dimColor === true)).toBe(true)
+  expect((await allRows(pane)).some(t => t.includes('!'))).toBe(false)
+  expect(await treeKeyLine(pane)).toBe('key: n nit')
+  await pane.unmount()
+})
+
+test('the security marks fit at 50 columns and line up', { options: { file_icons: 'nerd' } }, async ($, on) => {
+  const kept = survivorsMd(secAt('app/export/report.py:44', 'CSV formula injection in every exported cell'), impAt('lib/util.py:9', 'Unescaped CSV fields in the header row'))
+  const files = inRounds([kept])
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const check = async () => {
+    const pane = await $.ui.mount(ON_TERMINAL)
+    for (const t of await allRows(pane)) expect(cols(t)).toBeLessThanOrEqual(46)
+    const a = [...(await rowOf(pane, `${TREE}app/export/report.py`) ?? '')]
+    const b = [...(await rowOf(pane, `${TREE}lib/util.py`) ?? '')]
+    // Measured in columns: an icon is two.
+    const at = (cs: string[]) => cols(cs.slice(0, cs.indexOf('✗')).join(''))
+    expect(at(a)).toBeGreaterThan(0)
+    expect(at(a)).toBe(at(b))
+    expect(a[a.indexOf('✗') + 2]).toBe('!')
+    expect(b[b.indexOf('✗') + 2]).toBe(' ')
+    expect(cols(a.join(''))).toBe(cols(b.join('')))
+    await pane.unmount()
+  }
+  await check()
+  // With the recorded change's columns too.
+  await reload($, files, {
+    ...inRounds([kept]),
+    [LIST]: filesTsv([fileRow('M', '120', '45', 'app/export/report.py'), fileRow('A', '300', '0', 'lib/util.py')]),
+  })
+  await check()
+})
+
+test('the review card shows security findings the same way', async ($, on) => {
+  const id = 'review-pr-12'
+  const scope = `${id}:tree:`
+  world(on, inRuns(id, 'REVIEWING', [{ end: 'b2b2b2b', survivors: survivorsMd(`${impAt('app/log.py:8', 'Token written to the log')}\nSecurity: secret in log`) }]))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${scope}app/log.py:8#0`)).toMatch(/✗ :8 security Token written to the log$/)
+  expect(await labelAt(pane, `${scope}app/log.py:8#0`)).toContain('security: secret in log')
+  expect(await rowOf(pane, `${scope}app/log.py`)).toMatch(/ ✗1!$/)
+  expect(await treeKeyLine(pane, id)).toBe('key: ✗ important  ! security')
+  await pane.unmount()
+})
+
+test('a plan-review security finding shows under the task folder', async ($, on) => {
+  world(on, inRounds([survivorsMd('[IMPORTANT] .tasks/export-csv/plan.md:12 — Pattern Category: Auth bypass\nSecurity: auth bypass')], { dir: 'plan-review' }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, `${TREE}.tasks/export-csv/`)).toMatch(/ ✗1!$/)
+  expect(await rowOf(pane, `${TREE}.tasks/export-csv/plan.md`)).toMatch(/ ✗1!$/)
+  expect(await rowOf(pane, `${TREE}.tasks/export-csv/plan.md:12#0`)).toMatch(/✗ :12 security Auth bypass$/)
+  expect(await treeKeyLine(pane)).toBe('key: ✗ important  ! security')
+  await pane.unmount()
+})
+
 test('the task card shows the footprint line, not reviewed yet before a vote, and as of when the list is old', async ($, on) => {
   const HEAD_REF = '.git/refs/heads/feat/export-csv'
   // README.md is planned and not changed yet, so it isn't counted.
@@ -3885,4 +4058,63 @@ test('a Write or Edit under .tasks given with backslashes refreshes the task', a
   pane = await $.ui.mount(ON_TERMINAL)
   expect(await pane.find({ type: 'Text', text: /^✗ Verifier vote\s+kept ✗1 n1/ })).toBeDefined()
   await pane.unmount()
+})
+
+test('a value stored by the previous shape is dropped, not misread', async ($, on) => {
+  // Each state.get for one key answers what the engine holds, but as the previous shape's code stored it: wrapped
+  // under its old tag. Every read sees that, the band's included, and a write still lands at the engine's version.
+  const old: { task: unknown; reviews: unknown } = { task: undefined, reviews: undefined }
+  const latest: { task: unknown; reviews: unknown } = { task: undefined, reviews: undefined }
+  type Read = { value: { value: unknown; version: number } }
+  const stand = (key: 'task' | 'reviews', tag: string) => async (_: unknown, e: unknown, next: (e: unknown) => Promise<Read>) => {
+    const r = await next(e)
+    const stored = r.value.value as { value?: unknown } | undefined
+    if (stored?.value !== undefined && stored.value !== null && !(Array.isArray(stored.value) && stored.value.length === 0)) latest[key] = stored.value
+    return old[key] === undefined ? r : { value: { value: { shape: tag, value: old[key] }, version: r.value.version } }
+  }
+  const register = on as unknown as (event: string, matcher: unknown, hook: unknown) => void
+  register('state.get', { plugin: 'quorum', key: 'task' }, stand('task', 'task-16'))
+  register('state.get', { plugin: 'quorum', key: 'reviews' }, stand('reviews', 'reviews-2'))
+  const reviewing = {
+    '.git/HEAD': 'ref: refs/heads/main\n',
+    '.tasks/review-pr-12/state.md': reviewState('REVIEWING'),
+    '.tasks/review-pr-12/run-1/logic.md': SURVIVORS,
+  }
+  const files: Record<string, string> = { ...repo('IN_REVIEW') }
+  world(on, files)
+  on('ui.render', ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>engine</Text>
+  })
+  const band = async () => {
+    const b = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    const drawn = { engine: await b.find({ type: 'Text', text: /^engine$/ }), task: await b.find({ type: 'Text', text: /^ IN_REVIEW $/ }), review: await b.find({ type: 'Text', text: /^ REVIEWING $/ }) }
+    await b.unmount()
+    return drawn
+  }
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  // A real IN_REVIEW snapshot and a running review of this session's, as the dashboard keeps them.
+  expect((await band()).task).toBeDefined()
+  const snapshot = latest.task
+  await reload($, files, reviewing)
+  expect((await band()).review).toBeDefined()
+  const running = latest.reviews
+  expect(snapshot).toBeDefined()
+  expect(running).toBeDefined()
+
+  // (a) A task stored under task-16, with no task on disk: declined, so the band is the engine's.
+  await reload($, files, { '.git/HEAD': 'ref: refs/heads/main\n' })
+  old.task = snapshot
+  await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/state.md', content: '' })
+  let drawn = await band()
+  expect(drawn.task).toBeUndefined()
+  expect(drawn.engine).toBeDefined()
+
+  // (b) A running review stored under reviews-2: declined too.
+  old.task = undefined
+  old.reviews = running
+  await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/state.md', content: '' })
+  drawn = await band()
+  expect(drawn.review).toBeUndefined()
+  expect(drawn.engine).toBeDefined()
 })

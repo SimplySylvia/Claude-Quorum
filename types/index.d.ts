@@ -9,8 +9,8 @@ export type Stage = { name: string; state: 'done' | 'active' | 'waiting' | 'stuc
 export type Round = { n: number; findings: Findings | null; candidates: number | null }
 
 // One finding the voter kept: its tag, `file:line` (or '' when its line has no location), Pattern Category (or the
-// rest of its line), and confidence.
-export type KeptFinding = { tag: 'IMPORTANT' | 'NIT' | 'PRE-EXISTING'; loc: string; title: string; confidence: number | null }
+// rest of its line), confidence, and the kind its `Security: <kind>` line gives (null without one).
+export type KeptFinding = { tag: 'IMPORTANT' | 'NIT' | 'PRE-EXISTING'; loc: string; title: string; confidence: number | null; security: string | null }
 
 // One review round's (or a standalone review's run's) kept findings, the raw `path:line` of each IMPORTANT finding
 // its disputes.md dropped, and the end of the range it reviewed (runs only; null when unknown).
@@ -19,13 +19,14 @@ export type RoundKept = { n: number; kept: KeptFinding[]; drops: string[]; end: 
 // A finding in the findings tree, tracked across rounds: `path` is repo-relative, or '' with no location. `open`:
 // the round on show keeps it (`round` is that round); `fixed`: an earlier round kept it as IMPORTANT (`round`, the
 // last that did) and the round on show doesn't (`fixedBy`, the first round after it was last kept); `dropped`: the
-// voter dropped it on dispute in `round`.
+// voter dropped it on dispute in `round`. `security`: its security kind, from the latest round that kept it, or null.
 export type TreeFinding = {
   path: string
   line: number | null
   tag: KeptFinding['tag']
   title: string
   confidence: number | null
+  security: string | null
   state: 'open' | 'fixed' | 'dropped'
   round: number
   fixedBy: number | null

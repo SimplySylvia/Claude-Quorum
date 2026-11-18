@@ -506,20 +506,32 @@ export function tokenCount(n: number): string {
 }
 
 // The findings a voter's survivors.md kept, in order: `[TAG] file:line — Pattern Category: X`, then an optional
-// `Confidence: N` line under it, as bin/quorum-findings reads them. The `file:line` is optional: a finding without
-// one gets `loc: ''`, so the list's length matches countFindings.
+// `Confidence: N` line under it, and an optional `Security: <kind>` line in its body, as bin/quorum-findings reads
+// them. The `file:line` is optional: a finding without one gets `loc: ''`, so the list's length matches
+// countFindings. A Security: line counts only while its finding is open, as records() decides: a `#` heading or a
+// DROP, KEEP or Summary: line closes it, and so does a line after a blank one that isn't indented and isn't a key.
 export function keptFindings(text: string): KeptFinding[] {
   const out: KeptFinding[] = []
+  let isOpen = false
+  let blank = false
   for (const line of text.split('\n')) {
     const m = /^\[(IMPORTANT|NIT|PRE-EXISTING)\]\s+(?:(\S+:\d+)\s*)?(?:[—-]+\s*)?(.*)$/.exec(line)
     if (m) {
       const rest = (m[3] ?? '').trim()
-      out.push({ tag: m[1] as KeptFinding['tag'], loc: m[2] ?? '', title: /Pattern Category:\s*(.+)$/.exec(rest)?.[1]?.trim() ?? rest, confidence: null })
+      out.push({ tag: m[1] as KeptFinding['tag'], loc: m[2] ?? '', title: /Pattern Category:\s*(.+)$/.exec(rest)?.[1]?.trim() ?? rest, confidence: null, security: null })
+      isOpen = true
       continue
     }
     const c = /^Confidence:\s*(\d{1,3})\s*$/.exec(line)
     const last = out[out.length - 1]
     if (c && last && last.confidence === null) last.confidence = Number(c[1])
+    if (/^#/.test(line) || /^(DROP|KEEP|Summary:)/.test(line)) isOpen = false
+    if (!isOpen) continue
+    if (/^[ \t]*$/.test(line)) { blank = true; continue }
+    if (blank && !/^[ \t]/.test(line) && !/^(Confidence|Mechanism|Why|Fix|Evidence|Pattern Category|Security):/.test(line)) { isOpen = false; blank = false; continue }
+    blank = false
+    const s = /^Security:\s*(.*\S)\s*$/.exec(line)
+    if (s && last && last.security === null) last.security = s[1] ?? null
   }
   return out
 }

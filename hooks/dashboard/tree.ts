@@ -139,7 +139,7 @@ export function trackFindings(rounds: RoundKept[], roots: string[], unit: 'round
     found.forEach((x, fi) => {
       const isImportant = x.f.tag === 'IMPORTANT'
       const item = items[match.get(fi) ?? -1]
-      const seen = { line: x.line, tag: x.f.tag, title: x.f.title, confidence: x.f.confidence, lastSeen: round.n }
+      const seen = { line: x.line, tag: x.f.tag, title: x.f.title, confidence: x.f.confidence, security: x.f.security, lastSeen: round.n }
       if (item) Object.assign(item, seen, { lastImportant: isImportant ? round.n : item.lastImportant })
       else items.push({ key: x.key, path: x.path, ...seen, lastImportant: isImportant ? round.n : null })
     })
@@ -151,7 +151,7 @@ export function trackFindings(rounds: RoundKept[], roots: string[], unit: 'round
   }))]))
   const findings: TreeFinding[] = []
   for (const it of items) {
-    const base = { path: it.path, line: it.line, tag: it.tag, title: it.title, confidence: it.confidence }
+    const base = { path: it.path, line: it.line, tag: it.tag, title: it.title, confidence: it.confidence, security: it.security }
     const at = rounds.findIndex(r => r.n === it.lastSeen)
     if (it.tag === 'IMPORTANT' && it.line !== null && drops.get(it.lastSeen)?.has(`${it.path}:${it.line}`)) {
       findings.push({ ...base, state: 'dropped', round: it.lastSeen, fixedBy: null })
@@ -179,31 +179,39 @@ export function trackFindings(rounds: RoundKept[], roots: string[], unit: 'round
 
 // ---- Marks and words
 
-type Counts = Findings & { awaiting: number; fixed: number; dropped: number }
+// `security` and `securityAwaiting`: how many of the `important` and `awaiting` findings have a security kind.
+type Counts = Findings & { awaiting: number; fixed: number; dropped: number; security: number; securityAwaiting: number }
 
 // An open IMPORTANT finding on a file the fix changed since its round is awaiting re-review, not important.
 const isAwaiting = (f: TreeFinding, rereview: string[]) => f.state === 'open' && f.tag === 'IMPORTANT' && rereview.includes(f.path)
 
 const countOf = (fs: TreeFinding[], rereview: string[] = []): Counts => {
-  const open = (tag: TreeFinding['tag']) => fs.filter(f => f.state === 'open' && f.tag === tag && !isAwaiting(f, rereview)).length
+  const open = (tag: TreeFinding['tag']) => fs.filter(f => f.state === 'open' && f.tag === tag && !isAwaiting(f, rereview))
+  const important = open('IMPORTANT')
+  const awaiting = fs.filter(f => isAwaiting(f, rereview))
   return {
-    important: open('IMPORTANT'),
-    awaiting: fs.filter(f => isAwaiting(f, rereview)).length,
+    important: important.length,
+    security: important.filter(f => f.security !== null).length,
+    awaiting: awaiting.length,
+    securityAwaiting: awaiting.filter(f => f.security !== null).length,
     fixed: fs.filter(f => f.state === 'fixed').length,
-    nit: open('NIT'),
-    preExisting: open('PRE-EXISTING'),
+    nit: open('NIT').length,
+    preExisting: open('PRE-EXISTING').length,
     dropped: fs.filter(f => f.state === 'dropped').length,
   }
 }
 
-// The marks, in the order every row and the key use. Dropped findings have none.
+// The marks, in the order every row and the key use. Dropped findings have none. `bang`: the count of the mark's
+// findings with a security kind, which a `!` after the count flags.
 const MARKS = [
-  { glyph: '✗', field: 'important', word: 'important', color: 'error' },
-  { glyph: '↻', field: 'awaiting', word: 'awaiting re-review', color: 'warning' },
-  { glyph: '✓', field: 'fixed', word: 'fixed this run', color: 'success' },
-  { glyph: 'n', field: 'nit', word: 'nit', color: null },
-  { glyph: 'p', field: 'preExisting', word: 'pre-existing', color: null },
+  { glyph: '✗', field: 'important', word: 'important', color: 'error', bang: 'security' },
+  { glyph: '↻', field: 'awaiting', word: 'awaiting re-review', color: 'warning', bang: 'securityAwaiting' },
+  { glyph: '✓', field: 'fixed', word: 'fixed this run', color: 'success', bang: null },
+  { glyph: 'n', field: 'nit', word: 'nit', color: null, bang: null },
+  { glyph: 'p', field: 'preExisting', word: 'pre-existing', color: null, bang: null },
 ] as const
+
+const hasSecurity = (c: Counts) => c.security + c.securityAwaiting > 0
 
 const markPart = (glyph: string, color: string | null, text = glyph): TreePart => (color ? { text, color } : { text, dim: true })
 
@@ -214,7 +222,9 @@ export function markText(f: Findings): string {
 
 const words = (c: Counts) => [
   c.important ? `${c.important} important` : '',
+  c.security ? `${c.security} of them security` : '',
   c.awaiting ? `${c.awaiting} awaiting re-review` : '',
+  c.securityAwaiting ? `${c.securityAwaiting} of them security` : '',
   c.fixed ? `${c.fixed} fixed` : '',
   c.nit ? plural(c.nit, 'nit') : '',
   c.preExisting ? `${c.preExisting} pre-existing` : '',
@@ -222,7 +232,7 @@ const words = (c: Counts) => [
 ].filter(Boolean)
 
 // Counts in words, for a label: `1 important, 1 nit`, zero counts left out, or `clean`.
-export const markWords = (f: Findings) => words({ ...f, awaiting: 0, fixed: 0, dropped: 0 }).join(', ') || 'clean'
+export const markWords = (f: Findings) => words({ ...f, awaiting: 0, fixed: 0, dropped: 0, security: 0, securityAwaiting: 0 }).join(', ') || 'clean'
 
 // ---- Widths and cuts, in code points
 
@@ -379,7 +389,7 @@ export function stepRows(lines: StepLine[], width: number): { n: number; parts: 
       STEP_WORD[l.mark],
       ...(l.files === null ? [] : [plural(l.files, 'file')]),
       ...(l.requirements.length === 0 ? [] : [`${l.requirements.length === 1 ? 'requirement' : 'requirements'} ${andList(l.requirements)}`]),
-      ...(l.findings ? words({ ...l.findings, fixed: 0, dropped: 0 }) : []),
+      ...(l.findings ? words({ ...l.findings, fixed: 0, dropped: 0, security: 0, securityAwaiting: 0 }) : []),
       ...(l.isSelected ? ['selected'] : []),
     ].join(', ')
     const gap = Math.max(1, width - widthOf(left) - widthOf(right))
@@ -560,7 +570,8 @@ const pad = (n: number): TreePart[] => (n > 0 ? [{ text: ' '.repeat(n) }] : [])
 
 // The tree's rows, in order: folders before files, each sorted by name, a folder holding only one folder merged
 // with it, and the findings with no location under `other`, last. Rows inside a folded folder or file are left out.
-// Folder, file, and `other` rows are `width` wide, ending in one right-aligned column per mark the view has. With a
+// Folder, file, and `other` rows are `width` wide, ending in one right-aligned column per mark the view has; with a
+// security finding in the view, the ✗ and ↻ columns end in one more, a `!` where the count holds one. With a
 // recorded change, each row also leads with its progress and git letter, and ends with its line counts and step
 // before the marks; with no findings view (Build), there are no marks.
 export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
@@ -612,16 +623,19 @@ export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
 
   // Columns are measured over every row, folded or not, so a fold never moves one.
   const total = countOf(view?.findings ?? [], rereview)
-  const marks = (view ? MARKS : []).filter(m => total[m.field] > 0).map(m => ({
-    ...m,
-    width: Math.max(...entries.map(e => (e.counts[m.field] ? cellWidth(`${m.glyph}${e.counts[m.field]}`) : 0))),
-  }))
+  // With a security finding anywhere in the view, the ✗ and ↻ columns gain a last column for its `!` in every row.
+  const hasBang = hasSecurity(total)
+  const marks = (view ? MARKS : []).filter(m => total[m.field] > 0).map(m => {
+    const bang = hasBang ? m.bang : null
+    return { ...m, bang, width: Math.max(...entries.map(e => (e.counts[m.field] ? cellWidth(`${m.glyph}${e.counts[m.field]}`) : 0))) + (bang ? 1 : 0) }
+  })
   const blockWidth = marks.reduce((n, m) => n + m.width, 0) + 2 * Math.max(0, marks.length - 1)
   const markParts = (c: Counts): TreePart[] => [
     { text: ' '.repeat(Math.max(0, 6 - blockWidth)) },
     ...marks.flatMap((m, i) => {
       const text = c[m.field] ? `${m.glyph}${c[m.field]}` : ''
-      return [{ text: `${i > 0 ? '  ' : ''}${' '.repeat(m.width - cellWidth(text))}` }, ...(text ? [markPart(m.glyph, m.color, text)] : [])]
+      const bang: TreePart[] = m.bang ? [c[m.bang] > 0 ? { text: '!', color: 'error' } : { text: ' ' }] : []
+      return [{ text: `${i > 0 ? '  ' : ''}${' '.repeat(m.width - (m.bang ? 1 : 0) - cellWidth(text))}` }, ...(text ? [markPart(m.glyph, m.color, text)] : []), ...bang]
     }),
   ].filter(p => p.text !== '')
 
@@ -731,16 +745,18 @@ export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
       const status = f.state === 'fixed' ? `${view?.unit} ${f.round} → fixed by ${view?.unit} ${f.fixedBy}` : isDropped ? `dropped on dispute in ${view?.unit} ${f.round}` : ''
       const prefix: TreePart[] = [{ text: indent, dim: isDropped }, glyph, { text: ` ${where} `, dim: true }]
       const room = o.width - widthOf(prefix)
+      // A security finding's word before its title: in error while open, muted once fixed or dropped.
+      const word: TreePart[] = f.security === null ? [] : [f.state === 'open' ? { text: 'security ', color: 'error' } : { text: 'security ', dim: true }]
       const full = status ? `${status}: ${f.title}` : f.title
-      const lines = isOpen ? wrap(full, room, room) : [cutEnd(status || f.title, room)]
+      const lines = isOpen ? wrap(full, room - widthOf(word), room) : [cutEnd(status || f.title, room - widthOf(word))]
       const body = { text: lines[0] ?? '', ...(isDropped ? { dim: true } : {}) }
       const loc = f.path ? `${f.path}${f.line === null ? '' : `:${f.line}`}` : ''
       rows.push({
         key,
         kind: 'finding',
         isOpen,
-        label: [`${TAG_WORD[f.tag]} ${loc ? `at ${loc}` : 'with no location'}: ${f.title}`, ...(status ? [status] : []), ...(awaits ? ['awaiting re-review'] : []), stateWord(isOpen)].join(', '),
-        parts: fit([...prefix, body], o.width),
+        label: [`${TAG_WORD[f.tag]} ${loc ? `at ${loc}` : 'with no location'}: ${f.title}`, ...(f.security === null ? [] : [`security: ${f.security}`]), ...(status ? [status] : []), ...(awaits ? ['awaiting re-review'] : []), stateWord(isOpen)].join(', '),
+        parts: fit([...prefix, ...word, body], o.width),
         more: lines.slice(1).map(l => `${' '.repeat(widthOf(prefix))}${l}`),
         copy: f.path && f.line !== null ? `${f.path}:${f.line}` : null,
         confidence: f.confidence,
@@ -786,14 +802,16 @@ function keyLines(entries: { glyph: TreePart; word: string }[], width: number): 
   return key
 }
 
-// The tree's header, and its key: the marks the view shows, in order, then on their own lines the lead marks the
-// change shows (`✓ built  ○ not yet  ● editing  * unplanned`), the edited row as `●` and a live row's `●` too. No
-// mark key when the view has no rows; no header ('') with no view, as in Build; null with neither a view nor a change.
+// The tree's header, and its key: the marks the view shows, in order, and `! security` while a `!` shows, then on
+// their own lines the lead marks the change shows (`✓ built  ○ not yet  ● editing  * unplanned`), the edited row as
+// `●` and a live row's `●` too. No mark key when the view has no rows; no header ('') with no view, as in Build; null
+// with neither a view nor a change.
 export function treeHeader(view: FindingsView | null, width: number, change?: TreeChange | null, edit?: TreeEdit | null): { header: string; key: TreePart[][] } | null {
   if (!view && !change) return null
   const header = view ? `the verifier kept ${view.kept > 0 ? 'these' : 'nothing'} in ${view.unit} ${view.round}` : ''
   const total = countOf(view?.findings ?? [], change?.rereview ?? [])
   const marks = (view ? MARKS : []).filter(m => total[m.field] > 0).map(m => ({ glyph: markPart(m.glyph, m.color), word: m.word }))
+  if (view && hasSecurity(total)) marks.push({ glyph: { text: '!', color: 'error' }, word: 'security' })
   const shown = new Set<Progress>((change?.files ?? []).map(f => (edit && f.path === edit.path ? '●' : progressOf(f, change ?? null))))
   if (edit && change) shown.add('●')
   const leads = PROGRESS.filter(m => shown.has(m.glyph)).map(m => ({ glyph: markPart(m.glyph, m.color), word: m.word }))
