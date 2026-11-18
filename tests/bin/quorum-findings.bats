@@ -101,6 +101,48 @@ qf() { "$BIN/quorum-findings" "$@"; }
   [ "$status" -eq 0 ]
 }
 
+@test "a Security line stays in the finding body" {
+  make_repo
+  mkdir app && seq 1 40 | sed 's/^/x = /' > app/report.py
+  git add -A && git -c user.name=t -c user.email=t@example.com commit -qm base
+  base=$(git rev-parse HEAD)
+  sed -i.bak '20s/.*/y = parse(row)/; 21s/.*/z = csv(row)/' app/report.py && rm app/report.py.bak
+  git -c user.name=t -c user.email=t@example.com commit -qam change
+  cat > candidates.md <<'MD'
+[IMPORTANT] app/report.py:20 — Pattern Category: Unvalidated input
+Confidence: 90
+
+Security: injection
+Mechanism: parse() trusts the row.
+
+[IMPORTANT] app/report.py:21 — Pattern Category: CSV formula injection
+Confidence: 80
+
+Security: injection — “quoted”
+MD
+  for c in important "cap 0" "scope $base..HEAD"; do
+    out=$("$BIN/quorum-findings" $c candidates.md)
+    printf '%s\n' "$out" | grep -qxF 'Security: injection' || { echo "$c: no Security line"; return 1; }
+    printf '%s\n' "$out" | grep -qxF 'Mechanism: parse() trusts the row.' || { echo "$c: lost the body after it"; return 1; }
+  done
+  out=$("$BIN/quorum-findings" important candidates.md)
+  [ "$(printf '%s\n' "$out" | sed -n '/report.py:21/,$p' | sed -n 3p)" = 'Security: injection — “quoted”' ] || { echo "$out"; return 1; }
+  cleanup_repo
+}
+
+@test "check reports an empty Security line and passes findings without one" {
+  printf '%s\n' '[IMPORTANT] a.py:1 — Pattern Category: Bug' 'Confidence: 90' 'Security:  ' > "$BATS_TEST_TMPDIR/bad.md"
+  run qf check "$BATS_TEST_TMPDIR/bad.md"
+  [ "$status" -eq 1 ]
+  [ "$output" = "empty Security: [IMPORTANT] a.py:1 — Pattern Category: Bug" ]
+  printf '%s\n' '[IMPORTANT] a.py:1 — Pattern Category: Bug' 'Confidence: 90' '' 'Security: injection' > "$BATS_TEST_TMPDIR/ok.md"
+  run qf check "$BATS_TEST_TMPDIR/ok.md"
+  [ "$status" -eq 0 ]
+  printf '%s\n' '[IMPORTANT] a.py:1 — Pattern Category: Bug' 'Confidence: 90' > "$BATS_TEST_TMPDIR/plain.md"
+  run qf check "$BATS_TEST_TMPDIR/plain.md"
+  [ "$status" -eq 0 ]
+}
+
 @test "every finding agent's example output passes check and carries a confidence" {
   for a in code-reviewer pattern-auditor docs-auditor a11y-auditor spec-reviewer security-reviewer verifier-voter; do
     sed -n '/^```$/,/^```$/p' "$REPO_ROOT/agents/$a.md" | sed '/^```$/d' > "$BATS_TEST_TMPDIR/$a.md"
