@@ -696,7 +696,7 @@ export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
     const room = o.width - widthOf(right) - 1 - widthOf(cols) - cellWidth(lead) - (icon ? 3 : 0)
     const name = e.kind === 'folder' ? cutChain(e.name, room) : e.kind === 'file' ? cutMiddle(e.name, room) : e.name
     const nameStyle = flash ? { bold: true, color: 'claude' } : lit ? { bold: true } : {}
-    const left = fit([...cols, ...leadParts.filter(p => p.text !== ''), ...(icon ? [{ text: icon.glyph, color: icon.color }, { text: ' ' }] : []), { text: name, ...nameStyle }], Math.max(0, o.width - widthOf(right) - 1))
+    const left = fit([...cols, ...leadParts, ...(icon ? [{ text: icon.glyph, color: icon.color }, { text: ' ' }] : []), { text: name, ...nameStyle }], Math.max(0, o.width - widthOf(right) - 1))
     const gap = Math.max(1, o.width - widthOf(left) - widthOf(right))
     const counts = words(e.counts)
     const label = [
