@@ -610,3 +610,9 @@ export function parseFileList(text: string): FileList | null {
 export function stepProgress(t: Pick<Snapshot, 'planSteps' | 'isFast' | 'builtList' | 'hasBuildProof'>): { built: number[]; allBuilt: boolean } {
   return { built: t.builtList, allBuilt: !(t.planSteps >= SLICE_AT && !t.isFast) && t.hasBuildProof }
 }
+
+// The step a running builder is on, as `quorum-plan next` gives it: the first step in plan order that isn't built,
+// or null once every step is.
+export function buildingStep(steps: PlanStep[], p: { built: number[]; allBuilt: boolean }): number | null {
+  return p.allBuilt ? null : steps.find(s => !p.built.includes(s.n))?.n ?? null
+}

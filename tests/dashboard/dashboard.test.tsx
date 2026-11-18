@@ -11,7 +11,7 @@ import {
   plural, voterNext, parseFileList, parsePlanSteps,
 } from '../../hooks/dashboard/task'
 import {
-  awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, footprint, iconsOn, isBigTree, markText, markWords, repoPath, roundKept, runEnds, splitLoc, trackFindings, treeHeader, treeRows,
+  awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, footprint, iconsOn, isBigTree, markText, markWords, repoPath, roundKept, runEnds, splitLoc, stepFindings, stepRows, trackFindings, treeHeader, treeRows,
 } from '../../hooks/dashboard/tree'
 import type { TreeChange, TreeRow } from '../../hooks/dashboard/tree'
 import type { ChangedFile, FileList, FindingsView, TreeFinding } from '../../types'
@@ -3010,4 +3010,200 @@ test('every file row and the files row is a button a key press reaches', async (
   // Open, it shows the tree (src/ as the press above left it, folded).
   expect(await treeKeys(pane)).toEqual([`${TREE}src/`])
   await pane.unmount()
+})
+
+// ---- Plan steps in the Now card
+
+// A plan whose steps name requirements and files, with indented lines and blank lines between steps. Step 1 spans
+// lines 4-6, step 2 lines 8-9, step 3 lines 11-12; line 2 is before `## Steps`, and line 10 is between steps 2 and 3.
+const STEPS_PLAN = [
+  '# Plan',
+  '',
+  '## Steps',
+  '1. **Read the rows** — `app/report.py` · requirements: 1, 2',
+  '   - read each customer',
+  '   - keep their order',
+  '',
+  '2. **Quote commas** — `app/util.py`, `README.md` · requirements: 2',
+  '   - wrap a field with a comma in quotes',
+  '',
+  '3. **Docs** — `README.md`',
+  '   - name export in README.md',
+  '',
+  '## Tests',
+  '',
+].join('\n')
+// The planned files: step 1 names one, step 2 two, step 3 one.
+const STEPS_FILES = [fileRow('M', '-', '-', 'app/report.py', '1'), fileRow('A', '-', '-', 'app/util.py', '2'), fileRow('M', '-', '-', 'README.md', '2,3')]
+const STEP = 'export-csv:step:'
+// A step row as drawn, found by its key only.
+const stepRow = async (pane: Drawn, n: number) => (await pane.find({ key: `${STEP}${n}` }))?.text
+const stepLabel = async (pane: Drawn, n: number) => ((await pane.find({ key: `${STEP}${n}` }))?.props?.label as string | undefined) ?? ''
+const texts = async (pane: Drawn) => (await pane.findAll({ type: 'Text' })).map(x => x.text)
+
+test('during Plan the Now card lists the steps with their files and requirements above the tree', async ($, on) => {
+  const planning = (rounds: string[], extra: Record<string, string> = {}) =>
+    ({ ...inRounds(rounds, { dir: 'plan-review' }), [PLAN]: STEPS_PLAN, ...extra })
+  const files: Record<string, string> = planning([survivorsMd(impAt('.tasks/export-csv/plan.md:14', 'Plan skips the docs step'))], { [LIST]: filesTsv(STEPS_FILES, { base: '-' }) })
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  // Round 1: after the voter row and before the tree, a row per step and the hint.
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await stepRow(pane, 1)).toMatch(/^○ 1 Read the rows +1 file · req 1, 2$/)
+  expect(await stepRow(pane, 2)).toMatch(/^○ 2 Quote commas +2 files · req 2 {3}$/)
+  expect(await stepRow(pane, 3)).toMatch(/^○ 3 Docs +1 file {11}$/)
+  for (const n of [1, 2, 3]) expect(cols((await stepRow(pane, n)) ?? '')).toBe(46)
+  let all = await texts(pane)
+  const voter = all.findIndex(x => /Verifier vote/.test(x))
+  const header = all.indexOf('Plan steps')
+  const hint = all.indexOf('press a step to highlight its files')
+  const tree = all.indexOf('3 steps · 3 files, 1 new')
+  expect(voter).toBeGreaterThan(-1)
+  expect(header).toBeGreaterThan(voter)
+  expect(hint).toBeGreaterThan(header)
+  expect(all.findIndex(x => /^○ 1 Read the rows/.test(x))).toBeGreaterThan(hint)
+  expect(tree).toBeGreaterThan(all.findIndex(x => /^○ 3 Docs/.test(x)))
+  await pane.unmount()
+
+  // Before the first round: directly under the Now title, with no hint.
+  await reload($, files, planning([], { [LIST]: filesTsv(STEPS_FILES, { base: '-' }) }))
+  pane = await $.ui.mount(ON_TERMINAL)
+  all = await texts(pane)
+  const now = all.findIndex(x => x.startsWith('Now · '))
+  expect(now).toBeGreaterThan(-1)
+  expect(all.slice(now + 1, all.indexOf('Plan steps')).every(x => all[now]?.includes(x))).toBe(true)
+  expect(all.indexOf('Plan steps')).toBeGreaterThan(now)
+  expect(await pane.find({ type: 'Text', text: 'press a step to highlight its files' })).toBeUndefined()
+  expect(await stepRow(pane, 1)).toMatch(/^○ 1 Read the rows +1 file · req 1, 2$/)
+  await pane.unmount()
+
+  // Without files.tsv: no files part; a step with no requirements has no req part.
+  await reload($, files, planning([survivorsMd(impAt('.tasks/export-csv/plan.md:14', 'Plan skips the docs step'))]))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await stepRow(pane, 1)).toMatch(/^○ 1 Read the rows +req 1, 2$/)
+  expect(await stepRow(pane, 2)).toMatch(/^○ 2 Quote commas +req 2 {3}$/)
+  expect(await stepRow(pane, 3)).toMatch(/^○ 3 Docs *$/)
+  await pane.unmount()
+
+  // Spec has no plan yet, so no list, even with a plan.md on disk.
+  await reload($, files, { ...inRounds([], { status: 'DRAFT-AWAITING-VISUAL-SIGNOFF' }), [PLAN]: STEPS_PLAN, [LIST]: filesTsv(STEPS_FILES, { base: '-' }) })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: 'Plan steps' })).toBeUndefined()
+  expect(await stepRow(pane, 1)).toBeUndefined()
+  await pane.unmount()
+})
+
+test('a plan finding is counted on the step whose lines include it', async ($, on) => {
+  const at = (line: number) => `.tasks/export-csv/plan.md:${line}`
+  world(on, {
+    ...inRounds([survivorsMd(impAt(at(8), 'Quote rule'), nitAt(at(6), 'Order'), nitAt(at(10), 'Blank line'), nitAt(at(2), 'Title'))], { dir: 'plan-review' }),
+    [PLAN]: STEPS_PLAN,
+    [LIST]: filesTsv(STEPS_FILES, { base: '-' }),
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount(ON_TERMINAL)
+  // The IMPORTANT on step 2's number line, and the NIT on step 1's last indented line; the NITs on the blank line
+  // between steps 2 and 3 and before ## Steps are on no step.
+  expect(await stepRow(pane, 1)).toMatch(/^○ 1 Read the rows +n1 {3}1 file · req 1, 2$/)
+  expect(await stepRow(pane, 2)).toMatch(/^○ 2 Quote commas +✗1  2 files · req 2 {3}$/)
+  expect(await stepRow(pane, 3)).toMatch(/^○ 3 Docs +1 file {11}$/)
+  expect(await stepRow(pane, 3)).not.toMatch(/✗|↻|n\d|p\d/)
+  // Every finding still shows under plan.md in the tree.
+  for (const line of [2, 6, 8, 10]) expect(await rowOf(pane, `${TREE}.tasks/export-csv/plan.md:${line}#0`)).toBeDefined()
+  await pane.unmount()
+
+  // Both ends of step 2's span count, and the lines just outside it don't.
+  const step2 = parsePlanSteps(STEPS_PLAN)[1]
+  expect(step2).toMatchObject({ n: 2, from: 8, to: 9 })
+  const countAt = (line: number) => stepFindings(trackFindings([roundKept(1, survivorsMd(impAt(at(line))), '', null)], ['/repo'], 'round'), '.tasks/export-csv/plan.md', step2 ?? { from: 0, to: 0 }, [])
+  expect([7, 8, 9, 10].map(line => countAt(line).important)).toEqual([0, 1, 1, 0])
+})
+
+test('during Build each step shows built, being built, or not yet', async ($, on) => {
+  // Four steps, step 1 built; plan review kept an IMPORTANT and a NIT on step 2's line, which Build never shows.
+  const building = (plan: string, extra = builtSteps(1), more: Record<string, string> = {}) => {
+    const files = inRounds([], { status: 'BUILDING', extra })
+    files['.tasks/export-csv/state.md'] = (files['.tasks/export-csv/state.md'] ?? '').replace(/^plan_rounds: \d+$/m, 'plan_rounds: 1')
+    return {
+      ...files,
+      '.tasks/export-csv/plan-review/round-1/logic.md': NOTHING_KEPT,
+      '.tasks/export-csv/plan-review/round-1/survivors.md': survivorsMd(impAt(`${PLAN}:5`), nitAt(`${PLAN}:5`)),
+      [PLAN]: plan,
+      ...more,
+    }
+  }
+  const files: Record<string, string> = building(planMd(4))
+  world(on, files)
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.description }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const marks = async (pane: Drawn, ns: number[]) => Promise.all(ns.map(async n => (await stepRow(pane, n))?.slice(0, 3)))
+
+  // No builder running: step 2 isn't being built.
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await marks(pane, [1, 2, 3, 4])).toEqual(['✓ 1', '○ 2', '○ 3', '○ 4'])
+  await pane.unmount()
+
+  // A running builder: the first unbuilt step is being built. No step shows plan-review findings.
+  await $.agent.spawn({ tool_use_id: 'b1', prompt: 'Build step 2', description: 'b1', subagentType: 'quorum:builder', parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await marks(pane, [1, 2, 3, 4])).toEqual(['✓ 1', '● 2', '○ 3', '○ 4'])
+  for (const n of [1, 2, 3, 4]) {
+    expect(await stepRow(pane, n)).toMatch(/^[✓●○] \d Step \d *$/)
+    expect(await stepLabel(pane, n)).not.toMatch(/important|nit|awaiting/)
+  }
+  await pane.unmount()
+
+  // This session's standalone review is FIXING: the running builder is its fixer, so no step is being built.
+  files['.tasks/review-pr-12/state.md'] = reviewState('FIXING')
+  await $.tool.call({ tool: 'Bash', command: 'quorum-state --task review-pr-12 set status FIXING' })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await marks(pane, [1, 2])).toEqual(['✓ 1', '○ 2'])
+  await pane.unmount()
+
+  // Another session's FIXING review doesn't count.
+  files['.tasks/review-pr-12/state.md'] = reviewState('FIXING', 'MEDIUM', 'sess-b')
+  await $.tool.call({ tool: 'Bash', command: 'quorum-state --task review-pr-12 set status FIXING' })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await marks(pane, [1, 2])).toEqual(['✓ 1', '● 2'])
+  await pane.unmount()
+
+  // Steps numbered 1, 3, 2 with only 1 built: plan order puts ● on step 3.
+  await reload($, files, building('# Plan\n\n## Steps\n1. **One**\n3. **Three**\n2. **Two**\n'))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await marks(pane, [1, 3, 2])).toEqual(['✓ 1', '● 3', '○ 2'])
+  await pane.unmount()
+
+  // An unsliced plan with a passing build proof: every step is built.
+  await reload($, files, building(planMd(2), '', { '.tasks/export-csv/proof-build.md': PROOF }))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await marks(pane, [1, 2])).toEqual(['✓ 1', '✓ 2'])
+  await pane.unmount()
+})
+
+test('no step row is wider than the card and long titles are cut at the end', async ($, on) => {
+  const LONG = 'Long title for a step '.repeat(5).slice(0, 90)
+  const plan = `# Plan\n\n## Steps\n1. **${LONG}** — \`app/report.py\` · requirements: 1, 2, 3, 4, 5, 6, 7, 8\n2. **Quote commas** — \`app/util.py\` · requirements: 2\n3. **Docs** — \`README.md\`\n`
+  world(on, {
+    ...inRounds([survivorsMd(impAt('.tasks/export-csv/plan.md:4'))], { dir: 'plan-review' }),
+    [PLAN]: plan,
+    [LIST]: filesTsv(STEPS_FILES, { base: '-' }),
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount(ON_TERMINAL)
+  const rows = await Promise.all([1, 2, 3].map(async n => (await stepRow(pane, n)) ?? ''))
+  for (const row of rows) expect(cols(row)).toBeLessThanOrEqual(46)
+  // The title is cut at its end, before the marks; the requirements list is cut before the file count.
+  expect(rows[0]).toMatch(/^○ 1 Long[^…]*… +✗1 {3}1 file · req 1, 2[^·]*…$/)
+  expect(rows[0]).not.toContain(LONG)
+  // The files column ends at the same offset on every row, and the marks sit at a fixed place before it.
+  const filesEnd = rows.map(r => { const m = /\d+ files?/.exec(r); return m ? m.index + m[0].length : -1 })
+  expect(new Set(filesEnd).size).toBe(1)
+  expect(rows[0]?.indexOf('✗1')).toBe((filesEnd[0] ?? 0) - 7 - 4)
+  expect(rows[1]).toMatch(/^○ 2 Quote commas +2 files · req 2 +$/)
+  await pane.unmount()
+
+  // Narrower still, the requirements go once fewer than 6 columns are left for them; the files stay.
+  const narrow = stepRows([{ n: 1, title: LONG, requirements: [1, 2, 3], mark: '○', files: 2, findings: null, isSelected: false }], 28)
+  expect(narrow[0]?.parts.map(p => p.text).join('')).toMatch(/^○ 1 Long title for… +2 files$/)
 })

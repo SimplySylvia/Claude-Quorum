@@ -10,10 +10,10 @@ import type { ChangedFile, Check, Findings, FindingsView, Now, OtherTask, PullRe
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, parsePlanSteps, SLICE_AT, stageOf, stages, tokenCount,
-  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress,
+  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep,
 } from './task'
-import { awaitingFrom, awaitingOf, changeHeader, confidenceRow, footprint, iconsOn, isBigTree, markText, markWords, roundKept, runEnds, trackFindings, treeHeader, treeRows } from './tree'
-import type { TreeChange, TreePart } from './tree'
+import { awaitingFrom, awaitingOf, changeHeader, confidenceRow, footprint, iconsOn, isBigTree, markText, markWords, roundKept, runEnds, stepFindings, stepRows, trackFindings, treeHeader, treeRows } from './tree'
+import type { StepLine, TreeChange, TreePart } from './tree'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
@@ -973,6 +973,33 @@ export const register: Register = (on, options) => {
       if (n.tree && last && !n.survivors) return voterLine(n.kind, last, n.tree.round, of, t.status, n.tree.dropped, awaiting, `round ${n.tree.round}: `)
       return voterLine(n.kind, n.survivors, n.round, of, t.status, 0)
     }
+    // The plan's steps, in Plan and Build. A step is being built while a builder runs for the task, not for this
+    // session's standalone review (FIXING), and in Plan it carries the plan review's open findings on its lines.
+    const progress = stepProgress(t)
+    const isBuilding = t.status === 'BUILDING' && crew.some(a => a.role === 'builder' && a.endedAt === null) && rv?.status !== 'FIXING'
+    const beingBuilt = isBuilding ? buildingStep(t.steps, progress) : null
+    const stepLines = (): StepLine[] => t.steps.map(s => ({
+      n: s.n,
+      title: s.title,
+      requirements: s.requirements,
+      mark: t.status === 'PLANNING' ? '○' : progress.allBuilt || progress.built.includes(s.n) ? '✓' : s.n === beingBuilt ? '●' : '○',
+      files: t.files ? t.files.files.filter(f => f.steps.includes(s.n)).length : null,
+      findings: t.status === 'PLANNING' && n.kind === 'plan' ? stepFindings(n.tree, `.tasks/${t.slug}/plan.md`, s, []) : null,
+      isSelected: false,
+    }))
+    // `isPressable`: a file tree is drawn under the rows, so the hint says a press highlights a step's files.
+    const stepsPart = (opts: { isPressable: boolean; filesKey?: string }) => {
+      if (t.isFast || t.steps.length === 0 || (t.status !== 'PLANNING' && t.status !== 'BUILDING')) return null
+      return (
+        <Box key={`${t.slug}:steps-list`} flexDirection="column">
+          <Text bold>Plan steps</Text>
+          {opts.isPressable ? <Text dimColor wrap="truncate-end">press a step to highlight its files</Text> : null}
+          {stepRows(stepLines(), treeWidth).map(row => (
+            <Box key={`${t.slug}:step:${row.n}`}><Text wrap="truncate-end">{partsOf(`${t.slug}:step:${row.n}`, row.parts)}</Text></Box>
+          ))}
+        </Box>
+      )
+    }
     const { title, ticket } = splitTicket(spec?.title || t.slug)
 
     const shown = new Set<string>([
@@ -1059,6 +1086,7 @@ export const register: Register = (on, options) => {
             <Text bold>Now · </Text>
             <Text bold color={nowColor}>{nowTitle(n, t.maxRounds)}</Text>
           </Text>
+          {n.kind === 'plan' && n.round === 0 && stepsPart({ isPressable: false })}
           {n.kind === 'spec' && <Text dimColor>{plural(n.requirements, 'requirement')} in rd.md · {plural(taskChecks, 'check')} in eval.md</Text>}
           {n.kind === 'spec' && n.reviewers.map(r => reviewerLine(r))}
           {(n.kind === 'plan' || n.kind === 'review') && n.round > 0 && (
@@ -1069,6 +1097,7 @@ export const register: Register = (on, options) => {
               {n.reviewers.map(r => reviewerLine(r, n.tree?.round === n.round ? n.rereviewBy[r.role] ?? 0 : 0))}
               {/* While round N+1 reviews, the tree shows round N, whose drops aren't this round's. */}
               {roundVoter(n)}
+              {n.kind === 'plan' && stepsPart({ isPressable: t.files !== null })}
               {n.kind === 'plan'
                 ? findingsTree(t.slug, n.tree, t.risk === 'HIGH', treeWidth, planChange, planChange ? changeHeader('plan', planChange, t.planSteps) : undefined)
                 : filesRow ?? codeTree(n.tree)}
@@ -1082,6 +1111,7 @@ export const register: Register = (on, options) => {
                 if (!agent) return line(role, 'waiting', label, role === 'builder' ? 'implements plan.md' : 'runs checks, not final-only')
                 return line(role, agent.endedAt === null ? 'running' : 'done', label, `${agent.endedAt === null ? 'running' : 'took'} ${seconds(agent, clockNow)}`)
               })}
+              {stepsPart({ isPressable: t.files !== null })}
               {codeTree(null)}
             </Box>
           )}

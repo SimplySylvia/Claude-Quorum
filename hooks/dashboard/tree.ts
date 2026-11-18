@@ -5,7 +5,7 @@
 // marks the rows around it share. A `/quorum:review` has no recorded change, so its tree holds only the findings'
 // files. No `$` here, so tests can call it directly.
 
-import type { ChangedFile, FileList, Findings, FindingsView, Round, RoundKept, TreeFinding } from '../../types'
+import type { ChangedFile, FileList, Findings, FindingsView, PlanStep, Round, RoundKept, TreeFinding } from '../../types'
 import { isStaleProof, keptFindings, plural } from './task'
 
 // A run of text on a row, drawn as its own Text.
@@ -308,6 +308,75 @@ function wrap(text: string, first: number, rest: number): string[] {
   }
   lines.push(cur)
   return lines
+}
+
+// ---- Plan steps
+
+// A step's progress: built, being built, or not built yet.
+export type StepMark = '✓' | '●' | '○'
+export type StepMarks = Findings & { awaiting: number }
+// One step row: `files` is null without files.tsv, and `findings` null outside Plan, so neither is drawn or said.
+export type StepLine = { n: number; title: string; requirements: number[]; mark: StepMark; files: number | null; findings: StepMarks | null; isSelected: boolean }
+
+// The view's open findings on plan.md (`planPath`, repo-relative, as the tree places them) whose line falls in the
+// step's span, both ends included, counted as the tree counts them.
+export function stepFindings(view: FindingsView | null, planPath: string, step: Pick<PlanStep, 'from' | 'to'>, rereview: string[]): StepMarks {
+  const on = (view?.findings ?? []).filter(f => f.path === planPath && f.line !== null && f.line >= step.from && f.line <= step.to)
+  const { important, awaiting, nit, preExisting } = countOf(on, rereview)
+  return { important, awaiting, nit, preExisting }
+}
+
+const STEP_COLOR: Record<StepMark, string | null> = { '✓': 'success', '●': 'claude', '○': null }
+const STEP_WORD: Record<StepMark, string> = { '✓': 'built', '●': 'being built', '○': 'not built yet' }
+const STEP_MARKS = MARKS.filter(m => m.field !== 'fixed')
+
+// `1`, `1 and 2`, `1, 2 and 3`.
+const andList = (ns: number[]) => (ns.length < 2 ? ns.join('') : `${ns.slice(0, -1).join(', ')} and ${ns.at(-1)}`)
+
+// The step rows, `width` wide: the mark, the number right-aligned, the title cut at its end, then a right-hand block
+// as wide on every row so its columns line up: the finding marks, `K files` (none without files.tsv), and
+// ` · req 1, 2`. When the title would get fewer than 12 columns, the requirements give way first, cut at the end,
+// and go once fewer than 6 columns are left for them; the marks and files never shrink.
+export function stepRows(lines: StepLine[], width: number): { n: number; parts: TreePart[]; label: string }[] {
+  const numWidth = Math.max(0, ...lines.map(l => cellWidth(String(l.n))))
+  const marks = lines.map(l => STEP_MARKS.filter(m => l.findings?.[m.field])
+    .flatMap((m, i): TreePart[] => [...(i > 0 ? [{ text: ' ' }] : []), markPart(m.glyph, m.color, `${m.glyph}${l.findings?.[m.field]}`)]))
+  const marksWidth = Math.max(0, ...marks.map(widthOf))
+  const hasFiles = lines.some(l => l.files !== null)
+  const files = lines.map(l => (l.files === null ? '' : plural(l.files, 'file')))
+  const filesWidth = Math.max(0, ...files.map(cellWidth))
+  const reqs = lines.map(l => (l.requirements.length === 0 ? '' : `${hasFiles ? ' · ' : ''}req ${l.requirements.join(', ')}`))
+  const leadWidth = 2 + numWidth + 1
+  let reqWidth = Math.max(0, ...reqs.map(cellWidth))
+  const short = 12 - (width - leadWidth - 1 - (marksWidth > 0 ? marksWidth + 2 : 0) - filesWidth - reqWidth)
+  if (short > 0) reqWidth = reqWidth - short < 6 ? 0 : reqWidth - short
+
+  return lines.map((l, i) => {
+    const req = reqWidth > 0 ? cutEnd(reqs[i] ?? '', reqWidth) : ''
+    const right: TreePart[] = [
+      ...(marksWidth > 0 ? [...pad(marksWidth - widthOf(marks[i] ?? [])), ...(marks[i] ?? []), { text: '  ' }] : []),
+      ...pad(filesWidth - cellWidth(files[i] ?? '')),
+      ...(files[i] ? [{ text: files[i] ?? '' }] : []),
+      ...(req ? [{ text: req }] : []),
+      ...pad(reqWidth - cellWidth(req)),
+    ]
+    const left: TreePart[] = [
+      markPart(l.mark, STEP_COLOR[l.mark]),
+      { text: ` ${' '.repeat(numWidth - cellWidth(String(l.n)))}${l.n} ` },
+      { text: cutEnd(l.title, width - leadWidth - 1 - widthOf(right)) },
+    ]
+    const label = [
+      `step ${l.n}`,
+      l.title,
+      STEP_WORD[l.mark],
+      ...(l.files === null ? [] : [plural(l.files, 'file')]),
+      ...(l.requirements.length === 0 ? [] : [`${l.requirements.length === 1 ? 'requirement' : 'requirements'} ${andList(l.requirements)}`]),
+      ...(l.findings ? words({ ...l.findings, fixed: 0, dropped: 0 }) : []),
+      ...(l.isSelected ? ['selected'] : []),
+    ].join(', ')
+    const gap = Math.max(1, width - widthOf(left) - widthOf(right))
+    return { n: l.n, parts: fit([...left, ...pad(gap), ...right], width), label }
+  })
 }
 
 // ---- Icons (Nerd Fonts v3, codepoints from glyphnames.json 3.5.1)
