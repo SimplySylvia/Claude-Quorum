@@ -65,6 +65,27 @@ copy with `/plugin marketplace update`.
 - **`assets/src/run-bats.sh`** runs bats with `--jobs` set to the CPU count when GNU parallel is installed, and
   plain bats otherwise. **`assets/src/bench-hooks.sh`** counts the PreToolUse hooks' git processes and times them
   for one Bash call, on this checkout or another one with `--plugin DIR`.
+- **The dashboard names an unmet requirement.** With a proof saved, the Requirements row reads `3 of 4 met` and,
+  while one is unmet, `R3 <title> unmet, and 1 more`, beside the summary or on its own line in a narrow pane. From
+  `CONVERGED` on, a requirement a current (not stale) proof leaves unmet also shows on the stepper's Review stage
+  (`!`), the line under it (`converged with requirement 3 unmet`), the Now title (` · R3 unmet`), and first in the
+  band (`R3 unmet`).
+- **The Checks row names the proof's commit.** It reads `24/24 pass @ eb6c1c1`, and `24/24 pass @ eb6c1c1 · stale`
+  when the proof ran at a commit other than HEAD. A stale proof is never green: its summary is amber (red with a
+  failing check), its PASS badges are muted, and the band reads `checks stale`.
+- **A `▸ Blind test` row at the PR handoff.** In `READY` and `AWAITING-HUMAN`, the Now card shows the last blind
+  run, such as `▸ Blind test  run 1 · reached · 0 blockers · 0 caused`, with ` · a11y A` and ` · security S` when
+  those reports kept an IMPORTANT, and `no report` or `triage: no report` for a missing file. It's green when the
+  run is clean and amber otherwise, with the parts that make it so first; it opens by itself when amber, to the
+  blind test stage's rows for that run, and its open state is kept per task. LOW tasks and tasks with no blind run
+  show no row.
+- **Security findings.** A finding may carry a `Security: <kind>` line after its `Confidence:` line, such as
+  `Security: injection`. The security reviewer always writes one; the code reviewer and the pattern auditor add it
+  to an exploitable vulnerability, and the voter keeps it on a kept or merged finding. `quorum-findings` keeps the
+  line in a finding's body, and `quorum-findings check` reports `empty Security: <header>` for a line with no kind.
+  The dashboard's findings tree shows `security` before such a finding's title and `!` after a `✗` or `↻` count
+  that holds one (`✗2!`), with `! security` in the key; a fixed or dropped one keeps the word, muted. `REVIEW.md`'s
+  finding format, and its template, describe the line.
 
 ### Changed
 

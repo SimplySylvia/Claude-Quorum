@@ -17,21 +17,52 @@ finished with its PR open.</sub>
 - **The band above the prompt:** the task's status, a dot per stage, the round's progress, the change's file count
   (`12 files`) once the band is 110 columns wide or more, anything wrong in red, and **▶ Next** and **Dashboard**
   buttons. The 110 columns are the band's own width, not the terminal's, so a docked pane narrows the band and can
-  hide the count; undock or close the pane, or widen the terminal, to see it.
+  hide the count; undock or close the pane, or widen the terminal, to see it. A requirement that a current proof
+  leaves unmet comes first in what's wrong (`R3 unmet`, or `2 unmet`), since a narrow band shows only the first
+  problem, and a stale proof's progress reads `checks stale` instead of `checks 24/24`.
 - **The pane,** which opens by itself during a task (`/quorum-dashboard` shows or hides it):
   - **Task card:** title, goal, status, a stage stepper, and the PR once there is one. Once the build has started,
     a footprint line sums up the change: `12 files · +268 −11 · 1 important · 1 nit · 1 pre`, naming the findings
     the latest voted code review round kept. An important finding awaiting re-review counts as
     `1 awaiting re-review`, as the tree shows it, not as important. It reads `no findings` after a vote that kept
     none, `not reviewed yet` before any vote, and adds `as of a1b2c3d` when the list was recorded at an older commit
-    than the current one. The folded Files row (below) has the same summary.
+    than the current one. The folded Files row (below) has the same summary. From `CONVERGED` on, while a current
+    proof leaves a requirement unmet, the stepper's Review stage shows `!` in amber instead of `✓`, and the line
+    under the stepper starts `converged with requirement 3 unmet` (or `converged with 2 requirements unmet`).
   - **Now card:** what the current stage is doing, such as each reviewer's progress and what it found, the voter's
     verdict and the next step, the plan's steps from Plan on, and a
     [tree of the task's changed files](#the-file-tree) with the findings the voter kept under their files. Its
-    border turns amber when it's your move and red when the task is stuck.
+    border turns amber when it's your move and red when the task is stuck. From `CONVERGED` on, while a current
+    proof leaves a requirement unmet, its title gains ` · R3 unmet` (or ` · 2 unmet`) in amber.
+    - **At the PR handoff** (`READY` and `AWAITING-HUMAN`), a **▸ Blind test** row shows the last blind run, such as
+      `▸ Blind test  run 1 · reached · 0 blockers · 0 caused`, directly under the title, or under the "Every stage is
+      done" line when that shows (it's left out once a PR is known), and before the Plan steps. ` · a11y 1` and
+      ` · security 1` join it when the accessibility or security report kept an IMPORTANT. It reads `no report` in
+      place of `reached` when the run has no `blind-R.md` (or no `Result:` in it), and `triage: no report` in place
+      of `0 caused` with no `triage-R.md`. It's green when the run reached the goal with no blocker, nothing caused,
+      and no accessibility or security IMPORTANT, and amber otherwise. An amber row puts what makes it so first, in
+      the order security, a11y, caused, blockers, not reached, no report, triage: no report, so a narrow pane still
+      shows it: `run 2 · security 1 · reached · 0 blockers · 0 caused`. Its label keeps the usual order, in words:
+      `Blind test, run 1, reached the goal, 0 blockers, 0 caused, folded`. A press opens it to the rows the Blind
+      test stage shows for that run: the blind user and friction triage (each `no report` when its file is
+      missing), and the accessibility and security reports when they were written. An amber row opens by itself,
+      and a press's choice is kept per task. A LOW task, a task with no blind run, and the Blind test stage itself
+      show no such row.
   - **Folding sections:** Requirements, Checks, Review rounds (the plan's rounds and the code's, side by side), Spend
     (tokens and models used, the models the task chose, and a warning when an agent ran on another), Other tasks,
     and Other agents. A section with a problem opens by itself.
+    - **Requirements:** with a proof saved, the summary reads `3 of 4 met`: green when all are met, red when a final
+      proof's verdict leaves one unmet, and amber otherwise (a failing check, or a requirement still open or with no
+      check). While one is unmet, the note names the first in rd.md order and counts the rest:
+      `R3 Export honors DATA_FILE unmet, and 1 more`. It sits beside the summary when it fits, and on its own line
+      under the row otherwise, where only the title is cut (or left out when even `R3 unmet, and 1 more` fills the
+      line). The stepper, the Now title and the band show an unmet requirement too, from `CONVERGED` on, and only
+      from a proof that isn't stale, since a stale proof's failures may already be fixed; this row shows it either
+      way.
+    - **Checks:** the summary names the commit the proof ran at, `24/24 pass @ eb6c1c1`, and adds `· stale` when
+      that commit isn't HEAD, as after a fix commit: `24/24 pass @ eb6c1c1 · stale`. A stale proof never reads as
+      passing: its summary is amber (red when a check failed), the PASS badges in the opened fold are muted rather
+      than green, and the band reads `checks stale`. In a narrow pane the note gives way first, then the commit.
 - **▶ Next** puts the next command in your prompt to send or edit. It never sends it for you.
 - **Toasts** when a task converges, halts, escalates, or is ready for you.
 - **`/quorum:review`:** the one this session is running gets a card of its own, with its reviewers, the voter's
@@ -141,6 +172,12 @@ with findings.
 - **Marks:** `✗` important, `↻` awaiting re-review, `✓` fixed this run, `n` nit, `p` pre-existing. A key line
   under the header names only the marks shown, such as `key: ✗ important  n nit`, and wraps between entries in a
   narrow pane.
+- **Security findings:** a finding with a `Security: <kind>` line in its body (see [`REVIEW.md`](../REVIEW.md),
+  section 1) shows the word `security` in red before its title, and its label adds `security: injection`. A `✗` or
+  `↻` count that holds one is followed by `!` (`✗2!`, `↻1!`), the row's label adds `1 of them security`, and the
+  key adds `! security`. While a `!` shows, the `✗` and `↻` columns are one column wider in every row, so they
+  still line up. A security finding a later round fixed, or the voter dropped, keeps its `security` word, muted,
+  and gets no `!`. Plan-review findings show the same way.
 - **Awaiting re-review:** once a round's fix changes the file of an important finding that round kept, the finding
   shows `↻` instead of `✗` until a later round reviews it. The voter row then reads `kept ↻1 n1 → re-review` in
   place of `→ fix round`, and each reviewer row whose finding is now `↻` reads `↻1 found ✗1`. While the next round
