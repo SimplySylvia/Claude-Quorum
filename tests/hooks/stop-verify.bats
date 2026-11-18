@@ -242,6 +242,9 @@ must_rerun() {
   echo note > .tasks/demo/notes.md
   "$BIN/quorum-state" --task demo log set note
   must_skip
+  # A change only in the index: staged new content, with the worktree back to HEAD's.
+  echo two > t.txt; git add t.txt; echo one > t.txt
+  must_rerun; must_skip
   # A staged edit, then an unstaged one on top of it.
   echo two > t.txt; git add t.txt
   must_rerun; must_skip
@@ -310,6 +313,32 @@ must_rerun() {
   echo '# edited again' >> .claude/hooks/verify-completion.sh   # the verify script, ignored by git
   must_rerun; must_skip
   export CLAUDE_PLUGIN_OPTION_VERIFY_TIMEOUT_S=301
+  must_rerun; must_skip
+}
+
+@test "the stop key covers the plugin version" {
+  counting_check
+  echo one > t.txt; git add t.txt; commit -m t
+  must_rerun; must_skip
+  # A copy of the plugin at the same version skips, so only the version can make the next stop rerun.
+  plugin="$BATS_TEST_TMPDIR/plugin"
+  mkdir -p "$plugin"
+  cp -R "$REPO_ROOT/hooks" "$REPO_ROOT/bin" "$REPO_ROOT/libexec" "$REPO_ROOT/.claude-plugin" "$plugin/"
+  copy_stop() { echo '{"hook_event_name":"Stop","stop_hook_active":false}' | "$plugin/hooks/stop-verify.sh"; }
+  must_skip copy_stop
+  jq '.version = "999.0.0"' "$REPO_ROOT/.claude-plugin/plugin.json" > "$plugin/.claude-plugin/plugin.json"
+  must_rerun copy_stop; must_skip copy_stop
+  must_rerun
+}
+
+@test "the stop key covers the tree's path: a copy of the repo with the same stamp reruns the checks" {
+  counting_check
+  echo one > t.txt; git add t.txt; commit -m t
+  must_rerun; must_skip
+  cp -R "$WORK" "$BATS_TEST_TMPDIR/copy"
+  cd "$BATS_TEST_TMPDIR/copy"
+  export CLAUDE_PROJECT_DIR="$BATS_TEST_TMPDIR/copy"
+  [ "$(cat .tasks/demo/verify-pass)" = "$(cat "$WORK/.tasks/demo/verify-pass")" ]
   must_rerun; must_skip
 }
 

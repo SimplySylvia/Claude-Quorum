@@ -69,10 +69,12 @@ teardown() { cleanup_repo; }
 
 # all_modes LABEL [VAR=VALUE ...]: from the current directory, run each mode once with the counting shim on PATH and
 # append "LABEL MODE rc=N" and its output to ACTUAL, with $WORK's physical and logical paths both written as $WORK.
-# After each run, check the shim's log: at most one `rev-parse --show-toplevel` call per -C directory, and at most one other
-# rev-parse call for it (the dirs-only call, made only when there's no work tree).
+# After each run, check the shim's log: at most one rev-parse call in all per -C directory, except in the dotgit and
+# bare situations, which have no work tree: there a directory may also get one dirs-only call after its one
+# `rev-parse --show-toplevel` call.
 all_modes() {
-  local label=$1 m out rc w; shift
+  local label=$1 m out rc w max=1; shift
+  case $label in dotgit|bare) max=2 ;; esac
   w=$(cd "$WORK" && pwd -P)
   for m in "" --root --code --main --list; do
     : > "$GIT_LOG"
@@ -81,9 +83,9 @@ all_modes() {
 $out
 "
     ACTUAL=${ACTUAL//"$w"/\$WORK}; ACTUAL=${ACTUAL//"$WORK"/\$WORK}
-    if ! awk '/ rev-parse / { d = ""; for (i = 1; i < NF; i++) if ($i == "-C") { d = $(i + 1); break }
-              if (/--show-toplevel/) t[d]++; else o[d]++ }
-              END { for (d in t) if (t[d] > 1) bad = 1; for (d in o) if (o[d] > 1) bad = 1; exit bad }' "$GIT_LOG"; then
+    if ! awk -v max="$max" '/ rev-parse / { d = ""; for (i = 1; i < NF; i++) if ($i == "-C") { d = $(i + 1); break }
+              n[d]++; if (/--show-toplevel/) t[d]++; else o[d]++ }
+              END { for (d in n) if (n[d] > max || t[d] > 1 || o[d] > 1) bad = 1; exit bad }' "$GIT_LOG"; then
       echo "too many rev-parse calls for $label ${m:-default}:"; cat "$GIT_LOG"; return 1
     fi
   done
