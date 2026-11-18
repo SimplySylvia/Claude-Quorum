@@ -3207,3 +3207,103 @@ test('no step row is wider than the card and long titles are cut at the end', as
   const narrow = stepRows([{ n: 1, title: LONG, requirements: [1, 2, 3], mark: '○', files: 2, findings: null, isSelected: false }], 28)
   expect(narrow[0]?.parts.map(p => p.text).join('')).toMatch(/^○ 1 Long title for… +2 files$/)
 })
+
+const STEPS_FOLD = 'export-csv:steps'
+// The fold row's count, as its own Text inside the Button.
+const foldCount = async (pane: Drawn, text: string) => (await partOf(pane, STEPS_FOLD, text))?.props?.color
+
+test('from review on the steps fold to one row that a press opens', async ($, on) => {
+  const changed = [fileRow('M', '5', '1', 'app/report.py', '1'), fileRow('A', '9', '0', 'app/util.py', '2'), fileRow('M', '2', '0', 'README.md', '2,3')]
+  const task = (status: string, extra = '') =>
+    ({ ...inRounds([survivorsMd(nitAt('app/report.py:1'))], { status, extra: `${builtSteps(1, 2)}${extra}` }), [PLAN]: STEPS_PLAN, [LIST]: filesTsv(changed) })
+  const files: Record<string, string> = task('IN_REVIEW')
+  world(on, files)
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.description }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const buttonKeys = async (pane: Drawn) => (await pane.findAll({ type: 'Button' })).map(b => b.key ?? '')
+
+  // IN_REVIEW: one folded Button row, after the voter row and directly above the tree; no step rows.
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, STEPS_FOLD)).toBe('▸ Plan steps  2 of 3 built')
+  expect((await pane.find({ type: 'Button', key: STEPS_FOLD }))?.props.label).toBe('Plan steps, 2 of 3 steps built, folded')
+  expect(await foldCount(pane, '2 of 3 built')).not.toBe('success')
+  for (const n of [1, 2, 3]) expect(await stepRow(pane, n)).toBeUndefined()
+  let keys = await buttonKeys(pane)
+  expect(keys[keys.indexOf(STEPS_FOLD) + 1]).toBe((await treeKeys(pane))[0])
+  const all = await texts(pane)
+  const fold = all.indexOf('▸ Plan steps  2 of 3 built')
+  expect(fold).toBeGreaterThan(all.findIndex(x => /Verifier vote/.test(x)))
+  const after = all.slice(fold + 1).filter(x => !['▸ ', 'Plan steps', '  ', '2 of 3 built'].includes(x))
+  expect(after[0]).toBe('the verifier kept these in round 1')
+  expect(await pane.find({ type: 'Text', text: 'press a step to highlight its files' })).toBeUndefined()
+
+  // A press opens the list: the hint, then each step with its built mark.
+  await pane.press({ key: STEPS_FOLD })
+  expect(await rowOf(pane, STEPS_FOLD)).toBe('▾ Plan steps  2 of 3 built')
+  expect((await pane.find({ type: 'Button', key: STEPS_FOLD }))?.props.label).toBe('Plan steps, 2 of 3 steps built, open')
+  expect(await pane.find({ type: 'Text', text: 'press a step to highlight its files' })).toBeDefined()
+  expect(await stepRow(pane, 1)).toMatch(/^✓ 1 Read the rows +1 file · req 1, 2$/)
+  expect(await stepRow(pane, 2)).toMatch(/^✓ 2 Quote commas +2 files · req 2 +$/)
+  expect(await stepRow(pane, 3)).toMatch(/^○ 3 Docs +1 file +$/)
+  await pane.unmount()
+
+  // The open state is kept under export-csv:steps across a reload; a second press folds it again.
+  await reload($, files, task('IN_REVIEW'))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, STEPS_FOLD)).toBe('▾ Plan steps  2 of 3 built')
+  expect(await stepRow(pane, 1)).toBeDefined()
+  await pane.press({ key: STEPS_FOLD })
+  expect(await stepRow(pane, 1)).toBeUndefined()
+  await pane.unmount()
+
+  // AWAITING-HUMAN: directly above the folded Files row.
+  await reload($, files, task('AWAITING-HUMAN'))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, STEPS_FOLD)).toBe('▸ Plan steps  2 of 3 built')
+  keys = await buttonKeys(pane)
+  expect(keys[keys.indexOf(STEPS_FOLD) + 1]).toBe(FILES_ROW)
+  for (const n of [1, 2, 3]) expect(await stepRow(pane, n)).toBeUndefined()
+  await pane.unmount()
+
+  // inBothReviews keeps a plan-review IMPORTANT at plan.md:14, inside step 2, and a builder runs: opened, the
+  // rows show only built and not-yet marks, with no findings.
+  const plan14 = ['# Plan', '', 'Context', '', '', '', '', '', '', '', '## Steps', '1. **Read the rows** · requirements: 1', '2. **Quote commas** · requirements: 2', '   - wrap a field', '   - in quotes', '3. **Docs**', ''].join('\n')
+  expect(parsePlanSteps(plan14)[1]).toMatchObject({ n: 2, from: 13, to: 15 })
+  await reload($, files, { ...inBothReviews(), [PLAN]: plan14, [LIST]: filesTsv(changed) })
+  await $.agent.spawn({ tool_use_id: 'b1', prompt: 'Fix round 1', description: 'b1', subagentType: 'quorum:builder', parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
+  pane = await $.ui.mount(ON_TERMINAL)
+  await pane.press({ key: STEPS_FOLD })
+  for (const n of [1, 2, 3]) {
+    expect(await stepRow(pane, n)).toMatch(/^○ \d \S/)
+    expect(await stepRow(pane, n)).not.toMatch(/[●✗↻]|(^|\s)[np]\d/)
+    expect(await stepLabel(pane, n)).not.toMatch(/important|nit|awaiting|being built/)
+  }
+  await pane.press({ key: STEPS_FOLD })
+  await pane.unmount()
+
+  // A fast-path task, and a task with no plan.md, show neither the row nor the list.
+  const fast = task('IN_REVIEW')
+  fast['.tasks/export-csv/state.md'] = (fast['.tasks/export-csv/state.md'] ?? '').replace('risk: MEDIUM', 'risk: LOW\nfast: true')
+  await reload($, files, fast)
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Button', key: STEPS_FOLD })).toBeUndefined()
+  expect(await stepRow(pane, 1)).toBeUndefined()
+  await pane.unmount()
+  const noPlan = task('IN_REVIEW')
+  delete noPlan[PLAN]
+  await reload($, files, noPlan)
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Button', key: STEPS_FOLD })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /Plan steps/ })).toBeUndefined()
+  await pane.unmount()
+})
+
+test('the demo task shows its plan steps folded in review', async ($, on) => {
+  // The demo's review stage: IN_REVIEW in round 2, its three-step plan built in one go with a build proof.
+  world(on, { ...repo('IN_REVIEW'), [PLAN]: DEMO_PLAN, '.tasks/export-csv/proof-build.md': PROOF })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount(ON_TERMINAL)
+  expect(await rowOf(pane, STEPS_FOLD)).toBe('▸ Plan steps  3 of 3 built')
+  expect(await foldCount(pane, '3 of 3 built')).toBe('success')
+  await pane.unmount()
+})

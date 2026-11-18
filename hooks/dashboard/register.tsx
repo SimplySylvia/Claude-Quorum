@@ -52,6 +52,9 @@ const GLYPH: Record<Stage['state'], [string, string]> = {
 
 const REQUIREMENT_GLYPH = { pass: ['✓', 'success'], fail: ['✗', 'error'], open: ['○', 'inactive'], none: ['–', 'inactive'] } as const
 
+// From Review on, the plan's steps fold to one row.
+const FOLDED_STEPS = ['IN_REVIEW', 'CONVERGED', 'BLIND-TEST', 'READY', 'AWAITING-HUMAN', 'HALTED', 'ESCALATED']
+
 const REVIEW_FILES = ['logic.md', 'architecture.md', 'patterns.md', 'docs.md', 'tests.md', 'a11y.md', 'security.md', 'votes.md', 'survivors.md']
 
 
@@ -988,15 +991,46 @@ export const register: Register = (on, options) => {
       isSelected: false,
     }))
     // `isPressable`: a file tree is drawn under the rows, so the hint says a press highlights a step's files.
+    // From Review on, the list folds to one row, kept open or folded per task like the Files row.
+    const stepsKey = `${t.slug}:steps`
+    const isStepsOpen = folds[stepsKey] ?? false
     const stepsPart = (opts: { isPressable: boolean; filesKey?: string }) => {
-      if (t.isFast || t.steps.length === 0 || (t.status !== 'PLANNING' && t.status !== 'BUILDING')) return null
+      if (t.isFast || t.steps.length === 0) return null
+      const isFolding = FOLDED_STEPS.includes(t.status)
+      if (!isFolding && t.status !== 'PLANNING' && t.status !== 'BUILDING') return null
+      const hint = opts.isPressable ? <Text dimColor wrap="truncate-end">press a step to highlight its files</Text> : null
+      const rows = stepRows(stepLines(), treeWidth).map(row => (
+        <Box key={`${t.slug}:step:${row.n}`}><Text wrap="truncate-end">{partsOf(`${t.slug}:step:${row.n}`, row.parts)}</Text></Box>
+      ))
+      if (!isFolding) {
+        return (
+          <Box key={`${t.slug}:steps-list`} flexDirection="column">
+            <Text bold>Plan steps</Text>
+            {hint}
+            {rows}
+          </Box>
+        )
+      }
+      const built = progress.allBuilt ? t.steps.length : t.steps.filter(s => progress.built.includes(s.n)).length
+      const count = `${built} of ${t.steps.length} built`
       return (
         <Box key={`${t.slug}:steps-list`} flexDirection="column">
-          <Text bold>Plan steps</Text>
-          {opts.isPressable ? <Text dimColor wrap="truncate-end">press a step to highlight its files</Text> : null}
-          {stepRows(stepLines(), treeWidth).map(row => (
-            <Box key={`${t.slug}:step:${row.n}`}><Text wrap="truncate-end">{partsOf(`${t.slug}:step:${row.n}`, row.parts)}</Text></Box>
-          ))}
+          <Button
+            key={stepsKey}
+            plain
+            hover={{ color: 'claude' }}
+            label={`Plan steps, ${built} of ${t.steps.length} steps built, ${isStepsOpen ? 'open' : 'folded'}`}
+            onPress={() => void update($, sections, all => ({ ...all, [stepsKey]: !isStepsOpen }))}
+          >
+            <Text wrap="truncate-end">
+              <Text dimColor>{isStepsOpen ? '▾ ' : '▸ '}</Text>
+              <Text bold>Plan steps</Text>
+              <Text>  </Text>
+              <Text color={built === t.steps.length ? 'success' : undefined}>{count}</Text>
+            </Text>
+          </Button>
+          {isStepsOpen ? hint : null}
+          {isStepsOpen ? rows : null}
         </Box>
       )
     }
@@ -1086,7 +1120,7 @@ export const register: Register = (on, options) => {
             <Text bold>Now · </Text>
             <Text bold color={nowColor}>{nowTitle(n, t.maxRounds)}</Text>
           </Text>
-          {n.kind === 'plan' && n.round === 0 && stepsPart({ isPressable: false })}
+          {(n.kind === 'plan' || n.kind === 'review') && n.round === 0 && stepsPart({ isPressable: false })}
           {n.kind === 'spec' && <Text dimColor>{plural(n.requirements, 'requirement')} in rd.md · {plural(taskChecks, 'check')} in eval.md</Text>}
           {n.kind === 'spec' && n.reviewers.map(r => reviewerLine(r))}
           {(n.kind === 'plan' || n.kind === 'review') && n.round > 0 && (
@@ -1097,7 +1131,7 @@ export const register: Register = (on, options) => {
               {n.reviewers.map(r => reviewerLine(r, n.tree?.round === n.round ? n.rereviewBy[r.role] ?? 0 : 0))}
               {/* While round N+1 reviews, the tree shows round N, whose drops aren't this round's. */}
               {roundVoter(n)}
-              {n.kind === 'plan' && stepsPart({ isPressable: t.files !== null })}
+              {stepsPart({ isPressable: t.files !== null, filesKey: n.kind === 'review' && filesRow ? filesKey : undefined })}
               {n.kind === 'plan'
                 ? findingsTree(t.slug, n.tree, t.risk === 'HIGH', treeWidth, planChange, planChange ? changeHeader('plan', planChange, t.planSteps) : undefined)
                 : filesRow ?? codeTree(n.tree)}
@@ -1126,12 +1160,14 @@ export const register: Register = (on, options) => {
               {reportLine('security', n.blind.security, k => k ? `${k} IMPORTANT` : 'clean')}
               {reportLine('triage', n.blind.caused, k => k ? `${plural(k, 'item')} caused by this change` : 'nothing caused by this change')}
               {/* HALTED after a blind run: the Review tree, unfolded, under the blind test's rows. */}
+              {stepsPart({ isPressable: t.files !== null, filesKey: t.status !== 'HALTED' && filesRow ? filesKey : undefined })}
               {t.status === 'HALTED' && codeChange ? codeTree(t.codeView) : filesRow}
             </Box>
           )}
           {n.kind === 'done' && !(known && known.number > 0) && (
             <Text dimColor>{t.prDrafted ? 'Every stage is done; pr.md is drafted.' : 'Every stage is done.'}</Text>
           )}
+          {n.kind === 'done' && stepsPart({ isPressable: t.files !== null, filesKey })}
           {n.kind === 'done' ? filesRow : null}
           <Box flexDirection="row" gap={1} marginTop={1}>
             {command
