@@ -37,6 +37,16 @@ copy with `/plugin marketplace update`.
   short sha when the list is older than HEAD, and an important finding awaiting re-review counted as
   `1 awaiting re-review`), and the band adds `12 files` once the band itself is 110 columns or more, which a
   docked pane can prevent.
+- **`Plan steps` in the Now card.** In Plan and Build the Now card lists the plan's steps, each as
+  `○ 2 Export endpoint  ✗1  2 files · req 1, 2`: its mark (`✓` built, `●` being built, `○` not yet), its title, the
+  plan review's findings on its lines (in Plan), the files it names, and its requirements. A press highlights the
+  step's files in the tree with a `▎` and a bold name, holding their folders open. From Review on the list folds to
+  one `▸ Plan steps  3 of 3 built` row, kept open or folded per task; from Blind test on, a press on a step opens the
+  folded Files row too.
+- **`● editing` in the file tree.** In Build and review, the file an agent last changed with Write, Edit, or
+  NotebookEdit flashes for 2.5 s and then keeps `●` and `editing` until another file is edited, that agent's
+  turn ends, or the task leaves Build and review, with its folders held open. A file the list doesn't have yet shows
+  as a live `● editing unplanned` row until the next record. Edits made through Bash don't show.
 - **The stop check skips an unchanged tree.** After a pass, the Stop hook writes a key for the tree the checks ran
   in to `.tasks/<task>/verify-pass`: `HEAD`, the staged and unstaged diffs, the untracked files outside `.tasks/`,
   the verify script, `verify_timeout_s` and the plugin version. A later stop with the same key exits at once without
@@ -71,6 +81,9 @@ copy with `/plugin marketplace update`.
 
 ### Fixed
 
+- **A Write or Edit under `.tasks/` given with backslashes refreshes the dashboard.** A Windows path such as
+  `C:\repo\.tasks\csv-export\review\round-1-logic.md` used to be missed, leaving the pane stale until the next
+  refresh.
 - **`quorum-findings scope` matches absolute paths.** A finding cited with an absolute path (the repo's root, its
   `pwd -P` form, a task worktree's, or a Windows `C:\…`, `C:/…` or Git Bash `/c/…` path, the drive letter in either
   case) used to be dropped as outside the change; it's now matched like the relative path. A cited file's
