@@ -136,7 +136,7 @@ const settle = async () => {
 // `o.cwd`: the session's cwd, read on each call (`root` when not given); `o.clock: false` leaves `clock.now` and
 // `clock.every` to the test, so `mock.clock(on)` can drive time (the engine takes one unmatched hook per event).
 function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Record<string, number> = {}, links: string[] = [], o: { cwd?: string; clock?: false } = {}) {
-  const seen = { status: [] as (string | undefined)[], toasts: [] as string[], opened: 0, ticks: 0, live: [] as string[], copied: [] as string[], filled: [] as string[], draft: '', reads: [] as string[] }
+  const seen = { status: [] as (string | undefined)[], toasts: [] as string[], opened: 0, ticks: 0, live: [] as string[], copied: [] as string[], filled: [] as string[], draft: '', reads: [] as string[], writes: [] as string[] }
   // Paths are relative to `root`, or absolute (a worktree's session reads the main working tree's .tasks/).
   const abs = (path: string) => (path.startsWith('/') ? path : `${root}/${path}`)
   const file = (path: string) => Object.entries(files).find(([k]) => abs(k) === path)?.[1]
@@ -181,6 +181,8 @@ function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Re
     return { value: text }
   })
   on('fs.exists', (_, e) => { seen.reads.push(e.path); return { value: file(e.path) !== undefined } })
+  // `seen.writes`: every path the dashboard wrote; the write lands in `files`.
+  on('fs.write', (_, e) => { seen.writes.push(e.path); files[e.path] = e.text; return { value: undefined } })
   if (o.clock !== false) on('clock.now', () => ({ value: 1_000 }))
   on('ui.status', (_, e) => { seen.status.push(e.text); return { value: undefined } })
   on('ui.toast', (_, e) => { seen.toasts.push(e.text); return { value: undefined } })
@@ -3196,13 +3198,14 @@ test('during Build each step shows built, being built, or not yet', async ($, on
 test('no step row is wider than the card and long titles are cut at the end', async ($, on) => {
   const LONG = 'Long title for a step '.repeat(5).slice(0, 90)
   const plan = `# Plan\n\n## Steps\n1. **${LONG}** — \`app/report.py\` · requirements: 1, 2, 3, 4, 5, 6, 7, 8\n2. **Quote commas** — \`app/util.py\` · requirements: 2\n3. **Docs** — \`README.md\`\n`
-  world(on, {
+  const files: Record<string, string> = {
     ...inRounds([survivorsMd(impAt('.tasks/export-csv/plan.md:4'))], { dir: 'plan-review' }),
     [PLAN]: plan,
     [LIST]: filesTsv(STEPS_FILES, { base: '-' }),
-  })
+  }
+  world(on, files)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  const pane = await $.ui.mount(ON_TERMINAL)
+  let pane = await $.ui.mount(ON_TERMINAL)
   const rows = await Promise.all([1, 2, 3].map(async n => (await stepRow(pane, n)) ?? ''))
   for (const row of rows) expect(cols(row)).toBeLessThanOrEqual(46)
   // The title is cut at its end, before the marks; the requirements list is cut before the file count.
@@ -3213,6 +3216,23 @@ test('no step row is wider than the card and long titles are cut at the end', as
   expect(new Set(filesEnd).size).toBe(1)
   expect(rows[0]?.indexOf('✗1')).toBe((filesEnd[0] ?? 0) - 7 - 4)
   expect(rows[1]).toMatch(/^○ 2 Quote commas +2 files · req 2 +$/)
+  await pane.unmount()
+
+  // In review the fold row fits too, folded and opened, and so do the step rows it opens.
+  await reload($, files, { ...inRounds([survivorsMd(nitAt('app/report.py:1'))], { extra: builtSteps(1) }), [PLAN]: plan, [LIST]: filesTsv(STEPS_FILES) })
+  pane = await $.ui.mount(ON_TERMINAL)
+  const folded = (await rowOf(pane, STEPS_FOLD)) ?? ''
+  expect(folded).toMatch(/^▸ Plan steps/)
+  expect(cols(folded)).toBeLessThanOrEqual(46)
+  await pane.press({ key: STEPS_FOLD })
+  const opened = (await rowOf(pane, STEPS_FOLD)) ?? ''
+  expect(opened).toMatch(/^▾ Plan steps/)
+  expect(cols(opened)).toBeLessThanOrEqual(46)
+  for (const n of [1, 2, 3]) {
+    const row = (await stepRow(pane, n)) ?? ''
+    expect(row).toMatch(new RegExp(`^[✓○] ${n} `))
+    expect(cols(row)).toBeLessThanOrEqual(46)
+  }
   await pane.unmount()
 
   // Narrower still, the requirements go once fewer than 6 columns are left for them; the files stay.
@@ -3790,16 +3810,18 @@ test('in review an edited planned file shows the dot and editing even though its
 
 test('an edited file missing from the list shows as a live unplanned row until the next record', async ($, on) => {
   const files: Record<string, string> = { ...inRounds([], { status: 'BUILDING', extra: builtSteps(1, 2, 3) }), [PLAN]: STEPS_PLAN, [LIST]: filesTsv(STEPS_FILES) }
-  world(on, files)
+  const seen = world(on, files)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   const before = JSON.stringify(files)
+  const written = seen.writes.length
   await edit($, '/repo/app/new.ts')
   // Under app/, ● with no letter, the name, and editing unplanned, with no counts or step.
   const live = await look($, async p => rowOf(p, `${TREE}app/new.ts`))
   // The fixed clock keeps the flash on, so the lead's last column may hold its bar.
   expect(live).toMatch(/^● {6}[ ▎]new\.ts +editing unplanned *$/)
   expect(await look($, treeKeys)).toContain(`${TREE}app/new.ts`)
-  // The edit wrote nothing.
+  // The edit wrote nothing: no fs.write reached the engine, and no file changed.
+  expect(seen.writes.slice(written)).toEqual([])
   expect(JSON.stringify(files)).toBe(before)
   // The next record replaces it with the recorded row: its letter and counts.
   files[LIST] = filesTsv([...STEPS_FILES, fileRow('A', '7', '0', 'app/new.ts', '-')])
