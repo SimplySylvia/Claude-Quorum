@@ -28,7 +28,8 @@ export type TreeRow = {
 // them, once an unsliced build has its proof), and the paths whose kept IMPORTANT finding is awaiting re-review.
 export type TreeChange = { files: ChangedFile[]; hasPlan: boolean; built: number[]; allBuilt: boolean; rereview: string[] }
 
-export type TreeOptions = { scope: string; width: number; icons: boolean; isHigh: boolean; folds: Record<string, boolean>; change?: TreeChange | null }
+// `selected`: the plan step whose files are lit, each with a `▎` before its bold name, their folders held open.
+export type TreeOptions = { scope: string; width: number; icons: boolean; isHigh: boolean; folds: Record<string, boolean>; change?: TreeChange | null; selected?: number | null }
 
 // ---- Paths
 
@@ -531,6 +532,8 @@ type Entry = {
   file: ChangedFile | null
   isOpen: boolean
   isHidden: boolean
+  // Why a folder is open whatever its fold says: it holds the selected step's files.
+  hold: { step: number } | null
 }
 
 const stateWord = (isOpen: boolean) => (isOpen ? 'open' : 'folded')
@@ -550,6 +553,8 @@ export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
   const rereview = ch?.rereview ?? []
   const { root, other } = build(view?.findings ?? [], ch?.files ?? [])
   const isBig = isBigTree(view, ch)
+  const sel = o.selected ?? null
+  const isLit = (f: ChangedFile | null) => sel !== null && !!f && f.steps.includes(sel)
   const entries: Entry[] = []
   const walk = (dir: FolderNode, depth: number, isHidden: boolean) => {
     for (const child of sorted(dir.folders)) {
@@ -565,21 +570,23 @@ export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
       const nodes = nodesUnder(node)
       // In a big tree a folder starts folded unless it holds an open or ↻ finding, or an unplanned file.
       const hasProblem = () => nodes.some(f => f.findings.some(x => x.state === 'open') || progressOf(f.file, ch) === '*')
-      const isOpen = o.folds[key] ?? (!isBig || hasProblem())
-      entries.push({ kind: 'folder', key, path: node.path, name, depth, counts: countOf(under(node), rereview), files: nodes.length, findings: [], file: null, isOpen, isHidden })
+      // A folder holding the selected step's files is held open; the stored fold is kept for when the hold ends.
+      const hold = sel !== null && nodes.some(f => isLit(f.file)) ? { step: sel } : null
+      const isOpen = hold !== null || (o.folds[key] ?? (!isBig || hasProblem()))
+      entries.push({ kind: 'folder', key, path: node.path, name, depth, counts: countOf(under(node), rereview), files: nodes.length, findings: [], file: null, isOpen, isHidden, hold })
       walk(node, depth + 1, isHidden || !isOpen)
     }
     for (const file of sorted(dir.files)) {
       const key = `${o.scope}:tree:${file.path}`
       const c = countOf(file.findings, rereview)
       const isOpen = o.folds[key] ?? (c.important + c.awaiting + c.nit + c.preExisting + c.dropped > 0 || (o.isHigh && c.fixed > 0))
-      entries.push({ kind: 'file', key, path: file.path, name: file.name, depth, counts: c, files: 1, findings: [...file.findings].sort(byLine), file: file.file, isOpen, isHidden })
+      entries.push({ kind: 'file', key, path: file.path, name: file.name, depth, counts: c, files: 1, findings: [...file.findings].sort(byLine), file: file.file, isOpen, isHidden, hold: null })
     }
   }
   walk(root, 0, false)
   if (other.length > 0) {
     const key = `${o.scope}:tree::other`
-    entries.push({ kind: 'other', key, path: ':other', name: 'other', depth: 0, counts: countOf(other, rereview), files: 0, findings: other, file: null, isOpen: o.folds[key] ?? true, isHidden: false })
+    entries.push({ kind: 'other', key, path: ':other', name: 'other', depth: 0, counts: countOf(other, rereview), files: 0, findings: other, file: null, isOpen: o.folds[key] ?? true, isHidden: false, hold: null })
   }
 
   // Columns are measured over every row, folded or not, so a fold never moves one.
@@ -650,21 +657,26 @@ export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
     if (e.isHidden) continue
     // A file with no findings has nothing to fold.
     const hasFindings = e.findings.length > 0
-    const lead = `${'  '.repeat(e.depth)}${e.kind === 'file' ? (e.isOpen || !hasFindings ? '  ' : '▸ ') : e.isOpen ? '▾ ' : '▸ '}`
+    const lit = e.kind === 'file' && isLit(e.file)
+    const fold = `${'  '.repeat(e.depth)}${e.kind === 'file' ? (e.isOpen || !hasFindings ? '  ' : '▸ ') : e.isOpen ? '▾ ' : '▸ '}`
+    // A lit file's bar takes the lead's last column, always a space, so nothing on the row moves.
+    const lead = lit ? `${fold.slice(0, -1)}▎` : fold
     const cols = leadOf(e)
     const icon = !o.icons || e.kind === 'other' ? null : e.kind === 'folder' ? folderIcon(e.isOpen) : fileIcon(e.name)
     const right = rightOf(e)
     const room = o.width - widthOf(right) - 1 - widthOf(cols) - cellWidth(lead) - (icon ? 3 : 0)
     const name = e.kind === 'folder' ? cutChain(e.name, room) : e.kind === 'file' ? cutMiddle(e.name, room) : e.name
-    const left = fit([...cols, { text: lead }, ...(icon ? [{ text: icon.glyph, color: icon.color }, { text: ' ' }] : []), { text: name }], Math.max(0, o.width - widthOf(right) - 1))
+    const left = fit([...cols, { text: lead }, ...(icon ? [{ text: icon.glyph, color: icon.color }, { text: ' ' }] : []), { text: name, ...(lit ? { bold: true } : {}) }], Math.max(0, o.width - widthOf(right) - 1))
     const gap = Math.max(1, o.width - widthOf(left) - widthOf(right))
     const counts = words(e.counts)
     const label = [
       e.kind === 'folder' ? `${e.path} folder` : e.kind === 'file' ? e.path : 'other',
+      ...(lit ? [`in step ${sel}`] : []),
       ...(e.kind === 'folder' ? [plural(e.files, 'file')] : []),
       ...(e.file && ch ? fileWords(e.file, ch) : []),
       ...counts,
       ...(e.kind !== 'file' || hasFindings ? [stateWord(e.isOpen)] : []),
+      ...(e.hold ? [`held open for step ${e.hold.step}`] : []),
     ].join(', ')
     rows.push({ key: e.key, kind: e.kind, isOpen: e.isOpen, label, parts: fit([...left, { text: ' '.repeat(gap) }, ...right], o.width), more: [], copy: null, confidence: null })
     if (e.kind === 'folder' || !e.isOpen) continue

@@ -3109,6 +3109,11 @@ test('a plan finding is counted on the step whose lines include it', async ($, o
   expect(await stepRow(pane, 2)).toMatch(/^○ 2 Quote commas +✗1  2 files · req 2 {3}$/)
   expect(await stepRow(pane, 3)).toMatch(/^○ 3 Docs +1 file {11}$/)
   expect(await stepRow(pane, 3)).not.toMatch(/✗|↻|n\d|p\d/)
+  // The labels say the same in words.
+  expect(await stepLabel(pane, 1)).toMatch(/^step 1, Read the rows, .*, 1 nit$/)
+  expect(await stepLabel(pane, 2)).toMatch(/^step 2, Quote commas, .*, 1 important$/)
+  expect(await stepLabel(pane, 3)).toMatch(/^step 3, Docs, /)
+  expect(await stepLabel(pane, 3)).not.toMatch(/important|nit|awaiting|pre-existing/)
   // Every finding still shows under plan.md in the tree.
   for (const line of [2, 6, 8, 10]) expect(await rowOf(pane, `${TREE}.tasks/export-csv/plan.md:${line}#0`)).toBeDefined()
   await pane.unmount()
@@ -3133,7 +3138,8 @@ test('during Build each step shows built, being built, or not yet', async ($, on
       ...more,
     }
   }
-  const files: Record<string, string> = building(planMd(4))
+  // One planned file in every step, so the rows are pressable Buttons with their labels.
+  const files: Record<string, string> = building(planMd(4), builtSteps(1), { [LIST]: filesTsv([fileRow('M', '-', '-', 'x', '1,2,3,4')], { base: '-' }) })
   world(on, files)
   on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.description }))
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
@@ -3149,7 +3155,8 @@ test('during Build each step shows built, being built, or not yet', async ($, on
   pane = await $.ui.mount(ON_TERMINAL)
   expect(await marks(pane, [1, 2, 3, 4])).toEqual(['✓ 1', '● 2', '○ 3', '○ 4'])
   for (const n of [1, 2, 3, 4]) {
-    expect(await stepRow(pane, n)).toMatch(/^[✓●○] \d Step \d *$/)
+    expect(await stepRow(pane, n)).toMatch(/^[✓●○] \d Step \d +1 file$/)
+    expect(await stepLabel(pane, n)).toBe(`step ${n}, Step ${n}, ${['built', 'being built', 'not built yet', 'not built yet'][n - 1]}, 1 file`)
     expect(await stepLabel(pane, n)).not.toMatch(/important|nit|awaiting/)
   }
   await pane.unmount()
@@ -3276,6 +3283,7 @@ test('from review on the steps fold to one row that a press opens', async ($, on
   for (const n of [1, 2, 3]) {
     expect(await stepRow(pane, n)).toMatch(/^○ \d \S/)
     expect(await stepRow(pane, n)).not.toMatch(/[●✗↻]|(^|\s)[np]\d/)
+    expect(await stepLabel(pane, n)).toMatch(new RegExp(`^step ${n}, .+, not built yet, \\d files?`))
     expect(await stepLabel(pane, n)).not.toMatch(/important|nit|awaiting|being built/)
   }
   await pane.press({ key: STEPS_FOLD })
@@ -3295,6 +3303,141 @@ test('from review on the steps fold to one row that a press opens', async ($, on
   pane = await $.ui.mount(ON_TERMINAL)
   expect(await pane.find({ type: 'Button', key: STEPS_FOLD })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /Plan steps/ })).toBeUndefined()
+  await pane.unmount()
+})
+
+// The Text a tree row draws its name in, found among the Button's parts.
+const isBoldName = async (pane: Drawn, key: string) => (await partOf(pane, key, key.split(':tree:')[1]?.split('/').at(-1) ?? ''))?.props?.bold === true
+const isLit = async (pane: Drawn, key: string) => ((await rowOf(pane, key)) ?? '').includes('▎') && (await isBoldName(pane, key))
+
+test('pressing a step highlights its files and opens their folders, and a second press clears it', async ($, on) => {
+  // Build with 16 files, so every clean folder starts folded: a/ holds step 1's 13 files, b/ and b/deep/ step 2's,
+  // c/ step 3's; step 4 names no file.
+  const plan = '# Plan\n\n## Steps\n1. **One** — `a`\n2. **Two** — `b`\n3. **Three** — `c`\n4. **Four** — `d`\n'
+  const sixteen = [
+    ...Array.from({ length: 13 }, (_, i) => fileRow('M', '1', '0', `a/f${String(i).padStart(2, '0')}.ts`, '1')),
+    fileRow('M', '1', '0', 'b/x.ts', '2'),
+    fileRow('A', '1', '0', 'b/deep/y.ts', '2'),
+    fileRow('M', '1', '0', 'c/z.ts', '3'),
+  ]
+  const files: Record<string, string> = { ...inRounds([], { status: 'BUILDING', extra: builtSteps(1) }), [PLAN]: plan, [LIST]: filesTsv(sixteen) }
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const B = `${TREE}b/`
+  // In the tree's order: b/deep/ before b/'s own files.
+  const STEP2 = [`${TREE}b/deep/y.ts`, `${TREE}b/x.ts`]
+  const indexOf = async (pane: Drawn, key: string) => (await treeKeys(pane)).indexOf(key)
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Button', key: `${STEP}2` })).toBeDefined()
+  expect(await rowOf(pane, B)).toMatch(/▸ b\//)
+  for (const key of STEP2) expect(await pane.find({ type: 'Button', key })).toBeUndefined()
+  const before = await indexOf(pane, B)
+  expect(before).toBeGreaterThan(-1)
+
+  // Step 2: its files are lit, and the folders above them are held open, in place.
+  await pane.press({ key: `${STEP}2` })
+  expect(await rowOf(pane, B)).toMatch(/▾ b\//)
+  expect(await indexOf(pane, B)).toBe(before)
+  expect((await pane.find({ type: 'Button', key: B }))?.props.label).toContain('held open for step 2')
+  expect((await pane.find({ type: 'Button', key: `${TREE}b/deep/` }))?.props.label).toContain('held open for step 2')
+  for (const key of STEP2) expect(await isLit(pane, key)).toBe(true)
+  expect(await pane.find({ type: 'Text', text: "step 2's files are highlighted" })).toBeDefined()
+  expect((await treeButtons(pane)).filter(b => b.text.includes('▎')).map(b => b.key)).toEqual(STEP2)
+  // The lit row's columns don't move: the bar takes the lead's last space.
+  expect(((await rowOf(pane, `${TREE}b/x.ts`)) ?? '').replace('▎', ' ')).toMatch(/^○ M {5}x\.ts/)
+
+  // A second press clears both.
+  await pane.press({ key: `${STEP}2` })
+  expect(await rowOf(pane, B)).toMatch(/▸ b\//)
+  expect(await indexOf(pane, B)).toBe(before)
+  expect((await pane.find({ type: 'Button', key: B }))?.props.label).not.toContain('held open')
+  for (const key of STEP2) expect(await pane.find({ type: 'Button', key })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: 'press a step to highlight its files' })).toBeDefined()
+
+  // Step 1 then step 3 moves the highlight.
+  await pane.press({ key: `${STEP}1` })
+  expect(await isLit(pane, `${TREE}a/f00.ts`)).toBe(true)
+  expect(await rowOf(pane, `${TREE}c/`)).toMatch(/▸ c\//)
+  await pane.press({ key: `${STEP}3` })
+  expect(await pane.find({ type: 'Button', key: `${TREE}a/f00.ts` })).toBeUndefined()
+  expect(await rowOf(pane, `${TREE}a/`)).toMatch(/▸ a\//)
+  expect(await isLit(pane, `${TREE}c/z.ts`)).toBe(true)
+  expect(await pane.find({ type: 'Text', text: "step 3's files are highlighted" })).toBeDefined()
+
+  // A step with no files selects nothing, and doesn't throw.
+  await pane.press({ key: `${STEP}4` })
+  expect((await treeButtons(pane)).some(b => b.text.includes('▎'))).toBe(false)
+  expect(await rowOf(pane, `${TREE}c/`)).toMatch(/▸ c\//)
+  expect(await pane.find({ type: 'Text', text: 'press a step to highlight its files' })).toBeDefined()
+  await pane.unmount()
+
+  // READY with the Files row folded and the steps fold opened: a step press opens Files to show its lit files.
+  const changed = [fileRow('M', '5', '1', 'app/report.py', '1'), fileRow('A', '9', '0', 'app/util.py', '2'), fileRow('M', '2', '0', 'README.md', '2,3')]
+  await reload($, files, { ...inRounds([survivorsMd(nitAt('app/report.py:1'))], { status: 'READY', extra: builtSteps(1, 2, 3) }), [PLAN]: STEPS_PLAN, [LIST]: filesTsv(changed) })
+  pane = await $.ui.mount(ON_TERMINAL)
+  await pane.press({ key: STEPS_FOLD })
+  expect((await pane.find({ type: 'Button', key: FILES_ROW }))?.props.label).toMatch(/folded$/)
+  expect(await treeKeys(pane)).toEqual([])
+  await pane.press({ key: `${STEP}2` })
+  expect((await pane.find({ type: 'Button', key: FILES_ROW }))?.props.label).toMatch(/open$/)
+  for (const key of [`${TREE}app/util.py`, `${TREE}README.md`]) expect(await isLit(pane, key)).toBe(true)
+  expect(((await rowOf(pane, `${TREE}app/report.py`)) ?? '')).not.toContain('▎')
+  await pane.press({ key: `${STEP}2` })
+  expect((await treeButtons(pane)).some(b => b.text.includes('▎'))).toBe(false)
+  expect((await pane.find({ type: 'Button', key: FILES_ROW }))?.props.label).toMatch(/open$/)
+  await pane.unmount()
+
+  // No tree under the rows: PLANNING before the first round, and IN_REVIEW at round 0 with the fold opened. The
+  // rows are drawn, but not as Buttons, and nothing invites a press.
+  for (const status of ['PLANNING', 'IN_REVIEW']) {
+    await reload($, files, { ...inRounds([], { status }), [PLAN]: STEPS_PLAN, [LIST]: filesTsv(changed) })
+    pane = await $.ui.mount(ON_TERMINAL)
+    // The READY case above left the steps fold stored open; open it only if it isn't.
+    if (status === 'IN_REVIEW' && (await rowOf(pane, STEPS_FOLD))?.startsWith('▸')) await pane.press({ key: STEPS_FOLD })
+    if (status === 'IN_REVIEW') expect(await rowOf(pane, STEPS_FOLD)).toMatch(/^▾ Plan steps/)
+    expect(await pane.find({ type: 'Text', text: /Quote commas/ })).toBeDefined()
+    expect(await pane.find({ type: 'Button', key: `${STEP}2` })).toBeUndefined()
+    expect(await pane.find({ type: 'Text', text: /press a step|files are highlighted/ })).toBeUndefined()
+    await pane.unmount()
+  }
+})
+
+test('step rows and the folded row are labelled in words', async ($, on) => {
+  // Plan, round 1: an IMPORTANT on step 2's line and a NIT on step 1's.
+  const files: Record<string, string> = {
+    ...inRounds([survivorsMd(impAt(`${PLAN}:8`), nitAt(`${PLAN}:6`))], { dir: 'plan-review' }),
+    [PLAN]: STEPS_PLAN,
+    [LIST]: filesTsv(STEPS_FILES, { base: '-' }),
+  }
+  world(on, files)
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.description }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect(await stepLabel(pane, 1)).toBe('step 1, Read the rows, not built yet, 1 file, requirements 1 and 2, 1 nit')
+  expect(await stepLabel(pane, 2)).toBe('step 2, Quote commas, not built yet, 2 files, requirement 2, 1 important')
+  expect(await stepLabel(pane, 3)).toBe('step 3, Docs, not built yet, 1 file')
+  // Selected, the row says so, and its files in the plan tree say which step lit them.
+  await pane.press({ key: `${STEP}2` })
+  expect(await stepLabel(pane, 2)).toBe('step 2, Quote commas, not built yet, 2 files, requirement 2, 1 important, selected')
+  expect(await stepLabel(pane, 1)).not.toContain('selected')
+  for (const key of [`${TREE}app/util.py`, `${TREE}README.md`]) expect((await pane.find({ type: 'Button', key }))?.props.label).toMatch(/^[^,]+, in step 2, /)
+  expect((await pane.find({ type: 'Button', key: `${TREE}app/report.py` }))?.props.label).not.toContain('in step')
+  await pane.press({ key: `${STEP}2` })
+  await pane.unmount()
+
+  // Build with step 1 built and a builder running: built, being built, not built yet.
+  await reload($, files, { ...inRounds([], { status: 'BUILDING', extra: builtSteps(1) }), [PLAN]: STEPS_PLAN, [LIST]: filesTsv(STEPS_FILES) })
+  await $.agent.spawn({ tool_use_id: 'b1', prompt: 'Build step 2', description: 'b1', subagentType: 'quorum:builder', parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await stepLabel(pane, 1)).toBe('step 1, Read the rows, built, 1 file, requirements 1 and 2')
+  expect(await stepLabel(pane, 2)).toBe('step 2, Quote commas, being built, 2 files, requirement 2')
+  expect(await stepLabel(pane, 3)).toBe('step 3, Docs, not built yet, 1 file')
+  await pane.unmount()
+
+  // The folded row says how many steps are built of how many.
+  await reload($, files, { ...inRounds([survivorsMd(nitAt('app/report.py:1'))], { extra: builtSteps(1, 2) }), [PLAN]: STEPS_PLAN, [LIST]: filesTsv(STEPS_FILES) })
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect((await pane.find({ type: 'Button', key: STEPS_FOLD }))?.props.label).toContain('2 of 3 steps built')
   await pane.unmount()
 })
 

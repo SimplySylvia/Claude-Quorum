@@ -31,6 +31,8 @@ const PR_TTL_MS = 2 * 60 * 1000
 // Bumped every second while a Quorum agent runs, so the pane's running times count up.
 const clock = atom({ plugin: 'quorum', key: 'now' } as const, 0)
 let ticker: Timer | null = null
+// The plan step whose files the tree highlights, chosen by a press on its row. Kept in memory only, never stored.
+let selected: { slug: string; n: number } | null = null
 
 // Statuses worth interrupting for.
 const TOASTS: Record<string, string> = {
@@ -508,6 +510,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: COMMAND, description: "Show or hide the Quorum task dashboard" })
     await settleAgents($)
+    selected = null
     // The band above the prompt says it all, so Quorum keeps no status line; clear one an earlier version set.
     $.ui.status(undefined)
     if ((await refresh($, maxRounds)) || liveReview(await read($, reviews))) void open($)
@@ -692,7 +695,8 @@ export const register: Register = (on, options) => {
     ))
     // With a recorded `change`, the tree holds its files too, and `header` (the Plan or Build one) replaces the
     // findings header. Past 15 files a line says the clean folders start folded.
-    const findingsTree = (id: string, view: FindingsView | null, isHigh: boolean, width: number, change: TreeChange | null = null, header?: string) => {
+    // `selected`: the plan step whose files are highlighted, their folders held open.
+    const findingsTree = (id: string, view: FindingsView | null, isHigh: boolean, width: number, change: TreeChange | null = null, header?: string, selected: number | null = null) => {
       const head = treeHeader(view, width, change)
       if (!head) return null
       const title = header ?? head.header
@@ -703,7 +707,7 @@ export const register: Register = (on, options) => {
           {head.key.map((parts, i) => (
             <Box key={`${id}:tree-key-${i}`}><Text wrap="truncate-end">{partsOf(`${id}:tree-key-${i}`, parts)}</Text></Box>
           ))}
-          {treeRows(view, { scope: id, width, icons: iconsOn(fileIcons, e.surface), isHigh, folds, change }).flatMap(row => {
+          {treeRows(view, { scope: id, width, icons: iconsOn(fileIcons, e.surface), isHigh, folds, change, selected }).flatMap(row => {
             // A finding dropped on dispute is drawn dim throughout.
             const isDim = row.kind === 'finding' && row.parts.every(p => p.dim)
             const confidence = row.kind === 'finding' && row.isOpen ? confidenceRow(row, width) : []
@@ -936,7 +940,15 @@ export const register: Register = (on, options) => {
     const planChange = changeOf((t.files?.files ?? []).filter(f => f.steps.length > 0), [])
     const codeChange = changeOf(t.files?.files ?? [], t.rereview)
     const buildHeader = codeChange ? changeHeader('build', codeChange, t.planSteps) : undefined
-    const codeTree = (view: FindingsView | null) => findingsTree(t.slug, view, t.risk === 'HIGH', treeWidth, codeChange, view ? undefined : buildHeader)
+    // The steps fold, from Review on, kept open or folded per task like the Files row.
+    const stepsKey = `${t.slug}:steps`
+    const isStepsOpen = folds[stepsKey] ?? false
+    // A step selection reaches the tree only while pressable step rows are drawn above it: in Plan (from round 1)
+    // and Build, or with the steps fold open, over a files.tsv, for this task and a step its plan still has.
+    const isStepsDrawn = !t.isFast && t.steps.length > 0 && (t.status === 'PLANNING' || t.status === 'BUILDING' || (FOLDED_STEPS.includes(t.status) && isStepsOpen))
+    const isTreeUnder = n.kind !== 'spec' && !((n.kind === 'plan' || n.kind === 'review') && n.round === 0)
+    const selectedStep = isStepsDrawn && isTreeUnder && t.files !== null && selected?.slug === t.slug && t.steps.some(s => s.n === selected?.n) ? selected.n : null
+    const codeTree = (view: FindingsView | null) => findingsTree(t.slug, view, t.risk === 'HIGH', treeWidth, codeChange, view ? undefined : buildHeader, selectedStep)
     // The footprint: the change's files, lines, and latest verdict, once the build has a base. Each item is its own
     // Text after a ` · `, so a wrapped line breaks only between items.
     const fp = t.files ? footprint(t.files, t.rounds, t.head, awaitingOf(t.codeView, t.rereview)) : null
@@ -988,20 +1000,32 @@ export const register: Register = (on, options) => {
       mark: t.status === 'PLANNING' ? '○' : progress.allBuilt || progress.built.includes(s.n) ? '✓' : s.n === beingBuilt ? '●' : '○',
       files: t.files ? t.files.files.filter(f => f.steps.includes(s.n)).length : null,
       findings: t.status === 'PLANNING' && n.kind === 'plan' ? stepFindings(n.tree, `.tasks/${t.slug}/plan.md`, s, []) : null,
-      isSelected: false,
+      isSelected: s.n === selectedStep,
     }))
-    // `isPressable`: a file tree is drawn under the rows, so the hint says a press highlights a step's files.
-    // From Review on, the list folds to one row, kept open or folded per task like the Files row.
-    const stepsKey = `${t.slug}:steps`
-    const isStepsOpen = folds[stepsKey] ?? false
+    // A press on a step selects it, or clears it when it is already selected or names no file. A selection opens
+    // a folded Files row (`filesKey`), stored as the person's own choice, so the lit files show.
+    const pressStep = (step: number, files: number | null, filesKey?: string) => {
+      selected = !files || step === selectedStep ? null : { slug: t.slug, n: step }
+      if (selected && filesKey && folds[filesKey] !== true) void update($, sections, all => ({ ...all, [filesKey]: true }))
+      $.ui.invalidate('ui.render')
+    }
+    // `isPressable`: a file tree is drawn under the rows, so each row is a Button and the hint says what a press
+    // does; without one they are plain rows. From Review on, the list folds to one row.
     const stepsPart = (opts: { isPressable: boolean; filesKey?: string }) => {
       if (t.isFast || t.steps.length === 0) return null
       const isFolding = FOLDED_STEPS.includes(t.status)
       if (!isFolding && t.status !== 'PLANNING' && t.status !== 'BUILDING') return null
-      const hint = opts.isPressable ? <Text dimColor wrap="truncate-end">press a step to highlight its files</Text> : null
-      const rows = stepRows(stepLines(), treeWidth).map(row => (
-        <Box key={`${t.slug}:step:${row.n}`}><Text wrap="truncate-end">{partsOf(`${t.slug}:step:${row.n}`, row.parts)}</Text></Box>
-      ))
+      const hint = opts.isPressable
+        ? <Text dimColor wrap="truncate-end">{selectedStep === null ? 'press a step to highlight its files' : `step ${selectedStep}'s files are highlighted`}</Text>
+        : null
+      const lines = stepLines()
+      const rows = stepRows(lines, treeWidth).map(row => {
+        const key = `${t.slug}:step:${row.n}`
+        const text = <Text wrap="truncate-end">{partsOf(key, row.parts)}</Text>
+        if (!opts.isPressable) return <Box key={key}>{text}</Box>
+        const files = lines.find(l => l.n === row.n)?.files ?? null
+        return <Button key={key} plain hover={{ color: 'claude' }} label={row.label} onPress={() => pressStep(row.n, files, opts.filesKey)}>{text}</Button>
+      })
       if (!isFolding) {
         return (
           <Box key={`${t.slug}:steps-list`} flexDirection="column">
@@ -1133,7 +1157,7 @@ export const register: Register = (on, options) => {
               {roundVoter(n)}
               {stepsPart({ isPressable: t.files !== null, filesKey: n.kind === 'review' && filesRow ? filesKey : undefined })}
               {n.kind === 'plan'
-                ? findingsTree(t.slug, n.tree, t.risk === 'HIGH', treeWidth, planChange, planChange ? changeHeader('plan', planChange, t.planSteps) : undefined)
+                ? findingsTree(t.slug, n.tree, t.risk === 'HIGH', treeWidth, planChange, planChange ? changeHeader('plan', planChange, t.planSteps) : undefined, selectedStep)
                 : filesRow ?? codeTree(n.tree)}
             </Box>
           )}
