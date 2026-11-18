@@ -28,8 +28,13 @@ export type TreeRow = {
 // them, once an unsliced build has its proof), and the paths whose kept IMPORTANT finding is awaiting re-review.
 export type TreeChange = { files: ChangedFile[]; hasPlan: boolean; built: number[]; allBuilt: boolean; rereview: string[] }
 
+// The file being edited, repo-relative, and whether its row is still flashing.
+export type TreeEdit = { path: string; isFlash: boolean }
+
 // `selected`: the plan step whose files are lit, each with a `▎` before its bold name, their folders held open.
-export type TreeOptions = { scope: string; width: number; icons: boolean; isHigh: boolean; folds: Record<string, boolean>; change?: TreeChange | null; selected?: number | null }
+// `edit`: the file being edited, shown `●` and `editing` with its folders held open, as a live row when the list
+// doesn't hold it, and lit in the claude colour while it flashes.
+export type TreeOptions = { scope: string; width: number; icons: boolean; isHigh: boolean; folds: Record<string, boolean>; change?: TreeChange | null; selected?: number | null; edit?: TreeEdit | null }
 
 // ---- Paths
 
@@ -418,7 +423,7 @@ export const iconsOn = (option: unknown, surface: string) => option === 'nerd' &
 
 // ---- The recorded change
 
-type Progress = '✓' | '○' | '*' | ''
+type Progress = '✓' | '○' | '●' | '*' | ''
 
 // A file's progress against the plan: `✓` when every step that names it is built and the file has changed, `○` when
 // one isn't built yet or the file is only planned, `*` when no step names it; blank for a file the list doesn't hold,
@@ -427,10 +432,19 @@ const progressOf = (c: ChangedFile | null, ch: TreeChange | null): Progress =>
   !c || !ch?.hasPlan ? '' : c.steps.length === 0 ? '*'
     : c.added !== null && (ch.allBuilt || c.steps.every(n => ch.built.includes(n))) ? '✓' : '○'
 
+// Whether the edit of `path` shows its `●`: always, except in Build on a file some step names whose steps are all
+// built, none of them the one being built, where the file keeps its own mark.
+export function isEditShown(path: string, ch: TreeChange, isBuilding: boolean, beingBuilt: number | null): boolean {
+  const c = ch.files.find(f => f.path === path)
+  if (!isBuilding || !c || c.steps.length === 0) return true
+  return !c.steps.every(n => (ch.allBuilt || ch.built.includes(n)) && n !== beingBuilt)
+}
+
 // The lead marks, in the order the key names them.
 const PROGRESS = [
   { glyph: '✓', word: 'built', color: 'success' },
   { glyph: '○', word: 'not yet', color: null },
+  { glyph: '●', word: 'editing', color: 'claude' },
   { glyph: '*', word: 'unplanned', color: null },
 ] as const
 
@@ -532,8 +546,8 @@ type Entry = {
   file: ChangedFile | null
   isOpen: boolean
   isHidden: boolean
-  // Why a folder is open whatever its fold says: it holds the selected step's files.
-  hold: { step: number } | null
+  // Why a folder is open whatever its fold says: it holds the file being edited, or the selected step's files.
+  hold: 'editing' | { step: number } | null
 }
 
 const stateWord = (isOpen: boolean) => (isOpen ? 'open' : 'folded')
@@ -552,7 +566,11 @@ export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
   if (!view && !ch) return []
   const rereview = ch?.rereview ?? []
   const { root, other } = build(view?.findings ?? [], ch?.files ?? [])
+  // Measured before the live row goes in, so it never tips the tree past 15 files.
   const isBig = isBigTree(view, ch)
+  // The edited file's node, placed as a live row (no file) when the list doesn't hold it.
+  const edited = o.edit && ch ? place(root, o.edit.path) : null
+  const isEdited = (e: { kind: string; path: string }) => edited !== null && e.kind === 'file' && e.path === edited.path
   const sel = o.selected ?? null
   const isLit = (f: ChangedFile | null) => sel !== null && !!f && f.steps.includes(sel)
   const entries: Entry[] = []
@@ -570,8 +588,9 @@ export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
       const nodes = nodesUnder(node)
       // In a big tree a folder starts folded unless it holds an open or ↻ finding, or an unplanned file.
       const hasProblem = () => nodes.some(f => f.findings.some(x => x.state === 'open') || progressOf(f.file, ch) === '*')
-      // A folder holding the selected step's files is held open; the stored fold is kept for when the hold ends.
-      const hold = sel !== null && nodes.some(f => isLit(f.file)) ? { step: sel } : null
+      // A folder holding the edited file or the selected step's files is held open; the stored fold is kept for when
+      // the hold ends.
+      const hold = edited !== null && nodes.includes(edited) ? 'editing' : sel !== null && nodes.some(f => isLit(f.file)) ? { step: sel } : null
       const isOpen = hold !== null || (o.folds[key] ?? (!isBig || hasProblem()))
       entries.push({ kind: 'folder', key, path: node.path, name, depth, counts: countOf(under(node), rereview), files: nodes.length, findings: [], file: null, isOpen, isHidden, hold })
       walk(node, depth + 1, isHidden || !isOpen)
@@ -607,22 +626,29 @@ export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
   // The change's columns: progress and letter at the start; the unplanned word, line counts, and step before the marks.
   const countText = (e: Entry): TreePart[] => (e.kind === 'folder' ? [{ text: plural(e.files, 'file'), dim: true }] : countParts(e.file))
   const stepText = (e: Entry) => (e.file && e.file.steps.length > 0 ? `s${Math.min(...e.file.steps)}` : '')
-  const isUnplanned = (e: Entry) => e.kind === 'file' && progressOf(e.file, ch) === '*'
+  const isUnplanned = (e: Entry) => e.kind === 'file' && (progressOf(e.file, ch) === '*' || (isEdited(e) && !e.file && !!ch?.hasPlan))
+  // The word slot: `editing` and `unplanned`, each when it applies.
+  const wordsOf = (e: Entry): TreePart[] => [
+    ...(isEdited(e) ? [{ text: 'editing', color: 'claude' }] : []),
+    ...(isEdited(e) && isUnplanned(e) ? [{ text: ' ' }] : []),
+    ...(isUnplanned(e) ? [{ text: 'unplanned', dim: true }] : []),
+  ]
   const countWidth = Math.max(7, ...entries.map(e => widthOf(countText(e))))
   const stepWidth = Math.max(2, ...entries.map(e => cellWidth(stepText(e))))
   const markWidth = view ? Math.max(6, blockWidth) : 0
-  const WORD = 'unplanned'
-  let hasWord = entries.some(isUnplanned)
+  let hasWord = entries.some(e => wordsOf(e).length > 0)
   let hasStep = true
   let hasCount = true
   const rightWidth = () => {
     const cols = (hasCount ? countWidth : 0) + (hasCount && hasStep ? 1 : 0) + (hasStep ? stepWidth : 0)
     return cols + (view ? (cols > 0 ? 2 : 0) + markWidth : 0)
   }
-  const leadWidth = ch ? (ch.hasPlan ? 2 : 0) + 2 : 0
+  // The progress column shows with a plan, or for an edit's `●`.
+  const hasProgress = !!ch && (ch.hasPlan || edited !== null)
+  const leadWidth = ch ? (hasProgress ? 2 : 0) + 2 : 0
   // The widest file row at its least: the lead, indent and icon, a 4-column name, a gap, the word, and the right block.
   const need = () => Math.max(0, ...entries.filter(e => e.kind === 'file').map(e =>
-    leadWidth + 2 * e.depth + 2 + (o.icons ? 3 : 0) + Math.min(4, cellWidth(e.name)) + 1 + (hasWord && isUnplanned(e) ? cellWidth(WORD) + 1 : 0) + rightWidth()))
+    leadWidth + 2 * e.depth + 2 + (o.icons ? 3 : 0) + Math.min(4, cellWidth(e.name)) + 1 + (hasWord && wordsOf(e).length > 0 ? widthOf(wordsOf(e)) + 1 : 0) + rightWidth()))
   // What gives way when that doesn't fit, decided once for the view: the word, then the step, then the counts.
   if (ch && need() > o.width) hasWord = false
   if (ch && need() > o.width) hasStep = false
@@ -630,11 +656,11 @@ export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
 
   const leadOf = (e: Entry): TreePart[] => {
     if (!ch) return []
-    const p = e.kind === 'file' ? progressOf(e.file, ch) : ''
+    const p = isEdited(e) ? '●' : e.kind === 'file' ? progressOf(e.file, ch) : ''
     const mark = PROGRESS.find(m => m.glyph === p)
     const letter = e.kind === 'file' && e.file ? e.file.letter : ''
     return [
-      ...(ch.hasPlan ? [mark ? markPart(mark.glyph, mark.color) : { text: ' ' }, { text: ' ' }] : []),
+      ...(hasProgress ? [mark ? markPart(mark.glyph, mark.color) : { text: ' ' }, { text: ' ' }] : []),
       letter ? { text: letter, ...(e.file?.added === null ? { dim: true } : {}) } : { text: ' ' },
       { text: ' ' },
     ]
@@ -644,7 +670,7 @@ export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
     const count = countText(e)
     const step = stepText(e)
     return [
-      ...(hasWord && isUnplanned(e) ? [{ text: WORD, dim: true }, { text: ' ' }] : []),
+      ...(hasWord && wordsOf(e).length > 0 ? [...wordsOf(e), { text: ' ' }] : []),
       ...(hasCount ? [...pad(countWidth - widthOf(count)), ...count] : []),
       ...(hasCount && hasStep ? [{ text: ' ' }] : []),
       ...(hasStep ? [...pad(stepWidth - cellWidth(step)), ...(step ? [{ text: step }] : [])] : []),
@@ -658,25 +684,31 @@ export function treeRows(view: FindingsView | null, o: TreeOptions): TreeRow[] {
     // A file with no findings has nothing to fold.
     const hasFindings = e.findings.length > 0
     const lit = e.kind === 'file' && isLit(e.file)
+    // A flashing edit is lit in the claude colour, over a selection's plain highlight.
+    const flash = isEdited(e) && !!o.edit?.isFlash
     const fold = `${'  '.repeat(e.depth)}${e.kind === 'file' ? (e.isOpen || !hasFindings ? '  ' : '▸ ') : e.isOpen ? '▾ ' : '▸ '}`
     // A lit file's bar takes the lead's last column, always a space, so nothing on the row moves.
-    const lead = lit ? `${fold.slice(0, -1)}▎` : fold
+    const lead = lit || flash ? `${fold.slice(0, -1)}▎` : fold
+    const leadParts: TreePart[] = flash ? [{ text: fold.slice(0, -1) }, { text: '▎', color: 'claude' }] : [{ text: lead }]
     const cols = leadOf(e)
     const icon = !o.icons || e.kind === 'other' ? null : e.kind === 'folder' ? folderIcon(e.isOpen) : fileIcon(e.name)
     const right = rightOf(e)
     const room = o.width - widthOf(right) - 1 - widthOf(cols) - cellWidth(lead) - (icon ? 3 : 0)
     const name = e.kind === 'folder' ? cutChain(e.name, room) : e.kind === 'file' ? cutMiddle(e.name, room) : e.name
-    const left = fit([...cols, { text: lead }, ...(icon ? [{ text: icon.glyph, color: icon.color }, { text: ' ' }] : []), { text: name, ...(lit ? { bold: true } : {}) }], Math.max(0, o.width - widthOf(right) - 1))
+    const nameStyle = flash ? { bold: true, color: 'claude' } : lit ? { bold: true } : {}
+    const left = fit([...cols, ...leadParts.filter(p => p.text !== ''), ...(icon ? [{ text: icon.glyph, color: icon.color }, { text: ' ' }] : []), { text: name, ...nameStyle }], Math.max(0, o.width - widthOf(right) - 1))
     const gap = Math.max(1, o.width - widthOf(left) - widthOf(right))
     const counts = words(e.counts)
     const label = [
       e.kind === 'folder' ? `${e.path} folder` : e.kind === 'file' ? e.path : 'other',
+      ...(isEdited(e) ? ['editing'] : []),
+      ...(isEdited(e) && !e.file && isUnplanned(e) ? ['unplanned'] : []),
       ...(lit ? [`in step ${sel}`] : []),
       ...(e.kind === 'folder' ? [plural(e.files, 'file')] : []),
       ...(e.file && ch ? fileWords(e.file, ch) : []),
       ...counts,
       ...(e.kind !== 'file' || hasFindings ? [stateWord(e.isOpen)] : []),
-      ...(e.hold ? [`held open for step ${e.hold.step}`] : []),
+      ...(e.hold === 'editing' ? ['held open while editing'] : e.hold ? [`held open for step ${e.hold.step}`] : []),
     ].join(', ')
     rows.push({ key: e.key, kind: e.kind, isOpen: e.isOpen, label, parts: fit([...left, { text: ' '.repeat(gap) }, ...right], o.width), more: [], copy: null, confidence: null })
     if (e.kind === 'folder' || !e.isOpen) continue
@@ -753,14 +785,15 @@ function keyLines(entries: { glyph: TreePart; word: string }[], width: number): 
 }
 
 // The tree's header, and its key: the marks the view shows, in order, then on their own lines the lead marks the
-// change shows (`✓ built  ○ not yet  * unplanned`). No mark key when the view has no rows; no header ('') with no
-// view, as in Build; null with neither a view nor a change.
-export function treeHeader(view: FindingsView | null, width: number, change?: TreeChange | null): { header: string; key: TreePart[][] } | null {
+// change shows (`✓ built  ○ not yet  ● editing  * unplanned`), the edited row as `●` and a live row's `●` too. No
+// mark key when the view has no rows; no header ('') with no view, as in Build; null with neither a view nor a change.
+export function treeHeader(view: FindingsView | null, width: number, change?: TreeChange | null, edit?: TreeEdit | null): { header: string; key: TreePart[][] } | null {
   if (!view && !change) return null
   const header = view ? `the verifier kept ${view.kept > 0 ? 'these' : 'nothing'} in ${view.unit} ${view.round}` : ''
   const total = countOf(view?.findings ?? [], change?.rereview ?? [])
   const marks = (view ? MARKS : []).filter(m => total[m.field] > 0).map(m => ({ glyph: markPart(m.glyph, m.color), word: m.word }))
-  const shown = new Set((change?.files ?? []).map(f => progressOf(f, change ?? null)))
+  const shown = new Set<Progress>((change?.files ?? []).map(f => (edit && f.path === edit.path ? '●' : progressOf(f, change ?? null))))
+  if (edit && change) shown.add('●')
   const leads = PROGRESS.filter(m => shown.has(m.glyph)).map(m => ({ glyph: markPart(m.glyph, m.color), word: m.word }))
   return { header, key: [...keyLines(marks, width), ...keyLines(leads, width)] }
 }

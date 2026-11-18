@@ -11,7 +11,7 @@ import {
   plural, voterNext, parseFileList, parsePlanSteps,
 } from '../../hooks/dashboard/task'
 import {
-  awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, footprint, iconsOn, isBigTree, markText, markWords, repoPath, roundKept, runEnds, splitLoc, stepFindings, stepRows, trackFindings, treeHeader, treeRows,
+  awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, footprint, iconsOn, isBigTree, markText, markWords, repoPath, roundKept, isEditShown, runEnds, splitLoc, stepFindings, stepRows, trackFindings, treeHeader, treeRows,
 } from '../../hooks/dashboard/tree'
 import type { TreeChange, TreeRow } from '../../hooks/dashboard/tree'
 import type { ChangedFile, FileList, FindingsView, TreeFinding } from '../../types'
@@ -3449,4 +3449,106 @@ test('the demo task shows its plan steps folded in review', async ($, on) => {
   expect(await rowOf(pane, STEPS_FOLD)).toBe('▸ Plan steps  3 of 3 built')
   expect(await foldCount(pane, '3 of 3 built')).toBe('success')
   await pane.unmount()
+})
+
+// treeRows and treeHeader on their own, for the file being edited: a files.tsv row, its change (step 1 built), the
+// options at 50 columns, and a row's text.
+const editFile = (path: string, letter: ChangedFile['letter'], added: ChangedFile['added'], steps: number[]): ChangedFile =>
+  ({ letter, added, removed: added === null ? null : 0, path, oldPath: '', steps, fix: null })
+const editChange = (files: ChangedFile[], extra: Partial<TreeChange> = {}): TreeChange => ({ files, hasPlan: true, built: [1], allBuilt: false, rereview: [], ...extra })
+const editOpts = (extra: Partial<Parameters<typeof treeRows>[1]> = {}) => ({ scope: 's', width: 50, icons: false, isHigh: false, folds: {}, ...extra })
+const editText = (r: TreeRow | undefined) => (r?.parts ?? []).map(p => p.text).join('')
+const keyLine = (k: { text: string }[][] | undefined) => (k ?? []).map(l => l.map(p => p.text).join(''))
+
+test('the folders above the edited file open while it carries the dot', () => {
+  // 16 files, so the clean folder deep/ (inside app/) starts folded, and the user has folded it too.
+  const files = [
+    ...Array.from({ length: 14 }, (_, i) => editFile(`lib/f${String(i).padStart(2, '0')}.ts`, 'M', 1, [1])),
+    editFile('app/deep/a.ts', 'M', 1, [1]),
+    editFile('app/b.ts', 'M', 1, [1]),
+  ]
+  const ch = editChange(files)
+  const DEEP = 's:tree:app/deep/'
+  const folds = { [DEEP]: false }
+  const at = (rows: TreeRow[], key: string) => rows.find(r => r.key === key)
+  const index = (rows: TreeRow[], key: string) => rows.filter(r => r.kind !== 'finding').map(r => r.key).indexOf(key)
+
+  const held = treeRows(null, editOpts({ change: ch, folds, edit: { path: 'app/deep/a.ts', isFlash: false } }))
+  expect(at(held, DEEP)?.isOpen).toBe(true)
+  expect(at(held, DEEP)?.label).toContain('open, held open while editing')
+  expect(at(held, 's:tree:app/')?.isOpen).toBe(true)
+  expect(at(held, 's:tree:app/deep/a.ts')).toBeDefined()
+  expect(editText(at(held, 's:tree:app/deep/a.ts'))).toMatch(/^● M/)
+  expect(at(held, 's:tree:app/deep/a.ts')?.label).toMatch(/^app\/deep\/a\.ts, editing, /)
+  // The other big-tree folder stays folded: only the edited file's folders are held.
+  expect(at(held, 's:tree:lib/')?.isOpen).toBe(false)
+
+  // The dot moves to a file outside deep/: the user's fold applies again, in the same place under the same key.
+  const released = treeRows(null, editOpts({ change: ch, folds, edit: { path: 'app/b.ts', isFlash: false } }))
+  expect(at(released, DEEP)?.isOpen).toBe(false)
+  expect(at(released, DEEP)?.label).not.toContain('held open')
+  expect(at(released, 's:tree:app/deep/a.ts')).toBeUndefined()
+  expect(index(released, DEEP)).toBe(index(held, DEEP))
+  expect(index(held, DEEP)).toBeGreaterThan(-1)
+
+  // A flash: the bar and the bold name, both in the claude colour, winning over a selected step's plain bar.
+  const flash = at(treeRows(null, editOpts({ change: ch, folds, selected: 1, edit: { path: 'app/b.ts', isFlash: true } })), 's:tree:app/b.ts')
+  expect(editText(flash)).toContain('▎')
+  expect(flash?.parts.find(p => p.text === '▎')?.color).toBe('claude')
+  expect(flash?.parts.find(p => p.text === 'b.ts')).toMatchObject({ bold: true, color: 'claude' })
+  const lit = at(treeRows(null, editOpts({ change: ch, folds, selected: 1, edit: { path: 'app/b.ts', isFlash: false } })), 's:tree:app/b.ts')
+  expect(lit?.parts.find(p => p.text === 'b.ts')?.color).toBeUndefined()
+  // The word slot: editing in the claude colour, and the row is still 50 columns.
+  expect(flash?.parts.find(p => p.text === 'editing')?.color).toBe('claude')
+  for (const r of held.filter(r => r.kind !== 'finding')) expect(cols(editText(r))).toBe(50)
+})
+
+test('the key line names the editing dot when one shows', () => {
+  // A planned file (step 2, not built), a built one, an edited one, and an unplanned one.
+  const files = [editFile('a.ts', 'M', null, [2]), editFile('b.ts', 'M', 3, [1]), editFile('c.ts', 'M', 2, [1]), editFile('d.ts', 'M', 1, [])]
+  expect(keyLine(treeHeader(null, 50, editChange(files), { path: 'c.ts', isFlash: false })?.key)).toEqual(['key: ✓ built  ○ not yet  ● editing  * unplanned'])
+  // The edited row gives ●, not its own mark: with only built files, editing one of two leaves ✓ for the other.
+  const built = [editFile('b.ts', 'M', 3, [1]), editFile('c.ts', 'M', 2, [1])]
+  expect(keyLine(treeHeader(null, 50, editChange(built), { path: 'c.ts', isFlash: false })?.key)).toEqual(['key: ✓ built  ● editing'])
+  expect(keyLine(treeHeader(null, 50, editChange(built.slice(1)), { path: 'c.ts', isFlash: false })?.key)).toEqual(['key: ● editing'])
+  // Every row built and the edit on a path the list doesn't hold: the live row's ● still reaches the key.
+  expect(keyLine(treeHeader(null, 50, editChange(built), { path: 'app/new.ts', isFlash: false })?.key)).toEqual(['key: ✓ built  ● editing'])
+  const header = treeHeader(null, 50, editChange(built), { path: 'app/new.ts', isFlash: false })
+  expect(header?.key[0]?.find(p => p.text === '●')?.color).toBe('claude')
+  // Without an edit, no ● editing, and the order holds.
+  expect(keyLine(treeHeader(null, 50, editChange(files))?.key)).toEqual(['key: ✓ built  ○ not yet  * unplanned'])
+  expect(keyLine(treeHeader(null, 50, editChange(files), null)?.key)).toEqual(['key: ✓ built  ○ not yet  * unplanned'])
+
+  // The live row: under its folders, ● with no letter, counts or step, and the words editing unplanned.
+  const rows = treeRows(null, editOpts({ change: editChange(built), edit: { path: 'app/new.ts', isFlash: false } }))
+  const live = rows.find(r => r.key === 's:tree:app/new.ts')
+  expect(rows.map(r => r.key)).toEqual(['s:tree:app/', 's:tree:app/new.ts', 's:tree:b.ts', 's:tree:c.ts'])
+  expect(editText(live)).toMatch(/^● {7}new\.ts +editing unplanned {11}$/)
+  expect(live?.label).toBe('app/new.ts, editing, unplanned')
+  expect(live?.parts.find(p => p.text === 'unplanned')?.dim).toBe(true)
+  for (const r of rows) expect(cols(editText(r))).toBe(50)
+  // An edited unplanned file in the list shows ● and both words; its label keeps its own.
+  const odd = treeRows(null, editOpts({ change: editChange(files), edit: { path: 'd.ts', isFlash: false } })).find(r => r.key === 's:tree:d.ts')
+  expect(editText(odd)).toMatch(/^● M {3}d\.ts +editing unplanned +\+1 {3}$/)
+  expect(odd?.label).toBe('d.ts, editing, unplanned, modified, 1 line added')
+  // With no plan the progress column appears for the dot alone.
+  const noPlan = treeRows(null, editOpts({ change: editChange(built.map(f => ({ ...f, steps: [] })), { hasPlan: false }), edit: { path: 'b.ts', isFlash: false } }))
+  expect(editText(noPlan.find(r => r.key === 's:tree:b.ts'))).toMatch(/^● M {3}b\.ts +editing +\+3 {3}$/)
+  expect(editText(noPlan.find(r => r.key === 's:tree:c.ts'))).toMatch(/^ {2}M {3}c\.ts/)
+})
+
+test('in Build the edit shows on a file only while one of its steps is unbuilt or being built', () => {
+  const files = [editFile('a.ts', 'M', 1, [1]), editFile('b.ts', 'M', 1, [1, 2]), editFile('u.ts', 'M', 1, [])]
+  const ch = editChange(files)
+  // Step 1 built, step 2 being built: a.ts's steps are all built and none is being built.
+  expect(isEditShown('a.ts', ch, true, 2)).toBe(false)
+  expect(isEditShown('a.ts', ch, true, null)).toBe(false)
+  expect(isEditShown('a.ts', ch, true, 1)).toBe(true)
+  expect(isEditShown('b.ts', ch, true, 2)).toBe(true)
+  expect(isEditShown('b.ts', editChange(files, { built: [1, 2] }), true, null)).toBe(false)
+  expect(isEditShown('b.ts', editChange(files, { built: [], allBuilt: true }), true, null)).toBe(false)
+  // A file no step names, and one the list doesn't hold, always show it; so does review.
+  expect(isEditShown('u.ts', ch, true, null)).toBe(true)
+  expect(isEditShown('app/new.ts', ch, true, null)).toBe(true)
+  expect(isEditShown('a.ts', ch, false, null)).toBe(true)
 })
