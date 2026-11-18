@@ -619,6 +619,24 @@ export function unmetWords(ns: string[]): { short: string; details: string } {
     : { short: `${ns.length} unmet`, details: `converged with ${plural(ns.length, 'requirement')} unmet` }
 }
 
+// The Checks row's summary, `P/N pass @ <rev> · stale`, and its note, within `room` columns. The note gives way
+// first (cut at its end, and left out once fewer than 6 columns are left for it), then the rev (cut at its end, and
+// left out once fewer than 5 columns are left for ` @ ` and it); `count` and ` · stale` always show.
+export function checksRow(count: string, rev: string, isStale: boolean, note: string, room: number): { summary: string; note: string } {
+  const rev7 = rev.slice(0, 7)
+  const at = rev7 ? ` @ ${rev7}` : ''
+  const stale = isStale ? ' · stale' : ''
+  const summary = `${count}${at}${stale}`
+  if (cellWidth(summary) + 2 + cellWidth(note) <= room) return { summary, note }
+  if (cellWidth(summary) <= room) {
+    const left = room - cellWidth(summary) - 2
+    return { summary, note: left < 6 ? '' : cutEnd(note, left) }
+  }
+  const left = room - cellWidth(count) - cellWidth(stale)
+  const cut = left >= cellWidth(at) ? at : left >= 5 ? ` @ ${cutEnd(rev7, left - 3)}` : ''
+  return { summary: `${count}${cut}${stale}`, note: '' }
+}
+
 // What's wrong, briefly, for the band: an unmet requirement, failing checks, a stale proof, pending findings.
 export function problemsOf(t: Pick<Snapshot, 'spec' | 'status' | 'proof' | 'checks' | 'isProofStale' | 'pending'>): string[] {
   const failing = t.proof ? t.checks.filter(c => c.result === 'FAIL').length : 0

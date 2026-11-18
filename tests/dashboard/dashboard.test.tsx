@@ -8,7 +8,7 @@ import {
   requirementState, roleOf,
   roundReviewers, slugFromHead, spendOf, stageOf, stages, tokenCount,
   keptFindings, countPlanSteps, normalizePath, modelMismatches, choiceLabel, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, latestRun, liveReview, shortRange,
-  plural, voterNext, parseFileList, parsePlanSteps, editPath, unmetNote,
+  plural, voterNext, parseFileList, parsePlanSteps, editPath, unmetNote, checksRow,
 } from '../../hooks/dashboard/task'
 import {
   awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, footprint, iconsOn, isBigTree, markText, markWords, repoPath, roundKept, isEditShown, runEnds, splitLoc, stepFindings, stepRows, trackFindings, treeHeader, treeRows,
@@ -1064,7 +1064,7 @@ test('checks join eval.md with the latest proof', async ($, on) => {
   await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/proof-build.md', content: PROOF })
   pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   // A failed check opens Checks by itself, with a FAIL badge on its row.
-  expect(await pane.find({ type: 'Text', text: /^4\/5 pass$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^4\/5 pass @ 1a2b3c4$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /proof-build.md at 1a2b3c4/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^ FAIL $/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^quotes commas$/ })).toBeDefined()
@@ -1413,6 +1413,146 @@ test('from CONVERGED on a requirement unmet by a current proof shows on the step
   unchanged(await look4(reqTask('CONVERGED', { build: proofWith([1, 2, 3, 4]) })))
   unchanged(await look4(reqTask('CONVERGED', { unchecked: [4], build: proofWith([1, 2, 3]) })))
   unchanged(await look4(reqTask('CONVERGED', { final: proofWith([1, 2, 3, 4], [], { 1: 'MET', 2: 'MET', 3: 'MET', 4: 'MET', 9: 'PARTIAL' }) })))
+})
+
+// ---- The Checks row's commit
+
+// A task with 23 requirements, each with a check, and a build proof at `rev` passing every one but `fail`, so its
+// Checks reads `P/24 pass` with the verify-completion row. HEAD is `head`; nothing is pending unless `pending`.
+const CHECKS = 'toggle-checks'
+const TWENTY_THREE = Array.from({ length: 23 }, (_, i) => `Req ${i + 1}`)
+function checksTask(status: string, rev: string, head: string, o: { fail?: number[]; pending?: boolean; noRev?: boolean } = {}): Record<string, string> {
+  const fail = o.fail ?? []
+  const proof = proofWith(TWENTY_THREE.map((_, i) => i + 1).filter(i => !fail.includes(i)), fail)
+  const files = reqTask(status, { titles: TWENTY_THREE, head, build: o.noRev ? proof.replace(/^Proof: .*\n/, '') : proof.replace('at 1a2b3c4', `at ${rev}`) })
+  if (!o.pending) files['.tasks/export-csv/state.md'] = state(status).replace('pending_findings: ["app/report.py:42"]', 'pending_findings: []')
+  return files
+}
+
+test('the Checks summary names the commit the proof ran on', async ($, on) => {
+  const EB = `eb6c1c1${'0'.repeat(33)}`
+  const files = checksTask('BUILDING', 'eb6c1c1', EB)
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const look = async (next: Record<string, string>) => {
+    await reload($, files, next)
+    const pane = await $.ui.mount(ON_TERMINAL)
+    const texts = await pane.findAll({ type: 'Text' })
+    const summary = texts.find(t => /^\d+\/\d+ pass/.test(t.text))
+    const row = await pane.find({ type: 'Button', key: CHECKS })
+    await pane.unmount()
+    return { summary: summary?.text, color: summary?.props.color, text: row?.text ?? '', label: row?.props.label }
+  }
+
+  // Every check passes at HEAD and nothing is pending, so the fold is folded.
+  let r = await look(checksTask('BUILDING', 'eb6c1c1', EB))
+  expect(r.summary).toBe('24/24 pass @ eb6c1c1')
+  expect(r.color).toBe('success')
+  expect(r.label).toBe('Checks, 24 of 24 pass at eb6c1c1, folded')
+
+  // A 12-character rev, and a 40-character one equal to HEAD, show their first 7.
+  r = await look(checksTask('BUILDING', 'eb6c1c100000', EB))
+  expect(r.summary).toBe('24/24 pass @ eb6c1c1')
+  expect(r.color).toBe('success')
+  r = await look(checksTask('BUILDING', EB, EB))
+  expect(r.summary).toBe('24/24 pass @ eb6c1c1')
+  expect(r.label).toBe('Checks, 24 of 24 pass at eb6c1c1, folded')
+
+  // An upper-case rev at HEAD isn't stale (isStaleProof lower-cases it), and shows as written.
+  r = await look(checksTask('BUILDING', 'EB6C1C1', EB))
+  expect(r.summary).toBe('24/24 pass @ EB6C1C1')
+  expect(r.color).toBe('success')
+  expect(r.text).not.toContain('stale')
+
+  // No `Proof: … at` line: no commit to name.
+  r = await look(checksTask('BUILDING', '', EB, { noRev: true }))
+  expect(r.summary).toBe('24/24 pass')
+  expect(r.label).toBe('Checks, 24 of 24 pass, folded')
+
+  // At the handoff with no proof-final.md: as today, and the row is given no label, so it's read by its drawn words.
+  await reload($, files, reqTask('AWAITING-HUMAN', { titles: TWENTY_THREE }))
+  const pane = await $.ui.mount(ON_TERMINAL)
+  expect(await pane.find({ type: 'Text', text: /^no proof saved$/ })).toBeDefined()
+  const row = await pane.find({ type: 'Button', key: CHECKS })
+  expect(row?.text).toContain('no proof saved  proof-final.md missing')
+  expect(row?.text).not.toContain('@')
+  expect(row?.props.label).toBe(row?.text)
+  await pane.unmount()
+
+  // checksRow directly.
+  const NOTE = 'proof older than HEAD'
+  expect(checksRow('24/24 pass', 'eb6c1c1', false, NOTE, 60)).toEqual({ summary: '24/24 pass @ eb6c1c1', note: NOTE })
+  const b = checksRow('24/24 pass', 'eb6c1c1', true, NOTE, 40)
+  expect(b.summary).toBe('24/24 pass @ eb6c1c1 · stale')
+  expect(cellWidth(b.note)).toBe(10)
+  expect(b.note.endsWith('…')).toBe(true)
+  expect(checksRow('24/24 pass', 'eb6c1c1', true, NOTE, 36)).toEqual({ summary: '24/24 pass @ eb6c1c1 · stale', note: 'proof…' })
+  expect(checksRow('24/24 pass', 'eb6c1c1', true, NOTE, 35)).toEqual({ summary: '24/24 pass @ eb6c1c1 · stale', note: '' })
+  expect(checksRow('24/24 pass', 'eb6c1c1', true, NOTE, 33)).toEqual({ summary: '24/24 pass @ eb6c1c1 · stale', note: '' })
+  expect(checksRow('24/24 pass', 'eb6c1c1', true, NOTE, 23)).toEqual({ summary: '24/24 pass @ e… · stale', note: '' })
+  expect(checksRow('24/24 pass', 'eb6c1c1', true, NOTE, 22)).toEqual({ summary: '24/24 pass · stale', note: '' })
+  expect(checksRow('24/24 pass', 'eb6c1c1', true, NOTE, 20)).toEqual({ summary: '24/24 pass · stale', note: '' })
+  expect(checksRow('24/24 pass', 'eb6c1c100000', false, '', 60)).toEqual({ summary: '24/24 pass @ eb6c1c1', note: '' })
+  expect(checksRow('24/24 pass', '', false, '', 60)).toEqual({ summary: '24/24 pass', note: '' })
+})
+
+test('a stale proof reads as stale in the summary, the badges and the band, and fits', async ($, on) => {
+  const WIDE = { ...ON_TERMINAL, props: { ...ON_TERMINAL.props, bodyColumns: 100 } }
+  const STALE = '9'.repeat(40)
+  const files = checksTask('BUILDING', '1a2b3c4', STALE)
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const look = async (next: Record<string, string>, at: typeof ON_TERMINAL | typeof WIDE = WIDE) => {
+    await reload($, files, next)
+    const pane = await $.ui.mount(at)
+    const texts = await pane.findAll({ type: 'Text' })
+    const summary = texts.find(t => /^\d+\/\d+ pass/.test(t.text))
+    const row = await pane.find({ type: 'Button', key: CHECKS })
+    if (row?.props.label?.endsWith(', folded')) await pane.press({ key: CHECKS })
+    const pass = (await pane.findAll({ type: 'Text' })).filter(t => t.text === ' PASS ').map(t => t.props.backgroundColor)
+    const fail = (await pane.findAll({ type: 'Text' })).filter(t => t.text === ' FAIL ').map(t => t.props.backgroundColor)
+    const warning = (await pane.findAll({ type: 'Text' })).find(t => / ran at .*: these results may be out of date$/.test(t.text))?.text
+    await pane.unmount()
+    const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    const progress = (await band.findAll({ type: 'Text' })).find(t => /(^| · )checks \S+$/.test(t.text))?.text
+    await band.unmount()
+    return { summary: summary?.text, color: summary?.props.color, text: row?.text ?? '', label: row?.props.label, pass, fail, warning, progress }
+  }
+
+  // Every check passes, at a commit before HEAD: stale, amber, muted badges.
+  let r = await look(checksTask('BUILDING', '1a2b3c4', STALE))
+  expect(r.summary).toBe('24/24 pass @ 1a2b3c4 · stale')
+  expect(r.color).toBe('warning')
+  expect(r.text).toBe('▾ Checks         24/24 pass @ 1a2b3c4 · stale  proof older than HEAD')
+  expect(r.label).toBe('Checks, 24 of 24 pass at 1a2b3c4, stale, proof older than HEAD, open')
+  expect(r.warning).toBe('proof-build.md ran at 1a2b3c4, before HEAD (9999999): these results may be out of date')
+  expect(r.pass).toHaveLength(24)
+  expect(r.pass).not.toContain('success')
+  expect(r.progress?.endsWith('checks stale')).toBe(true)
+
+  // One fails: red, and its FAIL badge keeps its colour.
+  r = await look(checksTask('BUILDING', '1a2b3c4', STALE, { fail: [23] }))
+  expect(r.summary).toBe('23/24 pass @ 1a2b3c4 · stale')
+  expect(r.color).toBe('error')
+  expect(r.pass).toHaveLength(23)
+  expect(r.pass).not.toContain('success')
+  expect(r.fail).toEqual(['error'])
+  expect(r.progress?.endsWith('checks stale')).toBe(true)
+
+  // At 50 columns the note gives way, and the row keeps pass and stale within the card.
+  r = await look(checksTask('BUILDING', '1a2b3c4', STALE), ON_TERMINAL)
+  expect(cols(r.text)).toBeLessThanOrEqual(50)
+  expect(r.text).toContain('pass')
+  expect(r.text).toContain('stale')
+  expect(r.label).toBe('Checks, 24 of 24 pass at 1a2b3c4, stale, proof older than HEAD, open')
+
+  // The same proof at HEAD: green badges, and the band counts.
+  r = await look(checksTask('BUILDING', '1a2b3c4', AT_HEAD))
+  expect(r.summary).toBe('24/24 pass @ 1a2b3c4')
+  expect(r.color).toBe('success')
+  expect(r.pass).toHaveLength(24)
+  expect(r.pass.every(c => c === 'success')).toBe(true)
+  expect(r.progress?.endsWith('checks 24/24')).toBe(true)
 })
 
 test('the spec and blind-test stages show their own reports', async ($, on) => {

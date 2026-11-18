@@ -10,7 +10,7 @@ import type { ChangedFile, Check, Findings, FindingsView, Now, OtherTask, PullRe
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, parsePlanSteps, SLICE_AT, stageOf, stages, tokenCount,
-  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep, editPath, unmetNote, unmetNow, unmetWords,
+  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep, editPath, unmetNote, unmetNow, unmetWords, checksRow,
 } from './task'
 import { awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, footprint, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows } from './tree'
 import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
@@ -449,8 +449,9 @@ function reviewProgress(r: Review): string {
   return `reviewers ${done}/${r.reviewers.length}`
 }
 
-function checkProgress(checks: Check[], hasProof: boolean): string {
-  return hasProof ? `checks ${checks.filter(c => c.result === 'PASS').length}/${checks.length}` : ''
+// A stale proof's counts may no longer hold, so they aren't shown.
+function checkProgress(checks: Check[], hasProof: boolean, isStale: boolean): string {
+  return !hasProof ? '' : isStale ? 'checks stale' : `checks ${checks.filter(c => c.result === 'PASS').length}/${checks.length}`
 }
 
 function nowTitle(now: Now, maxRounds: number): string {
@@ -693,7 +694,7 @@ export const register: Register = (on, options) => {
         : current.name === 'PR' ? prDetail(known, t.prDrafted) || 'PR'
           : current.name
     const problems = problemsOf(t)
-    const progress = [reviewerProgress(t.now), checkProgress(t.checks, t.proof !== null)].filter(Boolean).join(' · ')
+    const progress = [reviewerProgress(t.now), checkProgress(t.checks, t.proof !== null, t.isProofStale)].filter(Boolean).join(' · ')
     const command = nextCommand(nextFor(t, known))
     // The recorded change's file count, once the build has a base (the Task card's footprint line).
     const fp = t.files ? footprint(t.files, t.rounds, t.head, awaitingOf(t.codeView, t.rereview)) : null
@@ -1164,8 +1165,10 @@ export const register: Register = (on, options) => {
     const requirementsNote = firstFailed ? unmetNote(firstFailed, failedRequirements.length - 1, Infinity, Infinity).beside
       : uncheckedRequirement ? `${uncheckedRequirement.n} has no check` : ''
     const unmet = unmetNow(t)
+    // With a proof, `P/N pass @ <rev>`, and ` · stale` when it ran before HEAD: then never green, since its passes
+    // may not hold now.
     const checksSummary: [string, string] = t.proof
-      ? [`${passed}/${t.checks.length} pass`, passed === t.checks.length ? 'success' : 'error']
+      ? [`${passed}/${t.checks.length} pass`, passed < t.checks.length ? 'error' : t.isProofStale ? 'warning' : 'success']
       : t.expectedProof ? ['no proof saved', 'warning']
         : isReported ? [`${t.checks.length} reported passing`, 'subtle'] : [`${taskChecks} not run yet`, 'inactive']
     const checksNote = t.isProofStale ? 'proof older than HEAD'
@@ -1173,6 +1176,10 @@ export const register: Register = (on, options) => {
         : t.stopBlocks > 0 && isHookActive(t.status) ? `Stop hook blocked ${plural(t.stopBlocks, 'time')}`
           : t.pending > 0 ? `${plural(t.pending, 'finding')} pending`
             : (t.checks.find(c => c.result === 'FAIL') ? `✗ ${t.checks.find(c => c.result === 'FAIL')?.id} ${t.checks.find(c => c.result === 'FAIL')?.label}` : '')
+    // The row as drawn, within the pane: the note gives way first, then the rev.
+    const checksLayout = t.proof ? checksRow(checksSummary[0], t.proof.rev, t.isProofStale, checksNote, columns - 17) : null
+    const rev7 = t.proof?.rev.slice(0, 7) ?? ''
+    const checksName = t.proof ? `Checks, ${passed} of ${t.checks.length} pass${rev7 ? ` at ${rev7}` : ''}${t.isProofStale ? ', stale' : ''}` : undefined
     // Review rounds: the plan rounds, then the code rounds, each group left out when it has none.
     const roundGroups = ([['plan', t.planReviewRounds], ['code', t.rounds]] as const).filter(([, rs]) => rs.length > 0)
     const lastRound = roundGroups.at(-1)?.[1].at(-1)
@@ -1310,7 +1317,7 @@ export const register: Register = (on, options) => {
               ] : []),
             ], t.proof ? `Requirements, ${requirementsSummary[0]}` : undefined, requirementsLayout)}
 
-          {fold('checks', 'Checks', checksSummary, checksNote, () => [
+          {fold('checks', 'Checks', checksLayout ? [checksLayout.summary, checksSummary[1]] : checksSummary, checksNote, () => [
             t.proof && !t.isProofStale ? <Text key="proof" dimColor>{t.proof.file}{t.proof.rev ? ` at ${t.proof.rev}` : ''}</Text> : null,
             t.proof && t.isProofStale ? (
               <Text key="stale" color="warning">
@@ -1325,7 +1332,7 @@ export const register: Register = (on, options) => {
             !t.proof && t.expectedProof && t.checksNote ? <Text key="note" dimColor>Round log: {t.checksNote}</Text> : null,
             ...t.checks.map(c => (
               <Box key={`check-${c.id}`} flexDirection="row" gap={1}>
-                {c.result === 'PASS' ? badge(`b-${c.id}`, 'PASS', 'success')
+                {c.result === 'PASS' ? badge(`b-${c.id}`, 'PASS', t.isProofStale ? 'inactive' : 'success')
                   : c.result === 'FAIL' ? badge(`b-${c.id}`, 'FAIL', 'error')
                     : c.result === 'SKIPPED' ? badge(`b-${c.id}`, 'SKIP', 'warning')
                       : <Text color={isReported ? 'subtle' : 'inactive'}>{isReported ? '  ✓   ' : '  ○   '}</Text>}
@@ -1335,7 +1342,7 @@ export const register: Register = (on, options) => {
             )),
             t.stopBlocks > 0 && isHookActive(t.status) ? <Text key="blocks" color="warning">Stop hook blocked {plural(t.stopBlocks, 'time')} in a row</Text> : null,
             t.pending > 0 ? <Text key="pending" color="warning">{plural(t.pending, 'finding')} pending for the builder</Text> : null,
-          ])}
+          ], checksName, checksLayout ? { beside: checksLayout.note, under: '' } : undefined)}
 
           {roundGroups.length > 0 && fold('rounds', 'Review rounds',
             [roundsSummary, lastRound?.findings && lastRound.findings.important > 0 ? 'error' : 'text'],
