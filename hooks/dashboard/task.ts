@@ -250,8 +250,7 @@ export function blindSummary(b: Blind): { text: string; words: string; isClean: 
     a11y > 0 ? `a11y ${a11y}` : '',
     b.caused !== null && b.caused > 0 ? triage : '',
     b.blockers > 0 ? blockers : '',
-    result === 'not reached' ? result : '',
-    result === 'no report' ? result : '',
+    result !== 'reached' ? result : '',
     b.caused === null ? triage : '',
   ].filter(p => p !== '')
   const rest = [result, blockers, triage].filter(p => !problems.includes(p))
