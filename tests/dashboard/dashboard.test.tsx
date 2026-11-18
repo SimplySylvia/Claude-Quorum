@@ -8,13 +8,14 @@ import {
   requirementState, roleOf,
   roundReviewers, slugFromHead, spendOf, stageOf, stages, tokenCount,
   keptFindings, countPlanSteps, normalizePath, modelMismatches, choiceLabel, nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, latestRun, liveReview, shortRange,
-  plural, voterNext, parseFileList,
+  plural, voterNext, parseFileList, parsePlanSteps,
 } from '../../hooks/dashboard/task'
 import {
   awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, footprint, iconsOn, isBigTree, markText, markWords, repoPath, roundKept, runEnds, splitLoc, trackFindings, treeHeader, treeRows,
 } from '../../hooks/dashboard/tree'
 import type { TreeChange, TreeRow } from '../../hooks/dashboard/tree'
 import type { ChangedFile, FileList, FindingsView, TreeFinding } from '../../types'
+import { DEMO_PLAN, DEMO_PLAN_SHOW } from './fixtures/demo-plan'
 
 const state = (status: string, extra = '') => `---
 slug: export-csv
@@ -799,6 +800,57 @@ test('a section the person closes stays closed, even while it holds a problem', 
 test('a plan\'s steps are the numbered lines under its Steps heading', () => {
   expect(countPlanSteps('## Steps\n1. a\n2. b\n   - c\n\n## Tests\n1. no\n')).toBe(2)
   expect(countPlanSteps('')).toBe(0)
+})
+
+test('plan steps are read from plan.md with their number, title, requirements, and line span', () => {
+  const plan = [
+    '# Plan', //                                                    1
+    '', //                                                          2
+    '## Steps', //                                                  3
+    '1. **The parser** — `task.ts` · requirements: 1, 2', //       4
+    '   - Reuses: `plain`.', //                                     5
+    '   - Convention: no `$`.', //                                  6
+    '   ', //                                                       7: spaces only
+    '\t', //                                                        8: a tab only
+    '', //                                                          9
+    '2. **Ünïcode — the list** — `a.ts` · requirements: 3 ,4, · mechanical', // 10
+    '\t- a tab-indented line', //                                   11
+    '', //                                                          12
+    '', //                                                          13
+    '4. Gap step without bold', //                                  14
+    '   - last indented', //                                        15
+    '', //                                                          16
+    '## Tests', //                                                  17
+    '1. not a step', //                                             18
+  ].join('\n')
+  expect(parsePlanSteps(plan)).toEqual([
+    { n: 1, title: 'The parser', requirements: [1, 2], from: 4, to: 6 },
+    { n: 2, title: 'Ünïcode — the list', requirements: [3, 4], from: 10, to: 11 },
+    { n: 4, title: 'Gap step without bold', requirements: [], from: 14, to: 15 },
+  ])
+  // A step's own number again continues it; a number that comes back after another step is ignored, and ends that step.
+  expect(parsePlanSteps('## Steps\n1. A\n   a\n1. again\n   b\n2. B\n')).toEqual([
+    { n: 1, title: 'A', requirements: [], from: 2, to: 5 },
+    { n: 2, title: 'B', requirements: [], from: 6, to: 6 },
+  ])
+  expect(parsePlanSteps('## Steps\n1. A\n2. B\n   b\n1. C\n   c\n')).toEqual([
+    { n: 1, title: 'A', requirements: [], from: 2, to: 2 },
+    { n: 2, title: 'B', requirements: [], from: 3, to: 4 },
+  ])
+  // An unindented line ends a step.
+  expect(parsePlanSteps('## Steps\n1. A\n   a\nprose\n   not a\n')).toEqual([{ n: 1, title: 'A', requirements: [], from: 2, to: 3 }])
+  // No plan.md, no Steps section, or no numbered steps: no list.
+  expect(parsePlanSteps('')).toEqual([])
+  expect(parsePlanSteps('# Plan\n1. a\n   b\n## Tests\n')).toEqual([])
+  expect(parsePlanSteps('## Steps\n- a\n   b\n## Tests\n1. c\n')).toEqual([])
+})
+
+test('the step spans match the lines quorum-plan show prints', () => {
+  const steps = parsePlanSteps(DEMO_PLAN)
+  const lines = DEMO_PLAN.split('\n')
+  expect(steps.map(s => s.n)).toEqual([1, 2, 3])
+  const shown = steps.flatMap(s => lines.slice(s.from - 1, s.to).filter(l => !/^[ \t]*$/.test(l))).join('\n') + '\n'
+  expect(shown).toBe(DEMO_PLAN_SHOW)
 })
 
 test('git\'s relative paths resolve', () => {

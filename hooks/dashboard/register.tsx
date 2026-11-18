@@ -9,7 +9,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { ChangedFile, Check, Findings, FindingsView, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, RoundKept, Section, Snapshot, Stage } from '../../types'
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
-  parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, SLICE_AT, stageOf, stages, tokenCount,
+  parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, parsePlanSteps, SLICE_AT, stageOf, stages, tokenCount,
   nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress,
 } from './task'
 import { awaitingFrom, awaitingOf, changeHeader, confidenceRow, footprint, iconsOn, isBigTree, markText, markWords, roundKept, runEnds, trackFindings, treeHeader, treeRows } from './tree'
@@ -18,7 +18,7 @@ import type { TreeChange, TreePart } from './tree'
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-15' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-16' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-3' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
 const reviews = atom({ plugin: 'quorum', key: 'reviews' } as const, [], { shape: 'reviews-2' })
@@ -224,6 +224,7 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
   const dir = `${root}/.tasks/${slug}`
   const rd = (await readOr($, `${dir}/rd.md`)) ?? ''
   const evalMd = (await readOr($, `${dir}/eval.md`)) ?? ''
+  const plan = (await readOr($, `${dir}/plan.md`)) ?? ''
   // proof-final.md is written after the review loop or blind test, so it is the newer one when both exist.
   const proofs = await readFiles($, dir, ['proof-final.md', 'proof-build.md'])
   const proofFile = proofs['proof-final.md'] !== undefined ? 'proof-final.md' : proofs['proof-build.md'] !== undefined ? 'proof-build.md' : ''
@@ -245,7 +246,9 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     risk,
     isFast: scalar(fm, 'fast') === 'true',
     isBug: scalar(fm, 'bug') === 'true',
-    planSteps: countPlanSteps((await readOr($, `${dir}/plan.md`)) ?? ''),
+    planSteps: countPlanSteps(plan),
+    steps: parsePlanSteps(plan),
+    roots: histories.roots,
     builtSteps: list(fm, 'built_steps').length,
     builtList: list(fm, 'built_steps').map(Number).filter(n => Number.isInteger(n) && n > 0),
     hasBuildProof: proofs['proof-build.md'] !== undefined,

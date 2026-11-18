@@ -95,6 +95,10 @@ export type Now =
   | { kind: 'blind'; blind: Blind }
   | { kind: 'done' }
 
+// One of plan.md's steps, as `quorum-plan show N` reads it: its number, title, requirement numbers, and the 1-based
+// plan.md lines it spans, from its numbered line to its last indented line.
+export type PlanStep = { n: number; title: string; requirements: number[]; from: number; to: number }
+
 export type Snapshot = {
   slug: string
   branch: string
@@ -110,6 +114,10 @@ export type Snapshot = {
   // plan.md's step count, and how many state.md's built_steps lists: a plan of 4 or more is built a step at a time.
   planSteps: number
   builtSteps: number
+  // plan.md's steps ([] when it has none), and the paths a finding's location may start with: the session root, the
+  // main working tree, and the task's worktree.
+  steps: PlanStep[]
+  roots: string[]
   // The steps built_steps lists, and whether proof-build.md exists (an unsliced build's steps are built once it does).
   builtList: number[]
   hasBuildProof: boolean

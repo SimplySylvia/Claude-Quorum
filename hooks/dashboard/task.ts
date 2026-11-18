@@ -2,7 +2,7 @@
 // the stage rail, count findings the way bin/quorum-findings does, and read the specs, proofs, and reports the skills
 // save in .tasks/<slug>/. No `$` here, so tests can call them directly.
 
-import type { Blind, ChangedFile, Check, FileList, Findings, Frontmatter, KeptFinding, Proof, PullRequest, QuorumAgent, Requirement, Reviewer, Section, Snapshot, Spec, Spend, Stage, Verdict } from '../../types'
+import type { Blind, ChangedFile, Check, FileList, Findings, Frontmatter, KeptFinding, PlanStep, Proof, PullRequest, QuorumAgent, Requirement, Reviewer, Section, Snapshot, Spec, Spend, Stage, Verdict } from '../../types'
 
 export const STAGES = ['Spec', 'Plan', 'Build', 'Review', 'Blind test', 'PR'] as const
 
@@ -124,6 +124,46 @@ export function slugFromHead(head: string): string {
 // How many steps plan.md has under "## Steps" (bin/quorum-plan steps).
 export function countPlanSteps(plan: string): number {
   return section(plan, 'Steps').filter(l => /^\d+\.\s/.test(l)).length
+}
+
+// plan.md's steps, with the lines `quorum-plan show N` prints for each (bin/quorum-plan's steps_section and show awk,
+// rule for rule): the section runs from the line "## Steps" to the next # or ## heading; a step is its numbered line,
+// then each line that repeats its own number or is indented, skipping blank ones, up to the next numbered or
+// unindented line. A number already read is ignored, with its indented lines, since `show N` stops at its first run.
+export function parsePlanSteps(plan: string): PlanStep[] {
+  const lines = plan.split('\n')
+  const start = lines.indexOf('## Steps')
+  if (start < 0) return []
+  const steps: PlanStep[] = []
+  const seen = new Set<string>()
+  let cur: { num: string; step: PlanStep } | null = null
+  for (let i = start + 1; i < lines.length; i++) {
+    const l = lines[i] ?? ''
+    if (/^#{1,2}[ \t]/.test(l)) break
+    const num = /^(\d+)\.[ \t]/.exec(l)?.[1]
+    if (cur && num === cur.num) { cur.step.to = i + 1; continue }
+    if (num !== undefined) {
+      cur = null
+      if (seen.has(num)) continue
+      seen.add(num)
+      const bold = /\*\*(.+?)\*\*/.exec(l)?.[1]
+      const reqs = /·[ \t]*requirements:([^·]*)/.exec(l)?.[1] ?? ''
+      const step = {
+        n: Number(num),
+        title: plain(bold ?? l.replace(/^\d+\.[ \t]+/, '')),
+        requirements: reqs.split(/[,\s]+/).filter(r => /^\d+$/.test(r)).map(Number),
+        from: i + 1,
+        to: i + 1,
+      }
+      steps.push(step)
+      cur = { num, step }
+      continue
+    }
+    if (!cur || /^[ \t]*$/.test(l)) continue
+    if (/^[ \t]/.test(l)) cur.step.to = i + 1
+    else cur = null
+  }
+  return steps
 }
 
 // A plan of this many steps or more is built a step at a time (bin/quorum-plan sliced).
