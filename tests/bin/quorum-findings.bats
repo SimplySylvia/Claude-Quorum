@@ -57,7 +57,7 @@ qf() { "$BIN/quorum-findings" "$@"; }
 @test "the reviewer agent's example output parses" {
   sed -n '/^```$/,/^```$/p' "$REPO_ROOT/agents/code-reviewer.md" | sed '1d;$d' > "$BATS_TEST_TMPDIR/ex.md"
   run qf summary "$BATS_TEST_TMPDIR/ex.md"
-  [ "$output" = "Summary: 1 IMPORTANT, 1 NIT, 0 PRE-EXISTING" ]
+  [ "$output" = "Summary: 2 IMPORTANT, 1 NIT, 0 PRE-EXISTING" ]
   run qf check "$BATS_TEST_TMPDIR/ex.md"
   [ "$status" -eq 0 ]
 }
@@ -65,7 +65,7 @@ qf() { "$BIN/quorum-findings" "$@"; }
 @test "the voter agent's example output parses, and its DROP lines don't count" {
   sed -n '/^```$/,/^```$/p' "$REPO_ROOT/agents/verifier-voter.md" | sed '1d;$d' > "$BATS_TEST_TMPDIR/ex.md"
   run qf count IMPORTANT "$BATS_TEST_TMPDIR/ex.md"
-  [ "$output" = "1" ]
+  [ "$output" = "2" ]
   run qf count NIT "$BATS_TEST_TMPDIR/ex.md"
   [ "$output" = "0" ]
 }

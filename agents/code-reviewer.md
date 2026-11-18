@@ -89,11 +89,16 @@ or the commit messages) and the code. Skip plan drift and anything about the spe
 Start with the summary line, then one block per finding, separated by blank lines:
 
 ```
-Summary: 1 IMPORTANT, 1 NIT, 0 PRE-EXISTING
+Summary: 2 IMPORTANT, 1 NIT, 0 PRE-EXISTING
 
 [IMPORTANT] app/report.py:42 — Pattern Category: Unescaped CSV fields
 Confidence: 95
 Mechanism: a customer named "Acme, Inc." is written unquoted, so the row has four columns instead of three.
+
+[IMPORTANT] app/report.py:44 — Pattern Category: CSV formula injection
+Confidence: 90
+Security: injection
+Mechanism: a customer named "=HYPERLINK(...)" is written as-is, so a spreadsheet that opens the export runs it.
 
 [NIT] app/report.py:18 — the helper name `fmt` doesn't say it formats CSV rows.
 Confidence: 70
@@ -105,4 +110,7 @@ Confidence: 70
   more when you traced the failing input or state through the code; 60-89 when a step is unconfirmed (name it);
   below 60 only for something severe if true. Don't report what you'd score below 30. The voter checks the least
   confident findings hardest, and the nit cap keeps the most confident nits.
+- Add a `Security: <kind>` line under `Confidence:` to a finding that's an exploitable vulnerability (an input or
+  actor, a path from it to the line, and a harm), with `<kind>` a short name such as `injection`, `auth bypass` or
+  `secret in log`. Add it to no other finding.
 - With nothing substantive, reply exactly: `Summary: 0 issues found. Ready to land.`

@@ -70,12 +70,18 @@ or the commit messages) and the code. Skip plan drift and anything about the spe
 Same format as the code reviewers:
 
 ```
-Summary: 1 IMPORTANT, 0 NIT, 0 PRE-EXISTING
+Summary: 2 IMPORTANT, 0 NIT, 0 PRE-EXISTING
 
 [IMPORTANT] src/export/format.ts:12 — Pattern Category: Reinvented helper
 Confidence: 90
 Mechanism: `formatMoney()` duplicates `formatCurrency()` in src/shared/format.ts:30, which also handles
 negative values and locale; the new copy prints "-$-5.00" for refunds.
+
+[IMPORTANT] src/deploy/tag.ts:8 — Pattern Category: Shell command built from input
+Confidence: 85
+Security: injection
+Mechanism: `exec("git tag " + name)` puts the request's tag name into a shell string, where src/shared/git.ts:14's
+`runGit()` passes arguments as an array; a name like "x; rm -rf ~" runs `rm` here and not there.
 ```
 
 - `[IMPORTANT]` when the break causes a bug, contradicts a written rule, or is a duplicate the next change will
@@ -84,4 +90,7 @@ negative values and locale; the new copy prints "-$-5.00" for refunds.
   more when you traced the failing input or state through the code; 60-89 when a step is unconfirmed (name it);
   below 60 only for something severe if true. Don't report what you'd score below 30. The voter checks the least
   confident findings hardest, and the nit cap keeps the most confident nits.
+- Add a `Security: <kind>` line under `Confidence:` to a finding that's an exploitable vulnerability (an input or
+  actor, a path from it to the line, and a harm), with `<kind>` a short name such as `injection`, `auth bypass` or
+  `secret in log`. Add it to no other finding.
 - With nothing substantive, reply exactly: `Summary: 0 issues found. Ready to land.`

@@ -33,7 +33,9 @@ plan says what the finding claims, then check the code it names to see whether t
   that rest on a rule quote it the same way), so `quorum-learned-rule audit` can tell which rules still fire; or (e)
   outside the task's scope in `rd.md` and not a bug the change introduces.
 - **KEEP** otherwise. Keep a real bug even if the reviewer described it badly; rewrite its Mechanism line to be
-  accurate, and set its `Confidence:` line to your own after checking (add one if it had none). Merge duplicates (two reviewers, one bug) into one finding.
+  accurate, and set its `Confidence:` line to your own after checking (add one if it had none). Keep its
+  `Security:` line, if it has one, unchanged.
+  Merge duplicates (two reviewers, one bug) into one finding; the merged finding keeps a `Security:` line if any of its duplicates had one.
 - If a kept finding is tagged wrong, retag it (for example a bug that predates the change is `[PRE-EXISTING]`).
 - Copy any `## Needs a human` sections (from the accessibility or docs auditor) through unchanged, after the kept
   findings and before `## Dropped`. Those items are questions for a person, not findings to vote on.
@@ -43,11 +45,16 @@ First the kept findings, in exactly the reviewers' format, starting with a summa
 `## Dropped` section with one line per dropped finding:
 
 ```
-Summary: 1 IMPORTANT, 0 NIT, 0 PRE-EXISTING
+Summary: 2 IMPORTANT, 0 NIT, 0 PRE-EXISTING
 
 [IMPORTANT] app/report.py:42 — Pattern Category: Unescaped CSV fields
 Confidence: 95
 Mechanism: "Acme, Inc." is written unquoted, so the row has four columns instead of three.
+
+[IMPORTANT] app/report.py:44 — Pattern Category: CSV formula injection
+Confidence: 90
+Security: injection
+Mechanism: a customer named "=HYPERLINK(...)" is written as-is, so a spreadsheet that opens the export runs it.
 
 ## Dropped
 DROP [IMPORTANT] app/report.py:7 — (b) load() errors are caught in main() at app/report.py:30.

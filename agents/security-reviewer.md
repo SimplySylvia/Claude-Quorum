@@ -51,10 +51,14 @@ Summary: 1 IMPORTANT, 0 NIT, 0 PRE-EXISTING
 
 [IMPORTANT] app/export.py:31 — Pattern Category: CSV formula injection
 Confidence: 95
+Security: injection
 Mechanism: a customer named "=HYPERLINK(...)" is written as-is, so a spreadsheet that opens the export runs it.
 ```
 
 Every finding's second line is `Confidence: <0-100>`: 90 or more when you traced an exploit path through the code,
 lower when a step is unconfirmed (name it). Report a plausible vulnerability even when you're unsure; say why.
+
+Every finding has a `Security: <kind>` line after its `Confidence:` line, where `<kind>` is a short name for the
+vulnerability such as `injection`, `auth bypass` or `secret in log`. The dashboard flags findings that carry it.
 
 With nothing exploitable, reply exactly: `Summary: 0 issues found. Ready to land.`
