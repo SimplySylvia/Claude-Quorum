@@ -4478,3 +4478,173 @@ test('a value stored by the previous shape is dropped, not misread', async ($, o
   expect(drawn.review).toBeUndefined()
   expect(drawn.engine).toBeDefined()
 })
+
+// ---- The blind test at the PR handoff
+
+const BLIND_FOLD = 'export-csv:blind'
+const REACHED = 'Goal: export customers\nResult: REACHED\n\nFriction:\n- FRICTION: ran export --help — no example\n'
+const NOTHING_CAUSED = 'Triage: export-csv, 1 friction item\n\nRELATED:\n- "no example" — help text predates this change\n'
+const AT_80 = { ...ON_TERMINAL, props: { ...ON_TERMINAL.props, bodyColumns: 80 } }
+// A task at the PR handoff (AWAITING-HUMAN unless `status` says), its plan's steps built, whose last blind run is
+// `runs` (2 unless given), with run R's blind-R.md and triage-R.md as given (a clean run's when not given, left out
+// when null), and a11y-R.md and security-R.md only when given.
+type Handoff = { status?: string; risk?: string; runs?: number; extra?: string; blind?: string | null; triage?: string | null; a11y?: string; security?: string }
+function atHandoff(o: Handoff = {}): Record<string, string> {
+  const run = o.runs ?? 2
+  const changed = [fileRow('M', '5', '1', 'app/report.py', '1'), fileRow('A', '9', '0', 'app/util.py', '2'), fileRow('M', '2', '0', 'README.md', '2,3')]
+  const files: Record<string, string> = {
+    ...inRounds([survivorsMd(nitAt('app/report.py:1'))], { status: o.status ?? 'AWAITING-HUMAN', risk: o.risk, extra: `${builtSteps(1, 2, 3)}${o.extra ?? ''}` }),
+    [PLAN]: STEPS_PLAN,
+    [LIST]: filesTsv(changed),
+  }
+  files['.tasks/export-csv/state.md'] = (files['.tasks/export-csv/state.md'] ?? '').replace('blind_runs: 0', `blind_runs: ${run}`)
+  const at = (name: string) => `.tasks/export-csv/blind/${name}-${run}.md`
+  if (o.blind !== null) files[at('blind')] = o.blind ?? REACHED
+  if (o.triage !== null) files[at('triage')] = o.triage ?? NOTHING_CAUSED
+  if (o.a11y !== undefined) files[at('a11y')] = o.a11y
+  if (o.security !== undefined) files[at('security')] = o.security
+  return files
+}
+const ONE_IMPORTANT = survivorsMd(impAt('app/report.py:3', 'Low contrast'))
+const blindButton = async (pane: Drawn) => pane.find({ type: 'Button', key: BLIND_FOLD })
+
+test('at the handoff the Now card shows the last blind run as one row that opens', async ($, on) => {
+  const files: Record<string, string> = atHandoff()
+  // Every write of the open folds, as the dashboard stores it, passed on to the engine.
+  const sets: unknown[] = []
+  const register = on as unknown as (event: string, matcher: unknown, hook: unknown) => void
+  register('state.set', { plugin: 'quorum', key: 'sections' }, async (_: unknown, e: { value: unknown }, next: (e: unknown) => Promise<unknown>) => {
+    sets.push(e.value)
+    return next(e)
+  })
+  world(on, files)
+  on('process.run', () => { throw new Error('gh: command not found') })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const CLEAN = 'run 2 · reached · 0 blockers · 0 caused'
+  const look = async (next: Record<string, string>, at: typeof ON_TERMINAL | typeof AT_80 = AT_80) => {
+    await reload($, files, next)
+    const pane = await $.ui.mount(at)
+    const row = (await blindButton(pane))?.text
+    const buttons = (await pane.findAll({ type: 'Button' })).map(b => b.key ?? '')
+    const all = await texts(pane)
+    const color = async (text: string) => (await partOf(pane, BLIND_FOLD, text))?.props?.color
+    return { pane, row, buttons, all, color }
+  }
+
+  // Clean, with no PR known: folded, in success, after the "Every stage is done" line and before the steps fold.
+  let v = await look(atHandoff())
+  expect(v.row).toBe(`▸ Blind test  ${CLEAN}`)
+  expect(await v.color(CLEAN)).toBe('success')
+  const done = v.all.indexOf('Every stage is done.')
+  expect(done).toBeGreaterThan(-1)
+  expect(v.all[done + 1]).toBe(v.row)
+  expect(v.buttons[v.buttons.indexOf(BLIND_FOLD) + 1]).toBe(STEPS_FOLD)
+  expect(v.all.findIndex(x => /^. Blind user/.test(x))).toBe(-1)
+  await v.pane.unmount()
+  // At 50 columns the row fits the card and keeps its start.
+  v = await look(atHandoff(), ON_TERMINAL)
+  const clean50 = v.row ?? ''
+  expect(cols(clean50)).toBeLessThanOrEqual(46)
+  expect(clean50.startsWith('▸ Blind test  run 2 ·')).toBe(true)
+  await v.pane.unmount()
+  // With a PR known the done line goes, and the row sits directly under the Now title.
+  v = await look(atHandoff({ extra: 'pr: https://github.com/o/r/pull/42\n' }))
+  expect(v.all.indexOf('Every stage is done.')).toBe(-1)
+  const title = v.all.findIndex(x => x.startsWith('Now · '))
+  expect(v.all.slice(title + 1, v.all.indexOf(v.row ?? ''))).toEqual(['Now · ', 'Waiting for you'])
+  expect(v.buttons[v.buttons.indexOf(BLIND_FOLD) + 1]).toBe(STEPS_FOLD)
+  await v.pane.unmount()
+
+  // A run that isn't clean is in warning and open by itself, its problem parts first, and at 50 columns still
+  // differs from a clean run's row without colour.
+  const warnings: { o: Handoff; text: string; opened: RegExp[]; absent: RegExp[] }[] = [
+    { o: { a11y: ONE_IMPORTANT, security: ONE_IMPORTANT }, text: 'run 2 · security 1 · a11y 1 · reached · 0 blockers · 0 caused', opened: [/^✗ Accessibility\s+1 IMPORTANT$/, /^✗ Security\s+1 IMPORTANT$/], absent: [] },
+    { o: { security: ONE_IMPORTANT }, text: 'run 2 · security 1 · reached · 0 blockers · 0 caused', opened: [/^✗ Security\s+1 IMPORTANT$/], absent: [/^. Accessibility/] },
+    { o: { a11y: ONE_IMPORTANT }, text: 'run 2 · a11y 1 · reached · 0 blockers · 0 caused', opened: [/^✗ Accessibility\s+1 IMPORTANT$/], absent: [/^. Security/] },
+    { o: { triage: TRIAGE }, text: 'run 2 · 1 caused · reached · 0 blockers', opened: [/^✗ Friction triage\s+1 item caused by this change$/], absent: [/^. Accessibility/, /^. Security/] },
+    { o: { blind: BLIND }, text: 'run 2 · 1 blocker · not reached · 0 caused', opened: [/^✗ Blind user\s+did not reach the goal · 1 blocker · 2 friction$/], absent: [] },
+    { o: { triage: null }, text: 'run 2 · triage: no report · reached · 0 blockers', opened: [/^○ Friction triage\s+no report$/, /^✓ Blind user\s+reached the goal · 0 blockers · 1 friction$/], absent: [] },
+    { o: { blind: null }, text: 'run 2 · no report · 0 blockers · 0 caused', opened: [/^○ Blind user\s+no report$/, /^✓ Friction triage\s+nothing caused by this change$/], absent: [] },
+  ]
+  for (const w of warnings) {
+    v = await look(atHandoff(w.o))
+    expect(v.row).toBe(`▾ Blind test  ${w.text}`)
+    expect(await v.color(w.text)).toBe('warning')
+    for (const re of w.opened) expect(v.all.some(x => re.test(x))).toBe(true)
+    for (const re of w.absent) expect(v.all.some(x => re.test(x))).toBe(false)
+    await v.pane.unmount()
+    v = await look(atHandoff(w.o), ON_TERMINAL)
+    const drawn = v.row ?? ''
+    expect(cols(drawn)).toBeLessThanOrEqual(46)
+    expect(drawn.startsWith('▾ Blind test  run 2 ·')).toBe(true)
+    expect(drawn.slice(2)).not.toBe(clean50.slice(2))
+    if (w.o.security) expect(drawn).toContain('security 1')
+    await v.pane.unmount()
+  }
+
+  // No row for a LOW task, with no blind run, or in the blind-test stage itself.
+  for (const o of [{ risk: 'LOW' }, { runs: 0 }, { status: 'BLIND-TEST' }]) {
+    v = await look(atHandoff(o))
+    expect(v.row).toBeUndefined()
+    await v.pane.unmount()
+  }
+
+  // A press opens a clean run: its blind user and triage rows, and an accessibility row since a11y-2.md exists,
+  // with no security row since security-2.md doesn't. The open state is stored under export-csv:blind.
+  v = await look(atHandoff({ a11y: NOTHING_KEPT }))
+  expect(v.row).toBe(`▸ Blind test  ${CLEAN}`)
+  await v.pane.press({ key: BLIND_FOLD })
+  expect((await blindButton(v.pane))?.text).toBe(`▾ Blind test  ${CLEAN}`)
+  const opened = await texts(v.pane)
+  expect(opened.some(x => /^✓ Blind user\s+reached the goal · 0 blockers · 1 friction$/.test(x))).toBe(true)
+  expect(opened.some(x => /^✓ Friction triage\s+nothing caused by this change$/.test(x))).toBe(true)
+  expect(opened.some(x => /^✓ Accessibility\s+clean$/.test(x))).toBe(true)
+  expect(opened.some(x => /^. Security/.test(x))).toBe(false)
+  await v.pane.unmount()
+  const last = sets[sets.length - 1] as { value?: Record<string, boolean> } | undefined
+  expect(last?.value?.[BLIND_FOLD]).toBe(true)
+  // Per task: another task's clean run is folded, and back on this one it is still open.
+  const other = JSON.parse(JSON.stringify(atHandoff()).split('export-csv').join('export-pdf')) as Record<string, string>
+  v = await look(other)
+  expect((await v.pane.find({ type: 'Button', key: 'export-pdf:blind' }))?.text).toBe(`▸ Blind test  ${CLEAN}`)
+  await v.pane.unmount()
+  v = await look(atHandoff())
+  expect(v.row).toBe(`▾ Blind test  ${CLEAN}`)
+  await v.pane.unmount()
+})
+
+test('the blind test row is a Button labelled in words', async ($, on) => {
+  const files: Record<string, string> = atHandoff()
+  world(on, files)
+  on('process.run', () => { throw new Error('gh: command not found') })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const label = async (pane: Drawn) => (await blindButton(pane))?.props?.label
+  let pane = await $.ui.mount(ON_TERMINAL)
+  expect((await blindButton(pane))?.type).toBe('Button')
+  expect(await label(pane)).toBe('Blind test, run 2, reached the goal, 0 blockers, 0 caused, folded')
+  await pane.press({ key: BLIND_FOLD })
+  expect(await label(pane)).toBe('Blind test, run 2, reached the goal, 0 blockers, 0 caused, open')
+  await pane.unmount()
+
+  // The label keeps its usual order, the reports' counts last; the row opens by itself.
+  await reload($, files, atHandoff({ a11y: ONE_IMPORTANT, security: ONE_IMPORTANT }))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await label(pane)).toBe('Blind test, run 2, reached the goal, 0 blockers, 0 caused, 1 accessibility IMPORTANT, 1 security IMPORTANT, open')
+  await pane.unmount()
+  await reload($, files, atHandoff({ triage: null }))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await label(pane)).toBe('Blind test, run 2, reached the goal, 0 blockers, triage: no report, open')
+  await pane.unmount()
+  await reload($, files, atHandoff({ blind: BLIND, triage: TRIAGE }))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await label(pane)).toBe('Blind test, run 2, did not reach the goal, 1 blocker, 1 caused, open')
+  await pane.unmount()
+  await reload($, files, atHandoff({ blind: null }))
+  pane = await $.ui.mount(ON_TERMINAL)
+  expect(await label(pane)).toBe('Blind test, run 2, no report, 0 blockers, 0 caused, open')
+  // A press toggles it.
+  await pane.press({ key: BLIND_FOLD })
+  expect(await label(pane)).toBe('Blind test, run 2, no report, 0 blockers, 0 caused, folded')
+  expect((await blindButton(pane))?.text.startsWith('▸ Blind test  ')).toBe(true)
+  await pane.unmount()
+})

@@ -6,13 +6,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { ChangedFile, Check, Findings, FindingsView, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, RoundKept, Section, Snapshot, Stage } from '../../types'
+import type { Blind, ChangedFile, Check, Findings, FindingsView, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, RoundKept, Section, Snapshot, Stage } from '../../types'
 import {
   ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, parsePlanSteps, SLICE_AT, stageOf, stages, tokenCount,
-  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep, editPath, unmetNote, unmetNow, unmetWords, checksRow,
+  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep, editPath, unmetNote, unmetNow, unmetWords, checksRow, blindSummary,
 } from './task'
-import { awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, footprint, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows } from './tree'
+import { awaitingFrom, awaitingOf, cellWidth, changeHeader, cutEnd, confidenceRow, footprint, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows } from './tree'
 import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
 
 const PANE = 'quorum-dashboard'
@@ -188,6 +188,11 @@ type Histories = { code: RoundFiles[]; plan: RoundFiles[]; roots: string[] }
 // What the current stage is doing, read from the files its skill saves.
 async function nowFor($: EngineInterface, dir: string, t: Pick<Snapshot, 'stage' | 'risk' | 'round' | 'maxRounds' | 'planRounds' | 'blindRuns' | 'codeView' | 'rereview'>, rd: string, h: Histories): Promise<Now> {
   const codeRound = () => roundNow($, `${dir}/review`, 'review', t.round, t.maxRounds, t.risk, t.codeView, t.rereview, h.roots)
+  // Blind run `run`'s reports, as its files stand.
+  const readBlind = async (run: number) => {
+    const files = await readFiles($, `${dir}/blind`, [`blind-${run}.md`, `a11y-${run}.md`, `security-${run}.md`, `triage-${run}.md`])
+    return parseBlind(run, { blind: files[`blind-${run}.md`], a11y: files[`a11y-${run}.md`], security: files[`security-${run}.md`], triage: files[`triage-${run}.md`] })
+  }
   switch (STAGES[t.stage]) {
     case 'Spec': {
       const files = await readFiles($, `${dir}/spec-review`, ['feasibility.md', 'improver.md'])
@@ -201,15 +206,11 @@ async function nowFor($: EngineInterface, dir: string, t: Pick<Snapshot, 'stage'
     case 'Build': return { kind: 'build' }
     case 'Review': return codeRound()
     case 'Blind test': {
-      if (t.risk === 'LOW' || t.blindRuns === 0) return t.round > 0 ? codeRound() : { kind: 'done' }
-      const run = t.blindRuns
-      const files = await readFiles($, `${dir}/blind`, [`blind-${run}.md`, `a11y-${run}.md`, `security-${run}.md`, `triage-${run}.md`])
-      return {
-        kind: 'blind',
-        blind: parseBlind(run, { blind: files[`blind-${run}.md`], a11y: files[`a11y-${run}.md`], security: files[`security-${run}.md`], triage: files[`triage-${run}.md`] }),
-      }
+      if (t.risk === 'LOW' || t.blindRuns === 0) return t.round > 0 ? codeRound() : { kind: 'done', blind: null }
+      return { kind: 'blind', blind: await readBlind(t.blindRuns) }
     }
-    default: return { kind: 'done' }
+    // The PR handoff: the last blind run, when the task had one.
+    default: return { kind: 'done', blind: t.risk !== 'LOW' && t.blindRuns >= 1 ? await readBlind(t.blindRuns) : null }
   }
 }
 
@@ -856,6 +857,31 @@ export const register: Register = (on, options) => {
       if (important !== null) return line(role, 'done', ROLE_LABEL[role] ?? role, detail(important), important > 0)
       return agent ? line(role, 'running', ROLE_LABEL[role] ?? role, `running ${seconds(agent, clockNow)}`) : null
     }
+    // A blind run's rows: the blind user, then the accessibility, security and triage reports. In the blind-test
+    // stage a report not written yet shows while its agent runs. At the handoff nothing runs: the blind user and
+    // triage rows always show, as `no report` when their file is missing, and the other two only when written.
+    const blindRows = (b: Blind, atHandoff: boolean) => {
+      const blindLabel = ROLE_LABEL.blind ?? 'Blind user'
+      const triageLabel = ROLE_LABEL.triage ?? 'triage'
+      const running = atHandoff ? undefined : runningAs('blind')
+      const report = (role: string, important: number | null, detail: (k: number) => string) => atHandoff
+        ? important === null ? null : line(role, 'done', ROLE_LABEL[role] ?? role, detail(important), important > 0)
+        : reportLine(role, important, detail)
+      return [
+        b.result
+          ? line('blind', 'done', blindLabel, `${b.result === 'REACHED' ? 'reached the goal' : 'did not reach the goal'} · ${plural(b.blockers, 'blocker')} · ${b.friction} friction`, b.result !== 'REACHED' || b.blockers > 0)
+          : atHandoff
+            ? line('blind', 'waiting', blindLabel, 'no report')
+            : running
+              ? line('blind', 'running', blindLabel, `running ${seconds(running, clockNow)}`)
+              : line('blind', 'waiting', blindLabel, 'waiting'),
+        report('a11y', b.a11y, k => k ? `${k} IMPORTANT` : 'clean'),
+        report('security', b.security, k => k ? `${k} IMPORTANT` : 'clean'),
+        atHandoff && b.caused === null
+          ? line('triage', 'waiting', triageLabel, 'no report')
+          : report('triage', b.caused, k => k ? `${plural(k, 'item')} caused by this change` : 'nothing caused by this change'),
+      ]
+    }
 
     // A section folds to one row; it opens by itself while it holds a problem, and a click overrides that. With no
     // task, only Reviews can show, and it opens by itself.
@@ -1047,6 +1073,32 @@ export const register: Register = (on, options) => {
         {isFilesOpen ? codeTree(t.codeView) : null}
       </Box>
     ) : null
+    // At the PR handoff, the last blind run folds to one row whose summary leads with what made it not clean; it
+    // opens by itself while not clean, to the rows the blind-test stage showed, and the choice is kept per task.
+    const blindKey = `${t.slug}:blind`
+    const blindRow = (b: Blind) => {
+      const summary = blindSummary(b)
+      const isOpen = folds[blindKey] ?? !summary.isClean
+      return (
+        <Box key={`${blindKey}-row`} flexDirection="column">
+          <Button
+            key={blindKey}
+            plain
+            hover={{ color: 'claude' }}
+            label={`Blind test, ${summary.words}, ${isOpen ? 'open' : 'folded'}`}
+            onPress={() => void update($, sections, all => ({ ...all, [blindKey]: !isOpen }))}
+          >
+            <Text wrap="truncate-end">
+              <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
+              <Text bold>Blind test</Text>
+              <Text>  </Text>
+              <Text color={summary.isClean ? 'success' : 'warning'}>{cutEnd(summary.text, treeWidth - 14)}</Text>
+            </Text>
+          </Button>
+          {isOpen ? <Box flexDirection="column" marginLeft={2}>{blindRows(b, true)}</Box> : null}
+        </Box>
+      )
+    }
     // The code review's voter row. While round N+1 reviews with no vote yet, and round N's fix awaits re-review,
     // it keeps round N's verdict, labelled with its round.
     const roundVoter = (n: Extract<Now, { kind: 'plan' | 'review' }>) => {
@@ -1265,14 +1317,7 @@ export const register: Register = (on, options) => {
           )}
           {n.kind === 'blind' && (
             <Box flexDirection="column">
-              {n.blind.result
-                ? line('blind', 'done', ROLE_LABEL.blind ?? 'Blind user', `${n.blind.result === 'REACHED' ? 'reached the goal' : 'did not reach the goal'} · ${plural(n.blind.blockers, 'blocker')} · ${n.blind.friction} friction`, n.blind.result !== 'REACHED' || n.blind.blockers > 0)
-                : runningAs('blind')
-                  ? line('blind', 'running', ROLE_LABEL.blind ?? 'Blind user', `running ${seconds(runningAs('blind') as QuorumAgent, clockNow)}`)
-                  : line('blind', 'waiting', ROLE_LABEL.blind ?? 'Blind user', 'waiting')}
-              {reportLine('a11y', n.blind.a11y, k => k ? `${k} IMPORTANT` : 'clean')}
-              {reportLine('security', n.blind.security, k => k ? `${k} IMPORTANT` : 'clean')}
-              {reportLine('triage', n.blind.caused, k => k ? `${plural(k, 'item')} caused by this change` : 'nothing caused by this change')}
+              {blindRows(n.blind, false)}
               {/* HALTED after a blind run: the Review tree, unfolded, under the blind test's rows. */}
               {stepsPart({ isPressable: t.files !== null, filesKey: t.status !== 'HALTED' && filesRow ? filesKey : undefined })}
               {t.status === 'HALTED' && codeChange ? codeTree(t.codeView) : filesRow}
@@ -1281,6 +1326,7 @@ export const register: Register = (on, options) => {
           {n.kind === 'done' && !(known && known.number > 0) && (
             <Text dimColor>{t.prDrafted ? 'Every stage is done; pr.md is drafted.' : 'Every stage is done.'}</Text>
           )}
+          {n.kind === 'done' && n.blind ? blindRow(n.blind) : null}
           {n.kind === 'done' && stepsPart({ isPressable: t.files !== null, filesKey })}
           {n.kind === 'done' ? filesRow : null}
           <Box flexDirection="row" gap={1} marginTop={1}>

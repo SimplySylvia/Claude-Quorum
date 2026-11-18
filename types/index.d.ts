@@ -94,7 +94,8 @@ export type Now =
   | { kind: 'plan' | 'review'; round: number; of: number; reviewers: Reviewer[]; voter: Reviewer; survivors: Findings | null; tree: FindingsView | null; rereviewBy: Record<string, number> }
   | { kind: 'build' }
   | { kind: 'blind'; blind: Blind }
-  | { kind: 'done' }
+  // `blind`: at the PR handoff, the task's last blind run; null for a LOW task, or one with no blind run.
+  | { kind: 'done'; blind: Blind | null }
 
 // One of plan.md's steps, as `quorum-plan show N` reads it: its number, title, requirement numbers, and the 1-based
 // plan.md lines it spans, from its numbered line to its last indented line.

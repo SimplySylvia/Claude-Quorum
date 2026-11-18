@@ -235,6 +235,41 @@ export function parseBlind(run: number, files: { blind?: string; a11y?: string; 
   }
 }
 
+// A blind run as the handoff's Blind test row reads it. `text`: `run R`, then its parts joined by ` · `, the ones that
+// make the run not clean first (security, a11y, caused, blockers, not reached, no report, triage: no report), so a
+// cut row still shows them; then the rest in the order result, blockers, triage. `words`: the label's, in that
+// usual order. `isClean`: reached, no blocker, nothing caused, and no accessibility or security IMPORTANT.
+export function blindSummary(b: Blind): { text: string; words: string; isClean: boolean } {
+  const a11y = b.a11y ?? 0
+  const security = b.security ?? 0
+  const result = b.result === 'REACHED' ? 'reached' : b.result === 'NOT REACHED' ? 'not reached' : 'no report'
+  const blockers = plural(b.blockers, 'blocker')
+  const triage = b.caused === null ? 'triage: no report' : `${b.caused} caused`
+  const problems = [
+    security > 0 ? `security ${security}` : '',
+    a11y > 0 ? `a11y ${a11y}` : '',
+    b.caused !== null && b.caused > 0 ? triage : '',
+    b.blockers > 0 ? blockers : '',
+    result === 'not reached' ? result : '',
+    result === 'no report' ? result : '',
+    b.caused === null ? triage : '',
+  ].filter(p => p !== '')
+  const rest = [result, blockers, triage].filter(p => !problems.includes(p))
+  const words = [
+    `run ${b.run}`,
+    b.result === 'REACHED' ? 'reached the goal' : b.result === 'NOT REACHED' ? 'did not reach the goal' : 'no report',
+    blockers,
+    triage,
+    ...(a11y > 0 ? [`${a11y} accessibility IMPORTANT`] : []),
+    ...(security > 0 ? [`${security} security IMPORTANT`] : []),
+  ]
+  return {
+    text: [`run ${b.run}`, ...problems, ...rest].join(' · '),
+    words: words.join(', '),
+    isClean: b.result === 'REACHED' && b.blockers === 0 && b.caused === 0 && a11y === 0 && security === 0,
+  }
+}
+
 // Which reviewer an agent is, from its type and the persona its prompt names.
 export function roleOf(type: string, prompt: string): string {
   const persona = /Persona:\s*([^.\n]+)/.exec(prompt)?.[1] ?? ''
