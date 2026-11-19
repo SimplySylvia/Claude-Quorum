@@ -11,7 +11,7 @@ import {
   plural, voterNext, parseFileList, parsePlanSteps, editPath, unmetNote, checksRow,
 } from '../../hooks/dashboard/task'
 import {
-  awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, footprint, iconsOn, isBigTree, markText, markWords, repoPath, roundKept, isEditShown, runEnds, splitLoc, stepFindings, stepRows, trackFindings, treeHeader, treeRows, wrap,
+  awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, footprint, glue, iconsOn, isBigTree, markText, markWords, repoPath, roundKept, isEditShown, runEnds, splitLoc, stepFindings, stepRows, trackFindings, treeHeader, treeRows, wrap,
 } from '../../hooks/dashboard/tree'
 import type { TreeChange, TreeRow } from '../../hooks/dashboard/tree'
 import {
@@ -4899,7 +4899,7 @@ const tk = (n: string, status: string, over: Partial<MapTicket> = {}): MapTicket
   n, title: `Ticket ${n}`, type: 'research', blockedBy: [], status, answeredBy: status === 'resolved' ? 'agent' : '', question: 'Why?', gist: '', ...over,
 })
 const mapRun = (n: number, slug: string, status: string, over: Partial<MapTaskRun> = {}): MapTaskRun => ({
-  n, slug, status, risk: 'MEDIUM', stage: stageOf(status, undefined), isFast: false, pr: null, files: null, rounds: [], codeView: null, hasPlan: false, ...over,
+  n, slug, status, risk: 'MEDIUM', stage: stageOf(status, undefined), isFast: false, pr: null, files: null, rounds: [], codeView: null, rereview: [], hasPlan: false, ...over,
 })
 const voted = (important: number | null) => ({
   round: 1, exists: true, reviewers: [], voter: { role: 'voter', findings: important === null ? null : { important, nit: 0, preExisting: 0 } }, survivors: null,
@@ -5012,13 +5012,13 @@ test("a map's title, destination, decisions, tickets and tasks are read as quoru
   // tasks.md's three tasks with no tasks-review/: Hand off.
   const closed = ticketsWith({ '04': 'out-of-scope', '05': 'out-of-scope' })
   await reload($, files, inSession({ tickets: closed }))
-  expect(await look($, async p => boxText(p, 'map-card:stepper'))).toBe('✓ Chart ✓ Tickets 2/2 ● Hand off ○ Tasks 0/3')
+  expect(await look($, async p => boxText(p, 'map-card:stepper'))).toBe('✓ Chart ✓ Tickets 2/2 in scope ● Hand off ○ Tasks 0/3')
   // The breakdown's round-1 voted: Tasks, waiting on the user to approve it.
   await reload($, files, inSession({ tickets: closed }, { [`${MAP_DIR}/tasks-review/round-1/votes.md`]: NOTHING_KEPT }))
-  expect(await look($, async p => boxText(p, 'map-card:stepper'))).toBe('✓ Chart ✓ Tickets 2/2 ✓ Hand off ◆ Tasks 0/3')
+  expect(await look($, async p => boxText(p, 'map-card:stepper'))).toBe('✓ Chart ✓ Tickets 2/2 in scope ✓ Hand off ◆ Tasks 0/3')
   // No votes.md, but another task, on another branch, was started from the map: Tasks.
   await reload($, files, inSession({ tickets: closed }, { '.tasks/import-rows/state.md': state('BUILDING', 'map: csv-everywhere\nmap_task: 2\n') }))
-  expect(await look($, async p => boxText(p, 'map-card:stepper'))).toBe('✓ Chart ✓ Tickets 2/2 ✓ Hand off ● Tasks 0/3')
+  expect(await look($, async p => boxText(p, 'map-card:stepper'))).toBe('✓ Chart ✓ Tickets 2/2 in scope ✓ Hand off ● Tasks 0/3')
 })
 
 test('the demo map reads the same tickets quorum-map lists', () => {
@@ -5046,47 +5046,49 @@ test("the map's phase and counts follow its tickets, tasks.md and session", () =
   // An open ticket and an out-of-scope one among five: resolved of in-scope.
   const five = [tk('01', 'resolved'), tk('02', 'resolved'), tk('03', 'open'), tk('04', 'claimed'), tk('05', 'out-of-scope')]
   expect(mapPhase(mapView({ tickets: five }))).toBe(1)
-  expect(stepperText(mapView({ tickets: five }))).toBe('✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks')
+  expect(stepperText(mapView({ tickets: five }))).toBe('✓ Chart ● Tickets 2/4 in scope ○ Hand off ○ Tasks')
+  // With no ticket out of scope, every ticket counts, so the count says no more.
+  expect(stepperText(mapView({ tickets: five.slice(0, 4) }))).toBe('✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks')
   expect(mapStepper(mapView({ tickets: five }), null)[0]).toEqual([{ text: '✓', color: 'success' }, { text: ' Chart', dim: true }])
 
   // Every ticket closed and no tasks.md: Hand off.
-  expect(stepperText(mapView({ tickets: closed }))).toBe('✓ Chart ✓ Tickets 2/2 ● Hand off ○ Tasks')
+  expect(stepperText(mapView({ tickets: closed }))).toBe('✓ Chart ✓ Tickets 2/2 in scope ● Hand off ○ Tasks')
   // tasks.md with no review stays at Hand off, in a map session or not: no marker plays a part.
   for (const isSession of [true, false]) {
     expect(mapPhase(mapView({ tickets: closed, tasks, isSession }))).toBe(2)
-    expect(stepperText(mapView({ tickets: closed, tasks, isSession }))).toBe('✓ Chart ✓ Tickets 2/2 ● Hand off ○ Tasks 0/3')
+    expect(stepperText(mapView({ tickets: closed, tasks, isSession }))).toBe('✓ Chart ✓ Tickets 2/2 in scope ● Hand off ○ Tasks 0/3')
   }
   // A round whose votes.md isn't written yet doesn't count.
-  expect(stepperText(mapView({ tickets: closed, tasks, review: voted(null) }))).toBe('✓ Chart ✓ Tickets 2/2 ● Hand off ○ Tasks 0/3')
+  expect(stepperText(mapView({ tickets: closed, tasks, review: voted(null) }))).toBe('✓ Chart ✓ Tickets 2/2 in scope ● Hand off ○ Tasks 0/3')
 
   // A reviewed breakdown with no task started waits on the user to approve it.
   const reviewed = mapView({ tickets: closed, tasks, review: voted(1) })
   expect(mapPhase(reviewed)).toBe(3)
   expect(mapWaits(reviewed)).toBe(true)
-  expect(stepperText(reviewed)).toBe('✓ Chart ✓ Tickets 2/2 ✓ Hand off ◆ Tasks 0/3')
+  expect(stepperText(reviewed)).toBe('✓ Chart ✓ Tickets 2/2 in scope ✓ Hand off ◆ Tasks 0/3')
   expect(mapStepper(reviewed, null)[3]?.[0]).toEqual({ text: '◆', color: 'warning' })
 
   // Once a task names the map, the agent works it.
   const started = mapView({ tickets: closed, tasks, review: voted(1), runs: [mapRun(1, 'csv-export', 'BUILDING')] })
   expect(mapWaits(started)).toBe(false)
-  expect(stepperText(started)).toBe('✓ Chart ✓ Tickets 2/2 ✓ Hand off ● Tasks 0/3')
+  expect(stepperText(started)).toBe('✓ Chart ✓ Tickets 2/2 in scope ✓ Hand off ● Tasks 0/3')
   // A run alone, with no review, is Tasks too.
   expect(mapPhase(mapView({ tickets: closed, tasks, runs: [mapRun(1, 'csv-export', 'BUILDING')] }))).toBe(3)
 
   // Merged of all, from the states stored for this map only.
   const merged = statesFor('csv-everywhere', { 1: 'merged', 2: 'BUILDING', 3: 'ready' })
-  expect(stepperText(started, merged)).toBe('✓ Chart ✓ Tickets 2/2 ✓ Hand off ● Tasks 1/3')
+  expect(stepperText(started, merged)).toBe('✓ Chart ✓ Tickets 2/2 in scope ✓ Hand off ● Tasks 1/3')
   expect(mergedCount(started, merged)).toBe(1)
   expect(readyTasks(started, merged).map(t => t.n)).toEqual([3])
   const beta = { ...merged, slug: 'beta' }
-  expect(stepperText(started, beta)).toBe('✓ Chart ✓ Tickets 2/2 ✓ Hand off ● Tasks 0/3')
+  expect(stepperText(started, beta)).toBe('✓ Chart ✓ Tickets 2/2 in scope ✓ Hand off ● Tasks 0/3')
   expect(statesOf(started, beta)).toBeNull()
   expect(readyTasks(started, beta)).toEqual([])
 
   // A claimed ticket wins over a started task: the phase is Tickets.
   const reopened = mapView({ tickets: [...closed, tk('04', 'claimed')], tasks, runs: [mapRun(1, 'csv-export', 'BUILDING')] })
   expect(mapPhase(reopened)).toBe(1)
-  expect(stepperText(reopened)).toBe('✓ Chart ● Tickets 2/3 ○ Hand off ○ Tasks 0/3')
+  expect(stepperText(reopened)).toBe('✓ Chart ● Tickets 2/3 in scope ○ Hand off ○ Tasks 0/3')
 })
 
 test('tickets sit under their first blocker, at most three levels deep, each drawn once', () => {
@@ -5115,14 +5117,14 @@ test('a ticket reads its status, mark and type, and the map its summary and the 
     tk('08', 'claimed', { type: 'prototype' }),
   ]
   const at = (n: string, running = false) => ticketStatus(all.find(t => t.n === n) as MapTicket, all, running)
-  expect(at('01')).toEqual({ mark: '✓', markColor: 'success', word: 'you', wordColor: 'success', type: null, words: 'resolved, decided by you' })
-  expect(at('02')).toEqual({ mark: '✓', markColor: 'subtle', word: 'agent', wordColor: 'claude', type: null, words: 'resolved, decided by the agent' })
+  expect(at('01')).toEqual({ mark: '✓', markColor: 'success', word: 'by you', wordColor: 'success', type: null, words: 'resolved, decided by you' })
+  expect(at('02')).toEqual({ mark: '✓', markColor: 'inactive', word: 'by agent', wordColor: 'claude', type: null, words: 'resolved, decided by the agent' })
   expect(at('03', true)).toEqual({ mark: '◆', markColor: 'warning', word: 'your answer', wordColor: 'warning', type: 'grilling', words: 'your answer' })
   expect(at('08').mark).toBe('◆')
   // A claimed research ticket is in progress only while an agent runs, so a stale claim never looks busy.
   expect(at('04', true)).toEqual({ mark: '●', markColor: 'claude', word: 'in progress', wordColor: 'claude', type: 'research', words: 'in progress' })
-  expect(at('04', false)).toEqual({ mark: '○', markColor: 'subtle', word: 'claimed', wordColor: 'subtle', type: 'research', words: 'claimed' })
-  expect(at('05')).toEqual({ mark: '○', markColor: 'subtle', word: 'ready', wordColor: 'subtle', type: 'grilling', words: 'ready' })
+  expect(at('04', false)).toEqual({ mark: '○', markColor: 'inactive', word: 'claimed', wordColor: '', type: 'research', words: 'claimed' })
+  expect(at('05')).toEqual({ mark: '○', markColor: 'inactive', word: 'ready', wordColor: 'text', type: 'grilling', words: 'ready' })
   // Every blocker still open, in Blocked by order.
   expect(at('06')).toEqual({ mark: '○', markColor: 'inactive', word: 'after 04, 03', wordColor: 'inactive', type: 'task', words: 'after 04, 03' })
   expect(at('07')).toEqual({ mark: '–', markColor: 'inactive', word: 'out of scope', wordColor: '', type: null, words: 'out of scope' })
@@ -5162,8 +5164,8 @@ test("a map task's state reads as one word and one mark, for the map its states 
   const at = (n: number, running = false, states: MapStates | null = s) => taskState(tasks[n - 1] as (typeof tasks)[number], m, states, running)
   expect(at(1)).toEqual({ word: 'merged', mark: '✓', color: 'success' })
   expect(at(2, true)).toEqual({ word: 'building', mark: '●', color: 'claude' })
-  expect(at(2, false)).toEqual({ word: 'building', mark: '○', color: 'subtle' })
-  expect(at(3)).toEqual({ word: 'ready', mark: '○', color: 'subtle' })
+  expect(at(2, false)).toEqual({ word: 'building', mark: '○', color: 'inactive' })
+  expect(at(3)).toEqual({ word: 'ready', mark: '○', color: 'inactive' })
   // Its blockers that aren't merged.
   expect(at(4)).toEqual({ word: 'after task 2, 3', mark: '○', color: 'inactive' })
   for (const n of [5, 6, 7]) expect(at(n, true)).toEqual({ word: 'your move', mark: '◆', color: 'warning' })
@@ -5259,7 +5261,7 @@ test("a map's task shows a Map card above its Task card, and a task with no map 
   const title = await boxText(d, 'map-card:title')
   // The Box's text joins the title's Text and the slug's.
   expect(title).toBe('Map · Export the sales rows everywherecsv-everywhere')
-  expect(await boxText(d, 'map-card:stepper')).toBe('✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 0/3')
+  expect(await boxText(d, 'map-card:stepper')).toBe('✓ Chart ● Tickets 2/4 in scope ○ Hand off ○ Tasks 0/3')
   expect((await d.findAll({ type: 'Box' })).filter(b => /^map-card:phase-\d$/.test(b.key ?? '')).length).toBe(4)
   expect(await boxText(d, 'map-task-line')).toBe('task 1 of 3 · Export the sales rows as CSV · next: 3 Add XLSX')
   expect(await boxText(d, 'map-task-line:0')).toBe('task 1 of 3 · Export the sales rows as CSV')
@@ -5420,7 +5422,7 @@ test('task states come from quorum-map in the background, cached for two minutes
   expect(runs.length).toBe(1)
   await runs[0]?.answer(STATES)
   // Task 9 isn't in tasks.md, so it isn't counted: 1 of 3 merged.
-  expect(await card()).toEqual({ stepper: '✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 1/3', line: 'task 2 of 3 · Import the rows back · next: 3 Add XLSX' })
+  expect(await card()).toEqual({ stepper: '✓ Chart ● Tickets 2/4 in scope ○ Hand off ○ Tasks 1/3', line: 'task 2 of 3 · Import the rows back · next: 3 Add XLSX' })
   // The rows read each task's state from the result.
   expect(await taskLines()).toEqual([['  ✓ ', '    merged · MEDIUM'], ['  ○ ', '    building · MEDIUM'], ['  ○ ', '    ready · LOW']])
 
@@ -5452,7 +5454,7 @@ test('task states come from quorum-map in the background, cached for two minutes
   // A non-zero exit keeps the states and stamps the attempt: a minute later nothing runs, though it's two minutes
   // since runs[3] began.
   await runs[4]?.answer(exited(1))
-  expect(await card()).toEqual({ stepper: '✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 1/3', line: 'task 2 of 3 · Import the rows back · next: 3 Add XLSX' })
+  expect(await card()).toEqual({ stepper: '✓ Chart ● Tickets 2/4 in scope ○ Hand off ○ Tasks 1/3', line: 'task 2 of 3 · Import the rows back · next: 3 Add XLSX' })
   await clock.advance(60_000)
   await refresh()
   expect(runs.length).toBe(5)
@@ -5461,7 +5463,7 @@ test('task states come from quorum-map in the background, cached for two minutes
   await refresh()
   expect(runs.length).toBe(6)
   await runs[5]?.answer(new Error('timed out'))
-  expect((await card()).stepper).toBe('✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 1/3')
+  expect((await card()).stepper).toBe('✓ Chart ● Tickets 2/4 in scope ○ Hand off ○ Tasks 1/3')
   await clock.advance(60_000)
   await refresh()
   expect(runs.length).toBe(6)
@@ -5471,7 +5473,7 @@ test('task states come from quorum-map in the background, cached for two minutes
   await swap({ ...onMap('IN_REVIEW', 'beta', 2, { mapMd: beta }), ...mapFiles() })
   expect(runs.length).toBe(7)
   expect(runs[6]?.argv.slice(1)).toEqual(['--map', 'beta', 'tasks'])
-  expect(await card()).toEqual({ stepper: '✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 0/3', line: 'task 2 of 3 · Import the rows back · task states unknown' })
+  expect(await card()).toEqual({ stepper: '✓ Chart ● Tickets 2/4 in scope ○ Hand off ○ Tasks 0/3', line: 'task 2 of 3 · Import the rows back · task states unknown' })
   await runs[6]?.answer(exited(0, ''))
 
   // No task on show, and this session's map-session marker: the same runs, for the map it names.
@@ -5604,6 +5606,13 @@ test("the map's task list folds during a task, opens at a hand-off, and shows ea
   expect((await taskRow(d, 1))?.text).toMatch(/^ {4}1 Export the sales rows as CSV +✓✓●○○○ Build +$/)
   expect((await taskRow(d, 1))?.sub).toBe('    MEDIUM · 1 file · +3 −1 · 1 important · 1 nit')
   expect((await taskRow(d, 3))?.sub).toBe('    LOW')
+  // At 70 columns the key wraps, and `· – skipped` goes onto the next line whole: `skipped` never sits alone.
+  await d.unmount()
+  const narrow = await $.ui.mount({ ...ON_TERMINAL, props: { ...PANE.props, bodyColumns: 70 } })
+  expect(await boxText(narrow, 'export-csv:maptasks-key')).toBe('key: the dots are Spec, Plan, Build, Review, Blind test, PR')
+  expect(await boxText(narrow, 'export-csv:maptasks-key-1')).toBe('     · – skipped')
+  await narrow.unmount()
+  d = await $.ui.mount(AT_100)
   // A second press folds it again, and the choice is stored.
   await d.press({ key: MAP_TASKS })
   expect((await list(d))?.text).toBe('▸ Tasks  0 of 3 merged')
@@ -5622,7 +5631,7 @@ test("the map's task list folds during a task, opens at a hand-off, and shows ea
   expect(one?.text).toMatch(/^ {2}○ 1 Export the sales rows as CSV +✓✓●○○○ Build +$/)
   expect(cellWidth(one?.text ?? '')).toBe(AT_100.props.bodyColumns - 4)
   expect(one?.parts.find(p => p.text.startsWith('1 Export'))?.bold).toBe(true)
-  expect(mark(one)).toMatchObject({ text: '○', color: 'subtle' })
+  expect(mark(one)).toMatchObject({ text: '○', color: 'inactive' })
   expect(one?.sub).toBe('    building · MEDIUM · 1 file · +3 −1 · 1 important · 1 nit')
   // Task 2 waits on task 1; task 3 is ready, and as a LOW task its fifth dot is skipped.
   const two = await taskRow(d, 2)
@@ -5632,7 +5641,7 @@ test("the map's task list folds during a task, opens at a hand-off, and shows ea
   expect(two?.sub).toBe('    after task 1 · MEDIUM')
   const three = await taskRow(d, 3)
   expect(three?.text).toMatch(/^ {2}○ 3 Add XLSX +○○○○–○ +$/)
-  expect(mark(three)).toMatchObject({ text: '○', color: 'subtle' })
+  expect(mark(three)).toMatchObject({ text: '○', color: 'inactive' })
   expect(three?.sub).toBe('    ready · LOW')
   await d.unmount()
   // A press after that keeps it folded, across results that change nothing, until the next such change.
@@ -5695,7 +5704,7 @@ test("the map's task list folds during a task, opens at a hand-off, and shows ea
   expect(runs.length).toBe(10)
   await runs[9]?.answer(tasksOut('IN_REVIEW', 'HALTED', 'unknown'))
   d = await $.ui.mount(AT_100)
-  expect(mark(await taskRow(d, 1))).toMatchObject({ text: '○', color: 'subtle' })
+  expect(mark(await taskRow(d, 1))).toMatchObject({ text: '○', color: 'inactive' })
   expect((await taskRow(d, 1))?.sub).toMatch(/^ {4}in review · MEDIUM · /)
   expect(mark(await taskRow(d, 2))).toMatchObject({ text: '✗', color: 'error' })
   expect((await taskRow(d, 2))?.sub).toBe('    halted · MEDIUM')
@@ -5709,7 +5718,7 @@ test("the map's task list folds during a task, opens at a hand-off, and shows ea
   await rerun(tasksOut('IN_REVIEW', 'IN_REVIEW', 'merged'))
   d = await $.ui.mount(AT_100)
   expect(mark(await taskRow(d, 1))).toMatchObject({ text: '●', color: 'claude' })
-  expect(mark(await taskRow(d, 2))).toMatchObject({ text: '○', color: 'subtle' })
+  expect(mark(await taskRow(d, 2))).toMatchObject({ text: '○', color: 'inactive' })
   expect((await taskRow(d, 2))?.sub).toBe('    in review · MEDIUM')
   expect(mark(await taskRow(d, 3))).toMatchObject({ text: '✓', color: 'success' })
   expect((await taskRow(d, 3))?.text).toMatch(/ ✓✓✓✓–✓ done +$/)
@@ -5720,7 +5729,7 @@ test("the map's task list folds during a task, opens at a hand-off, and shows ea
   await finish($, 'b1')
   await rerun(tasksOut('IN_REVIEW', 'AWAITING-HUMAN', 'ready'))
   d = await $.ui.mount(AT_100)
-  expect(mark(await taskRow(d, 1))).toMatchObject({ text: '○', color: 'subtle' })
+  expect(mark(await taskRow(d, 1))).toMatchObject({ text: '○', color: 'inactive' })
   expect(mark(await taskRow(d, 2))).toMatchObject({ text: '◆', color: 'warning' })
   expect((await taskRow(d, 2))?.sub).toBe('    your move · MEDIUM')
   await d.unmount()
@@ -5751,6 +5760,14 @@ test("the map's task list folds during a task, opens at a hand-off, and shows ea
   expect(tree.some(k => k.includes('/wt/'))).toBe(false)
   // The task on show never opens: its row stays a Box.
   expect((await taskRow(d, 1))?.type).toBe('Box')
+  await d.unmount()
+  // Task 2's fix changed a.ts after round 1 voted (its list names a round sha and is newer than survivors.md): its row
+  // and its open tree count the kept finding as awaiting re-review, as the Task card does, not as important.
+  const fixed = filesTsv([fileRow('A', '12', '0', 'src/a.ts', '-', '1')], { since: 'def456' })
+  await swap(withList('IN_REVIEW', { ...importTask, '.tasks/csv-import/files.tsv': fixed }))
+  d = await $.ui.mount(AT_100)
+  expect((await taskRow(d, 2))?.sub).toBe('    merged · PR #55 · MEDIUM · 1 file · +12 · 1 awaiting re-review')
+  expect(await boxText(d, 'csv-import:tree-key-0')).toBe('key: ↻ awaiting re-review')
   await d.unmount()
   // Every task merged: M in success.
   await rerun(tasksOut('merged', 'merged', 'merged'))
@@ -5890,14 +5907,14 @@ test('in a map session the band shows a MAP badge with the phase dots', async ($
   }
 
   // A claimed grilling ticket: the badge is amber, then the slug, the four phase dots and the phase.
-  expect(await band()).toEqual({ texts: [' MAP ', 'csv-everywhere', '✓◆○○ Tickets 2/4'], badge: 'warning', buttons: ['Dashboard'] })
+  expect(await band()).toEqual({ texts: [' MAP ', 'csv-everywhere', '✓◆○○ Tickets 2/4 in scope'], badge: 'warning', buttons: ['Dashboard'] })
   // Tasks, with the breakdown waiting for approval: amber.
   const closed = ticketsWith({ '04': 'out-of-scope', '05': 'out-of-scope' })
   await reload($, files, inSession({ tickets: closed }, { [`${MAP_DIR}/tasks-review/round-1/votes.md`]: NOTHING_KEPT }))
   expect(await band()).toEqual({ texts: [' MAP ', 'csv-everywhere', '✓✓✓◆ Tasks 0/3'], badge: 'warning', buttons: ['Dashboard'] })
   // Only a research ticket claimed: the accent colour.
   await reload($, files, inSession({ tickets: ticketsWith({ '02': 'claimed', '04': 'open' }) }))
-  expect(await band()).toEqual({ texts: [' MAP ', 'csv-everywhere', '✓●○○ Tickets 1/4'], badge: 'claude', buttons: ['Dashboard'] })
+  expect(await band()).toEqual({ texts: [' MAP ', 'csv-everywhere', '✓●○○ Tickets 1/4 in scope'], badge: 'claude', buttons: ['Dashboard'] })
   // The marker goes: the engine's row again.
   const gone = inSession()
   delete gone['.tasks/.map-sessions/sess-a']
@@ -5936,6 +5953,11 @@ test("the map's Now card says what the session is doing in each phase", async ($
     lines: ['Where the export button goes', 'Where on the page does the button sit?'],
     border: 'warning',
   })
+  // At 44 columns the title wraps with `ticket 04` whole, so the number never sits alone on a line.
+  const at44 = await $.ui.mount({ ...ON_TERMINAL, props: { ...PANE.props, bodyColumns: 44 } })
+  expect((await at44.findAll({ type: 'Box' })).filter(b => /^map-now:title-\d+$/.test(b.key ?? '')).map(b => b.text))
+    .toEqual(['Now · ◆ waiting for you · answer', 'ticket 04'])
+  await at44.unmount()
   // A prototype: the title doesn't fit beside `Now · ` at 50 columns, so it wraps whole onto two lines.
   await reload($, files, inSession({ tickets: ticketsWith({}, { '04': 'prototype' }) }))
   expect((await now()).title).toBe('Now · ◆ waiting for you · pick a variant for ticket 04')
@@ -6006,18 +6028,19 @@ test('tickets sit under their first blocker with their status, type and who deci
   expect(section?.props.label).toBe('Tickets, 5 tickets · 2 resolved · 1 out of scope, open')
   // 02 and 04 under 01 (their first blocker), 05 under 04, then 03.
   expect(await ticketNs(d)).toEqual(['01', '02', '04', '05', '03'])
-  expect(await ticketText(d, '01')).toMatch(/^▾ ✓ 01 Which formats count as everywhere\s+you$/)
-  expect(await ticketText(d, '02')).toBe('▾ ✓   02 How spreadsheets treat formula… agent')
+  expect(await ticketText(d, '01')).toBe('▾ ✓ 01 Which formats count as everywhe… by you')
+  expect(await ticketText(d, '02')).toBe('▾ ✓   02 How spreadsheets treat form… by agent')
   expect(await ticketText(d, '04')).toMatch(/^▸ ◆ {3}04 Where the export button…\s+your answer$/)
   expect(await ticketText(d, '05')).toMatch(/^▸ ○ {5}05 How large .*…\s+after 04$/)
   expect(await ticketText(d, '03')).toMatch(/^▾ – 03 A PDF export\s+out of scope$/)
   for (const [n, indent] of [['01', 0], ['02', 2], ['04', 2], ['05', 4], ['03', 0]] as const) expect(indentOf(await ticketText(d, n))).toBe(indent)
   // The user's decision has a green ✓, the agent's a muted one.
   expect((await partOf(d, ticketKey('01'), '✓'))?.props?.color).toBe('success')
-  expect((await partOf(d, ticketKey('02'), '✓'))?.props?.color).toBe('subtle')
+  expect((await partOf(d, ticketKey('02'), '✓'))?.props?.color).toBe('inactive')
   // Resolved and out-of-scope tickets start open: the gist and who decided, or the reason; open and claimed folded.
-  expect((await ticketMore(d, '01')).join(' ')).toBe('CSV, XLSX and the web page · decided by you')
-  expect((await ticketMore(d, '02')).join(' ')).toBe('prefix = + - @ with a quote · decided by the agent')
+  // Wrapped, who decided stays on one line: `decided by` never ends a line with `you` on the next.
+  expect(await ticketMore(d, '01')).toEqual(['CSV, XLSX and the web page', '· decided by you'])
+  expect(await ticketMore(d, '02')).toEqual(['prefix = + - @ with a quote', '· decided by the agent'])
   expect(await ticketMore(d, '03')).toEqual(['printing the web page covers it'])
   expect(await ticketMore(d, '04')).toEqual([])
   expect(await ticketMore(d, '05')).toEqual([])
@@ -6047,6 +6070,9 @@ test('tickets sit under their first blocker with their status, type and who deci
   expect((await d.find({ type: 'Button', key: `${MAP_SCOPE}:tickets` }))?.props.label).toBe('Tickets, 5 tickets · 3 resolved · 1 out of scope · 1 ready, open')
   expect(await boxText(d, 'map-card:summary')).toBe('5 tickets · 3 resolved · 1 out of scope · 1 r…')
   expect(await ticketText(d, '05')).toMatch(/ ready$/)
+  // `ready` is drawn in the text colour and its ○ as a blocked ticket's, both well above 4.5:1 (the subtle colour isn't).
+  expect((await partOf(d, ticketKey('05'), 'ready'))?.props).toMatchObject({ color: 'text' })
+  expect((await partOf(d, ticketKey('05'), '○'))?.props?.color).toBe('inactive')
   await d.unmount()
 
   // A blocker that doesn't exist puts its ticket at the top level, naming the number; a cycle draws each once.
@@ -6071,7 +6097,10 @@ test('tickets sit under their first blocker with their status, type and who deci
   await reload($, files, inSession({ tickets: ticketsWith({ '02': 'claimed', '04': 'open' }) }))
   d = await $.ui.mount(ON_TERMINAL)
   expect(await ticketText(d, '02')).toMatch(/ claimed$/)
-  expect((await partOf(d, ticketKey('02'), '○'))?.props?.color).toBe('subtle')
+  expect((await partOf(d, ticketKey('02'), '○'))?.props?.color).toBe('inactive')
+  // `claimed` is drawn dim, not in the subtle colour.
+  const claimedWord = (await partOf(d, ticketKey('02'), 'claimed'))?.props
+  expect([claimedWord?.color, claimedWord?.dimColor]).toEqual([undefined, true])
   await d.unmount()
   await $.agent.spawn(RESEARCHER)
   d = await $.ui.mount(ON_TERMINAL)
@@ -6146,6 +6175,11 @@ test("the Decisions section lists map.md's decisions with who decided, folded", 
   expect(byDecision(1)).toBe('How spreadsheets treat formula cells: prefix = + - @ with a quote · agent')
   for (const b of drawn) expect(cellWidth(b.text)).toBeLessThanOrEqual(PANE.props.bodyColumns - 4 - 2)
   await d.unmount()
+  // At 70 columns the first decision wraps before `· you`, which stays whole: `you` never sits alone.
+  const at70 = await $.ui.mount({ ...ON_TERMINAL, props: { ...PANE.props, bodyColumns: 70 } })
+  expect((await decisionLines(at70)).filter(b => (b.key ?? '').startsWith(`${MAP_SCOPE}:decision:0-`)).map(b => b.text))
+    .toEqual(['Which formats count as everywhere: CSV, XLSX and the web page', '· you'])
+  await at70.unmount()
 
   // No decisions yet; the press above is kept, so the section stays open, with nothing under it.
   await reload($, files, inSession({ tickets: DEMO_LIKE, mapMd: MAP_MD.replace(/^- \[.*\]\(tickets\/0[12]-.*$\n/gm, '') }))
@@ -6159,6 +6193,10 @@ test('wrapWhole splits a word too long for a line, and wraps other words as wrap
   expect(wrapWhole(text, 12, 16)).toEqual(wrap(text, 12, 16))
   // An astral letter is one piece, never split in half.
   expect(wrapWhole('𝔼'.repeat(5), 2, 2)).toEqual(['𝔼𝔼', '𝔼𝔼', '𝔼'])
+  // Words glued together wrap as one, and draw with plain spaces.
+  expect(wrap(`aaaa bbbb ${glue('· cc')}`, 11, 11)).toEqual(['aaaa bbbb', '· cc'])
+  expect(wrapWhole(`aaaa bbbb ${glue('· cc')}`, 11, 11)).toEqual(['aaaa bbbb', '· cc'])
+  expect(wrap(`aaaa ${glue('· cc')}`, 11, 11)).toEqual(['aaaa · cc'])
 })
 
 // ---- The map pane's layout, marks and labels
@@ -6346,7 +6384,7 @@ test('one mark per state: ◆ for your turn, ● while an agent works', async ($
   await reload($, files, { ...onMap('BUILDING'), '.tasks/.map-sessions/sess-a': 'csv-everywhere\n' })
   await $.agent.spawn(RESEARCHER)
   d = await $.ui.mount(ON_TERMINAL)
-  expect((await marks(d, `${MAP_SCOPE}:maptask:1`)).mark).toEqual({ text: '○', color: 'subtle' })
+  expect((await marks(d, `${MAP_SCOPE}:maptask:1`)).mark).toEqual({ text: '○', color: 'inactive' })
   await d.unmount()
 
   // Tickets: a claimed grilling ticket waits on the user (◆), a claimed research ticket's agent works (●).

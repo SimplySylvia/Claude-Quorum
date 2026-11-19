@@ -90,11 +90,12 @@ with no map, or whose map folder is missing, has no Map card and looks as it did
 - **The title row:** `Map · <title>` with the map's slug on the right; a long title is cut at the end and never runs
   into the slug.
 - **The stepper:** the map's four phases, `Chart · Tickets · Hand off · Tasks`, such as
-  `✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 1/3`. A done phase is `✓`, the current one `●`, or `◆` in amber when the
-  map waits on you, and a later one `○`. The map is in Chart while it has no tickets, in Tickets while any ticket is
+  `✓ Chart ● Tickets 2/4 in scope ○ Hand off ○ Tasks 1/3`. A done phase is `✓`, the current one `●`, or `◆` in amber
+  when the map waits on you, and a later one `○`. The map is in Chart while it has no tickets, in Tickets while any ticket is
   open or claimed, in Tasks once `tasks.md` exists and its breakdown review has voted, or a task names the map, and
   in Hand off between them. `Tickets 4/4` counts resolved of in-scope tickets (out-of-scope ones aren't counted), and
-  `Tasks 1/3` merged of all tasks.
+  reads `Tickets 4/4 in scope` whenever a ticket is out of scope, so it doesn't seem to disagree with the tickets'
+  summary, which counts them all. `Tasks 1/3` counts merged of all tasks.
 - **The task line:** `task 1 of 3 · Export the sales rows as CSV`, then `· next: 3 <request>` when another task is
   ready, and `· task states unknown` until the first [task states](#where-task-states-come-from) arrive. A
   `map_task` beyond the tasks in `tasks.md`, or no `tasks.md`, reads just `task 4`.
@@ -102,22 +103,24 @@ with no map, or whose map folder is missing, has no Map card and looks as it did
   It starts folded during a task, and opens by itself at a hand-off: while the task waits at the PR handoff (`READY`
   or `AWAITING-HUMAN`), and when a task turns `ready` between two task-state results. A press's choice is kept per
   task, and wins until the next task turns ready. The first result after a reload opens nothing. Opened, it shows the
-  key line, `key: the dots are Spec, Plan, Build, Review, Blind test, PR · – skipped`, then a row per task:
+  key line, `key: the dots are Spec, Plan, Build, Review, Blind test, PR · – skipped` (wrapped, `· – skipped` stays on
+  one line), then a row per task:
   - its state mark, then `<n> <request>`, cut at the end and bold for the task on show;
   - on the right, the six stage dots from that task's state.md, as the Task card's stepper places them, with `–` for
     a LOW task's blind test, then the current stage (`Build`, `Blind`, or `done` once merged);
   - a second line with the state word, `· PR #55` when its state.md records a PR, its tier, and its footprint when
-    it has a recorded file list: `merged · PR #55 · MEDIUM · 1 file · +12 · 1 important`.
+    it has a recorded file list: `merged · PR #55 · MEDIUM · 1 file · +12 · 1 important`. As on the Task card, an
+    important finding awaiting re-review counts as `1 awaiting re-review`, here and in the task's file tree.
 
   Each state reads as one word and one mark:
 
   | State | Word | Mark |
   |---|---|---|
   | merged | `merged` | `✓` green |
-  | ready | `ready` | `○` |
+  | ready | `ready` | `○` dim |
   | blocked | `after task 1, 2` (the blockers not merged yet) | `○` dim |
   | `DRAFT-AWAITING-VISUAL-SIGNOFF`, `READY`, `AWAITING-HUMAN` | `your move` | `◆` amber |
-  | `PLANNING`, `BUILDING`, `IN_REVIEW`, `CONVERGED`, `BLIND-TEST` | the status in words (`in review`) | `●` while an agent of the task on show runs, else `○` |
+  | `PLANNING`, `BUILDING`, `IN_REVIEW`, `CONVERGED`, `BLIND-TEST` | the status in words (`in review`) | `●` while an agent of the task on show runs, else `○` dim |
   | `HALTED`, `ESCALATED` | `halted`, `escalated` | `✗` red |
   | unknown, or no state yet | none | none |
 
@@ -139,9 +142,10 @@ band and the pane, even with a task on show. They go back to the task, or the em
 map. Another session's map, including one a crashed session left behind, doesn't show here. A `quorum-map` call
 refreshes the dashboard at once, so a claimed or resolved ticket shows before the turn ends.
 
-- **The band:** a ` MAP ` badge, the map's slug, the four phase dots with the current phase by name, and
-  **Dashboard**. The badge is amber whenever the map waits on you (a claimed grilling or prototype ticket, or a task
-  breakdown waiting for your approval), and in Claude's colour otherwise.
+- **The band:** a ` MAP ` badge, the map's slug, the four phase dots with the current phase by name and count, as
+  the stepper reads it (`Tickets 2/4 in scope`), and **Dashboard**. The badge is amber whenever the map waits on you
+  (a claimed grilling or prototype ticket, or a task breakdown waiting for your approval), and in Claude's colour
+  otherwise.
 - **The Map card:** its title row and stepper, then the Destination and the tickets' summary, cut to the card.
 - **The Now card** says what the session is doing, its border amber when it waits on you:
   - **Chart:** `charting the map`.
@@ -158,22 +162,24 @@ refreshes the dashboard at once, so a claimed or resolved ticket shows before th
   `resolved` is left out, so `0 ready` doesn't show). Each ticket sits two columns under the first ticket it waits
   on, at most three levels deep, so a long chain still fits. A row reads `▸`/`▾`, its mark, `NN <title>`, then on
   the right its status:
-  - `you` (green `✓`) or `agent` (muted `✓`) for a resolved ticket, by who decided it;
+  - `by you` (green `✓`) or `by agent` (muted `✓`) for a resolved ticket, by who decided it;
   - `your answer` (`◆`, amber) for a claimed grilling or prototype ticket. Another claimed ticket reads
-    `in progress` (`●`) while an agent runs in this session, and `claimed` (`○`) otherwise, so a stale claim never
-    looks busy;
-  - `ready` for an open ticket whose blockers are all closed, and `after 04` naming the blockers still open;
+    `in progress` (`●`) while an agent runs in this session, and `claimed` (`○`, dim) otherwise, so a stale claim
+    never looks busy;
+  - `ready` for an open ticket whose blockers are all closed, in the text colour so it stands out, and `after 04`
+    (dim) naming the blockers still open;
   - `out of scope`.
 
   An open ticket shows its type before its status (`grilling · ready`); in a tight row the type goes first, then the
   title is cut at the end, and the row's label still names the type. A press on a row (`▸`/`▾`) opens or folds its
   detail line, wrapped to the row's indent: a resolved ticket's gist with `· decided by you` or
-  `· decided by the agent`, an out-of-scope ticket's reason, or an open ticket's question. Resolved and out-of-scope
-  tickets start open and open ones folded, and the choice is kept.
+  `· decided by the agent`, which wraps whole onto the next line rather than split, an out-of-scope ticket's reason,
+  or an open ticket's question. Resolved and out-of-scope tickets start open and open ones folded, and the choice is
+  kept.
 - **Tasks,** once `tasks.md` exists: the [task list](#the-map-card), open. No row gets an agent's `●` here, since the
   running agents are the map's.
 - **Decisions,** folded: `▸ Decisions  2 so far` (or `none yet`). Opened, each of map.md's Decisions so far, ending
-  `· you` or `· agent`.
+  `· you` or `· agent`, which wraps whole.
 - **Below them,** a running `/quorum:review`, past reviews, and Other tasks, with the task on show listed first,
   whatever its status.
 

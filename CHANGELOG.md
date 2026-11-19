@@ -88,7 +88,7 @@ copy with `/plugin marketplace update`.
   finding format, and its template, describe the line.
 - **The Map card.** A task started from a map (`map` and `map_task` in its state.md) shows a Map card above its Task
   card, or after it above the prompt: `Map · <title>` with the slug, the map's phases as a stepper
-  (`✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 1/3`, `◆` when the map waits on you), and
+  (`✓ Chart ● Tickets 2/4 in scope ○ Hand off ○ Tasks 1/3`, `◆` when the map waits on you), and
   `task 1 of 3 · <request> · next: 3 <request>`. Under it, `▸ Tasks  1 of 3 merged` folds the map's tasks, each
   with its state mark, its six stage dots, and its state word, PR, tier and footprint; it opens by itself at the PR
   handoff and when a task turns ready, and a finished task with a recorded file list opens to its file tree. The
@@ -99,7 +99,7 @@ copy with `/plugin marketplace update`.
   shows a ` MAP ` badge, amber while the map waits on you, with the slug and the phase dots, and the pane shows the
   Map card with the Destination, a Now card for the phase (`◆ waiting for you · answer ticket 04`,
   `between tickets`, `hand off · reviewing the task breakdown`, `◆ waiting for you · approve the task breakdown`),
-  Tickets under their first blocker with their type and status (`you`, `agent`, `your answer`, `in progress`,
+  Tickets under their first blocker with their type and status (`by you`, `by agent`, `your answer`, `in progress`,
   `claimed`, `ready`, `after 04`, `out of scope`) and a press for each one's gist, reason or question, the task
   list, and Decisions, folded. Above the prompt the Now card comes first and the finished tickets and merged tasks
   fold to `▸ ✓ 3 finished tickets` and `▸ ✓ 1 merged task`. The task on show is listed first under Other tasks.

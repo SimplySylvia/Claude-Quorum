@@ -306,12 +306,20 @@ function fit(parts: TreePart[], max: number): TreePart[] {
   return out
 }
 
-// Words onto lines of at most `first` columns, then `rest`; a word too long for a line is cut at its end.
+// Words that wrap() and wrapWhole() keep on one line, such as `· decided by you`: their spaces become no-break spaces,
+// which wrap() doesn't break at and draws as plain spaces.
+export const glue = (text: string) => text.replace(/ /g, '\u00a0')
+
+// The words of a line to wrap: split at whitespace, but not at glue()'s no-break spaces.
+export const wrapWords = (text: string) => text.split(/[^\S\u00a0]+/).filter(Boolean)
+
+// Words onto lines of at most `first` columns, then `rest`; a word too long for a line is cut at its end. Words
+// glue() joined count as one, and draw with plain spaces.
 export function wrap(text: string, first: number, rest: number): string[] {
   const lines: string[] = []
   let room = Math.max(1, first)
   let cur = ''
-  for (const word of text.split(/\s+/).filter(Boolean)) {
+  for (const word of wrapWords(text)) {
     if (cur && cellWidth(cur) + 1 + cellWidth(word) <= room) {
       cur += ` ${word}`
       continue
@@ -323,7 +331,7 @@ export function wrap(text: string, first: number, rest: number): string[] {
     cur = cutEnd(word, room)
   }
   lines.push(cur)
-  return lines
+  return lines.map(l => l.replace(/\u00a0/g, ' '))
 }
 
 // ---- Plan steps

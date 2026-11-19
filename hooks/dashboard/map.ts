@@ -5,7 +5,7 @@
 
 import type { MapLine, MapStates, MapTask, MapTaskRun, MapTicket, MapView } from '../../types'
 import { GLYPH, plural, section, stages, whoseMove } from './task'
-import { cellWidth, cutEnd, footprint, wrap } from './tree'
+import { awaitingOf, cellWidth, cutEnd, footprint, wrap, wrapWords } from './tree'
 import type { TreePart } from './tree'
 
 // bin/quorum-map's valid_slug and valid_session: checked before any path is built from them.
@@ -163,22 +163,23 @@ export function nowTicket(tickets: MapTicket[]): MapTicket | null {
 }
 
 // A ticket row's mark and status, and their colours (a `wordColor` of '' draws dim). `type` shows while the ticket
-// is open or claimed and has one, else it's null. `words`, for a label, adds who decided a resolved ticket.
+// is open or claimed and has one, else it's null. `words`, for a label, adds who decided a resolved ticket. A muted
+// mark is `inactive`, never `subtle`, whose grey is too faint to read (1.88:1 on the pane).
 export function ticketStatus(t: MapTicket, all: MapTicket[], isAgentRunning: boolean): { mark: string; markColor: string; word: string; wordColor: string; type: string | null; words: string } {
   const row = (mark: string, markColor: string, word: string, wordColor: string, words = word) =>
     ({ mark, markColor, word, wordColor, type: isClosed(t) || t.type === '' ? null : t.type, words })
   if (t.status === 'resolved') {
     return t.answeredBy === 'user'
-      ? row('✓', 'success', 'you', 'success', 'resolved, decided by you')
-      : row('✓', 'subtle', 'agent', 'claude', 'resolved, decided by the agent')
+      ? row('✓', 'success', 'by you', 'success', 'resolved, decided by you')
+      : row('✓', 'inactive', 'by agent', 'claude', 'resolved, decided by the agent')
   }
   if (t.status === 'out-of-scope') return row('–', 'inactive', 'out of scope', '')
   if (t.status === 'claimed') {
     if (isUsers(t)) return row('◆', 'warning', 'your answer', 'warning')
-    return isAgentRunning ? row('●', 'claude', 'in progress', 'claude') : row('○', 'subtle', 'claimed', 'subtle')
+    return isAgentRunning ? row('●', 'claude', 'in progress', 'claude') : row('○', 'inactive', 'claimed', '')
   }
   const open = openBlockers(t, all)
-  return open.length === 0 ? row('○', 'subtle', 'ready', 'subtle') : row('○', 'inactive', `after ${open.join(', ')}`, 'inactive')
+  return open.length === 0 ? row('○', 'inactive', 'ready', 'text') : row('○', 'inactive', `after ${open.join(', ')}`, 'inactive')
 }
 
 // A ticket row, `width` columns wide: a `▸`/`▾` lead, its mark, an indent of 2 per level, `NN `, the title (dim once
@@ -212,7 +213,7 @@ export function ticketRow(entry: { ticket: MapTicket; depth: number }, all: MapT
 // so nothing is cut: for detail lines and titles that must show whole.
 export function wrapWhole(text: string, first: number, rest: number): string[] {
   const max = Math.max(1, Math.min(first, rest))
-  const pieces = text.split(/\s+/).filter(Boolean).flatMap(word => {
+  const pieces = wrapWords(text).flatMap(word => {
     if (cellWidth(word) <= max) return [word]
     const out: string[] = []
     let cur = ''
@@ -265,14 +266,15 @@ export const readyTasks = (m: MapView, s: MapStates | null): MapTask[] => {
 }
 
 // One part list per phase: `✓` done, the current one `◆` when it waits on the user and `●` otherwise, later ones
-// `○`; the current label bold and the others dim. `Tickets R/I` counts resolved of in-scope tickets, and `Tasks M/N`
-// merged of all tasks.
+// `○`; the current label bold and the others dim. `Tickets R/I` counts resolved of in-scope tickets, read `Tickets R/I
+// in scope` when a ticket is out of scope (so it doesn't seem to disagree with the summary's count of every ticket),
+// and `Tasks M/N` merged of all tasks.
 export function mapStepper(m: MapView, s: MapStates | null): TreePart[][] {
   const phase = mapPhase(m)
   const inScope = m.tickets.filter(t => t.status !== 'out-of-scope')
   const counts = [
     '',
-    m.tickets.length > 0 ? ` ${inScope.filter(t => t.status === 'resolved').length}/${inScope.length}` : '',
+    m.tickets.length > 0 ? ` ${inScope.filter(t => t.status === 'resolved').length}/${inScope.length}${inScope.length < m.tickets.length ? ' in scope' : ''}` : '',
     '',
     m.tasks !== null && m.tasks.length > 0 ? ` ${mergedCount(m, s)}/${m.tasks.length}` : '',
   ]
@@ -292,7 +294,7 @@ export function taskState(task: MapTask, m: MapView, s: MapStates | null, isAgen
   const st = states?.[String(task.n)]
   if (st === undefined || st === '' || st === 'unknown') return null
   if (st === 'merged') return { word: 'merged', mark: '✓', color: 'success' }
-  if (st === 'ready') return { word: 'ready', mark: '○', color: 'subtle' }
+  if (st === 'ready') return { word: 'ready', mark: '○', color: 'inactive' }
   if (st === 'blocked') {
     const waits = task.blockedBy.filter(b => states?.[String(b)] !== 'merged')
     return { word: `after task ${waits.join(', ')}`, mark: '○', color: 'inactive' }
@@ -301,7 +303,7 @@ export function taskState(task: MapTask, m: MapView, s: MapStates | null, isAgen
   const move = whoseMove(st)
   if (move === 'warning') return { word: 'your move', mark: '◆', color: 'warning' }
   if (move === 'error') return { word, mark: '✗', color: 'error' }
-  return isAgentRunning ? { word, mark: '●', color: 'claude' } : { word, mark: '○', color: 'subtle' }
+  return isAgentRunning ? { word, mark: '●', color: 'claude' } : { word, mark: '○', color: 'inactive' }
 }
 
 // The stage names short enough for a task row: `Blind test` reads `Blind`.
@@ -331,7 +333,7 @@ export function taskRow(task: MapTask, run: MapTaskRun | null, state: { word: st
   const title = cutEnd(`${task.n} ${task.request}`, width - 4 - DOTS_WIDTH - 1)
   const gap = ' '.repeat(Math.max(1, width - 4 - cellWidth(title) - DOTS_WIDTH))
   const tier = run?.risk || task.tier
-  const fp = run?.files ? footprint(run.files, run.rounds, '') : null
+  const fp = run?.files ? footprint(run.files, run.rounds, '', awaitingOf(run.codeView, run.rereview)) : null
   const sub = [state?.word ?? '', run?.pr ? `PR #${run.pr}` : '', tier, fp ? fp.parts.map(p => p.map(x => x.text).join('')).join(' · ') : '']
     .filter(Boolean).join(' · ')
   return {

@@ -8,13 +8,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Blind, ChangedFile, Check, Findings, FindingsView, MapReview, MapTask, MapTaskRun, MapTicket, MapView, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, RoundKept, Section, Snapshot, Stage } from '../../types'
+import type { Blind, ChangedFile, Check, FileList, Findings, FindingsView, MapReview, MapTask, MapTaskRun, MapTicket, MapView, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, RoundKept, Section, Snapshot, Stage } from '../../types'
 import {
   GLYPH, ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, parsePlanSteps, SLICE_AT, stageFor, stages, tokenCount,
   nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep, editPath, unmetNote, unmetNow, unmetWords, checksRow, blindSummary, whoseMove,
 } from './task'
-import { awaitingFrom, awaitingOf, cellWidth, changeHeader, cutEnd, confidenceRow, footprint, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows, wrap } from './tree'
+import { awaitingFrom, awaitingOf, cellWidth, changeHeader, cutEnd, confidenceRow, footprint, glue, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows, wrap } from './tree'
 import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
 import { isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskRow, taskState, ticketOrder, ticketRow, ticketSummary, wrapWhole } from './map'
 
@@ -248,14 +248,10 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
   const proofs = await readFiles($, dir, ['proof-final.md', 'proof-build.md'])
   const proofFile = proofs['proof-final.md'] !== undefined ? 'proof-final.md' : proofs['proof-build.md'] !== undefined ? 'proof-build.md' : ''
   const proof = proofFile ? parseProof(proofs[proofFile] ?? '', proofFile) : null
-  // The recorded change, and the code review's findings tree. A kept IMPORTANT on a file the list marks changed
-  // since the round sha is awaiting re-review only when the list was recorded after the round on show voted
-  // (`recorded` is in seconds, the mtime in milliseconds).
+  // The recorded change, and the code review's findings tree.
   const files = parseFileList((await readOr($, `${dir}/files.tsv`)) ?? '')
   const codeView = treeOf(histories.code, histories.roots)
-  const votedAt = codeView ? (await $.fs.stat(`${dir}/review/round-${codeView.round}/survivors.md`).catch(() => null))?.mtimeMs ?? null : null
-  const rereview = files && files.since !== '' && votedAt !== null && files.recorded * 1000 > votedAt
-    ? files.files.filter(f => f.fix === true).map(f => f.path) : []
+  const rereview = await rereviewOf($, dir, files, codeView)
 
   return {
     slug,
@@ -348,6 +344,9 @@ async function readMap($: EngineInterface, root: string, slug: string, sessionRo
     if (scalar(fm, 'map') !== slug || n <= 0) continue
     const at = `${tasksDir}/${e.name}`
     const history = await roundHistory($, `${at}/review`, count(fm, 'round'))
+    const runFiles = parseFileList((await readOr($, `${at}/files.tsv`)) ?? '')
+    // The run's own roots, as snapshot() builds a task's, so a path under its worktree reads repo-relative.
+    const codeView = treeOf(history, [sessionRoot, root, scalar(fm, 'worktree')])
     runs.push({
       n,
       slug: e.name,
@@ -356,14 +355,23 @@ async function readMap($: EngineInterface, root: string, slug: string, sessionRo
       stage: stageFor(fm),
       isFast: scalar(fm, 'fast') === 'true',
       pr: prFromUrl(e.name, scalar(fm, 'pr'))?.number ?? null,
-      files: parseFileList((await readOr($, `${at}/files.tsv`)) ?? ''),
+      files: runFiles,
       rounds: history.map(roundOf),
-      // The run's own roots, as snapshot() builds a task's, so a path under its worktree reads repo-relative.
-      codeView: treeOf(history, [sessionRoot, root, scalar(fm, 'worktree')]),
+      codeView,
+      rereview: await rereviewOf($, at, runFiles, codeView),
       hasPlan: countPlanSteps((await readOr($, `${at}/plan.md`)) ?? '') > 0,
     })
   }
   return { slug, title, destination, decisions, outOfScope, tickets: joinGists(parsed, decisions, outOfScope), tasks, review, runs, isSession }
+}
+
+// The files awaiting re-review in the task folder `dir`: a kept IMPORTANT on a file the list marks changed since the
+// round sha is awaiting re-review only when the list was recorded after the round on show voted (`recorded` is in
+// seconds, the mtime in milliseconds).
+async function rereviewOf($: EngineInterface, dir: string, files: FileList | null, codeView: FindingsView | null): Promise<string[]> {
+  const votedAt = codeView ? (await $.fs.stat(`${dir}/review/round-${codeView.round}/survivors.md`).catch(() => null))?.mtimeMs ?? null : null
+  return files && files.since !== '' && votedAt !== null && files.recorded * 1000 > votedAt
+    ? files.files.filter(f => f.fix === true).map(f => f.path) : []
 }
 
 // The map to show: the one this session's map-session marker names, if it reads, else the task's, if it has one
@@ -1170,7 +1178,7 @@ export const register: Register = (on, options) => {
       const merged = mergedCount(mp, ms)
       const isListOpen = folds[key] ?? defaultOpen
       const isRunning = crew.some(a => a.endedAt === null)
-      const keyLines = wrap('key: the dots are Spec, Plan, Build, Review, Blind test, PR · – skipped', treeWidth, treeWidth - 5)
+      const keyLines = wrap(`key: the dots are Spec, Plan, Build, Review, Blind test, PR ${glue('· – skipped')}`, treeWidth, treeWidth - 5)
       const isMergedTask = (task: MapTask) => statesOf(mp, ms)?.[String(task.n)] === 'merged'
       const mergedKey = `${scope}:merged`
       const mergedTasks = foldMerged ? all.filter(isMergedTask) : []
@@ -1193,7 +1201,7 @@ export const register: Register = (on, options) => {
           row.sub ? <Box key={`${rowKey}:sub`}><Text dimColor wrap="truncate-end">{row.sub}</Text></Box> : null,
           isRowOpen && run?.files ? (
             <Box key={`${rowKey}:tree`} flexDirection="column" marginLeft={2}>
-              {findingsTree(run.slug, run.codeView, run.risk === 'HIGH', treeWidth - 2, { files: run.files.files, hasPlan: run.hasPlan, built: [], allBuilt: true, rereview: [] })}
+              {findingsTree(run.slug, run.codeView, run.risk === 'HIGH', treeWidth - 2, { files: run.files.files, hasPlan: run.hasPlan, built: [], allBuilt: true, rereview: run.rereview })}
             </Box>
           ) : null,
         ]
@@ -1262,8 +1270,8 @@ export const register: Register = (on, options) => {
         if (phase === 1) {
           const tk = nowTicket(m.tickets)
           if (!tk) return { title: 'between tickets', body: [{ text: `${m.tickets.filter(x => isFrontier(x, m.tickets)).length} ready` }] }
-          const title = tk.type === 'grilling' ? `◆ waiting for you · answer ticket ${tk.n}`
-            : tk.type === 'prototype' ? `◆ waiting for you · pick a variant for ticket ${tk.n}` : `ticket ${tk.n} · ${tk.type}`
+          const title = tk.type === 'grilling' ? `◆ waiting for you · answer ${glue(`ticket ${tk.n}`)}`
+            : tk.type === 'prototype' ? `◆ waiting for you · pick a variant for ${glue(`ticket ${tk.n}`)}` : `${glue(`ticket ${tk.n}`)} · ${tk.type}`
           const agentLines = crew.filter(a => a.endedAt === null).map(a => ({ node: line(a.role, 'running', ROLE_LABEL[a.role] ?? a.role, `running ${seconds(a, clockNow)}`) }))
           return { title, body: [{ text: tk.title, isPlain: true as const }, { text: tk.question }, ...agentLines].filter(l => !('text' in l) || l.text !== '') }
         }
@@ -1307,7 +1315,9 @@ export const register: Register = (on, options) => {
         const key = `${scopeOf}:ticket:${tk.n}`
         const isRowOpen = folds[key] ?? isClosed(tk)
         const row = ticketRow(entry, m.tickets, isRunning, isRowOpen, treeWidth)
-        const detail = tk.status === 'resolved' ? [tk.gist, `decided by ${tk.answeredBy === 'user' ? 'you' : 'the agent'}`].filter(Boolean).join(' · ')
+        // Who decided wraps whole, with its `·`, so no line ends on `decided by` or a bare `·`.
+        const decider = `decided by ${tk.answeredBy === 'user' ? 'you' : 'the agent'}`
+        const detail = tk.status === 'resolved' ? (tk.gist ? `${tk.gist} ${glue(`· ${decider}`)}` : glue(decider))
           : tk.status === 'out-of-scope' ? tk.gist : tk.question
         const indent = 4 + 2 * entry.depth
         return [
@@ -1322,10 +1332,11 @@ export const register: Register = (on, options) => {
       const decisionsKey = `${scopeOf}:decisions`
       const isDecisionsOpen = folds[decisionsKey] ?? false
       const decided = m.decisions.length > 0 ? `${m.decisions.length} so far` : 'none yet'
-      // `<title>: <gist> · you|agent`, the decider being the linked ticket's Answered by, wrapped whole.
+      // `<title>: <gist> · you|agent`, the decider being the linked ticket's Answered by, wrapped whole and `· you` kept
+      // together.
       const decisionRows = () => m.decisions.flatMap((dl, i) => {
         const tk = dl.ticket ? m.tickets.find(x => x.n === dl.ticket) : undefined
-        const text = dl.ticket ? `${[dl.title, dl.gist].filter(Boolean).join(': ')}${tk ? ` · ${tk.answeredBy === 'user' ? 'you' : 'agent'}` : ''}` : dl.text
+        const text = dl.ticket ? `${[dl.title, dl.gist].filter(Boolean).join(': ')}${tk ? ` ${glue(`· ${tk.answeredBy === 'user' ? 'you' : 'agent'}`)}` : ''}` : dl.text
         return wrapWhole(text, treeWidth - 2, treeWidth - 2).map((l, j) => (
           <Box key={`${scopeOf}:decision:${i}-${j}`} marginLeft={2}><Text dimColor>{l}</Text></Box>
         ))

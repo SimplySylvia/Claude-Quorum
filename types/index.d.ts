@@ -236,6 +236,8 @@ export type MapTaskRun = {
   files: FileList | null
   rounds: Round[]
   codeView: FindingsView | null
+  // The files of codeView's kept IMPORTANT findings that are awaiting re-review, as a Snapshot's `rereview`.
+  rereview: string[]
   hasPlan: boolean
 }
 
