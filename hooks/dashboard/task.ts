@@ -623,7 +623,7 @@ export const isReviewRunning = (status: string) => status === 'REVIEWING' || sta
 // The current run of a review: the highest `run-<N>` folder (`<prefix>-<N>`, as `round` for a map's
 // tasks-review/), 0 before the first is made.
 export function latestRun(names: string[], prefix = 'run'): number {
-  return Math.max(0, ...names.map(n => (m => (m && m[1] === prefix ? Number(m[2]) : 0))(/^([a-z]+)-(\d+)$/.exec(n))))
+  return Math.max(0, ...names.map(n => Number(new RegExp(`^${prefix}-(\\d+)$`).exec(n)?.[1] ?? 0)))
 }
 
 // The review this session is running, if any: the live card. Another session's running review may be live in

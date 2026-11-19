@@ -1161,9 +1161,9 @@ export const register: Register = (on, options) => {
     // a row per tasks.md task with its second line. A row opens to its read-only file tree when it isn't the task on
     // show, its change is recorded, and it merged or finished. With `foldMerged` (above the prompt in a map session),
     // the merged tasks fold under one `<scope>:merged` row after the key line, `▸ ✓ N merged tasks`. In a map session
-    // (`isSession`) no row gets the agent `●`, since the running agents are the map's and the agents atom records no
-    // task.
-    const mapTasks = (scope: string, mp: MapView, defaultOpen: boolean, foldMerged: boolean, isSession: boolean) => {
+    // (`mp.isSession`) no row gets the agent `●`, since the running agents are the map's and the agents atom records
+    // no task.
+    const mapTasks = (scope: string, mp: MapView, defaultOpen: boolean, foldMerged: boolean) => {
       const all = mp.tasks ?? []
       const key = `${scope}:maptasks`
       const merged = mergedCount(mp, ms)
@@ -1177,7 +1177,7 @@ export const register: Register = (on, options) => {
       const rows = all.flatMap(task => {
         const run = mp.runs.find(r => r.n === task.n) ?? null
         const isShown = run !== null && run.slug === t?.slug
-        const state = taskState(task, mp, ms, !isSession && isShown && isRunning)
+        const state = taskState(task, mp, ms, !mp.isSession && isShown && isRunning)
         const isMerged = isMergedTask(task)
         if (isMerged && mergedTasks.length > 0 && !isMergedOpen) return []
         const rowKey = `${scope}:maptask:${task.n}`
@@ -1374,7 +1374,7 @@ export const register: Register = (on, options) => {
               ] : null}
             </Box>
           ) : null}
-          {m.tasks !== null ? mapTasks(scopeOf, m, true, isInline, true) : null}
+          {m.tasks !== null ? mapTasks(scopeOf, m, true, isInline) : null}
           <Box key={`${decisionsKey}-section`} flexDirection="column">
             {sectionRow(decisionsKey, 'Decisions', decided, isDecisionsOpen)}
             {isDecisionsOpen ? decisionRows() : null}
@@ -1646,7 +1646,7 @@ export const register: Register = (on, options) => {
           <Box key="map-task-line" flexDirection="row" flexWrap="wrap">
             {items.map((parts, i) => <Box key={`map-task-line:${i}`}><Text>{partsOf(`map-task-line:${i}`, parts)}</Text></Box>)}
           </Box>
-          {shownMap.tasks !== null ? mapTasks(t.slug, shownMap, isPrStage(t.status) || isHandoffOf(shownMap, ms), false, false) : null}
+          {shownMap.tasks !== null ? mapTasks(t.slug, shownMap, isPrStage(t.status) || isHandoffOf(shownMap, ms), false) : null}
         </Box>
       )
     })()

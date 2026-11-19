@@ -41,7 +41,8 @@ export function parseTicket(file: string, text: string): MapTicket | null {
   const n = /^(\d\d)-/.exec(file)?.[1]
   if (n === undefined) return null
   const lines = text.split('\n')
-  const head = lines.slice(0, (i => (i < 0 ? undefined : i))(lines.findIndex(l => l.startsWith('## '))))
+  const end = lines.findIndex(l => l.startsWith('## '))
+  const head = end < 0 ? lines : lines.slice(0, end)
   const field = (key: string) => {
     const line = head.find(l => l.startsWith(`${key}:`))
     return line === undefined ? null : line.slice(key.length + 1).replace(/^[ \t]+|[ \t]+$/g, '')
