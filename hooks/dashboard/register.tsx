@@ -14,9 +14,9 @@ import {
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, parsePlanSteps, SLICE_AT, stageFor, stages, tokenCount,
   nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep, editPath, unmetNote, unmetNow, unmetWords, checksRow, blindSummary, whoseMove,
 } from './task'
-import { awaitingFrom, awaitingOf, cellWidth, changeHeader, cutEnd, confidenceRow, footprint, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows } from './tree'
+import { awaitingFrom, awaitingOf, cellWidth, changeHeader, cutEnd, confidenceRow, footprint, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows, wrap } from './tree'
 import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
-import { isMapSlug, isSessionId, joinGists, mapStepper, nextStates, parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf } from './map'
+import { isHandoffOf, isMapSlug, isSessionId, joinGists, mapStepper, mergedCount, nextStates, parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskRow, taskState } from './map'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
@@ -1118,6 +1118,66 @@ export const register: Register = (on, options) => {
       )
     })()
 
+    // A map's task list, kept open or folded under `<scope>:maptasks`: `▸ Tasks  M of N merged`, then the key line and
+    // a row per tasks.md task with its second line. A row opens to its read-only file tree when it isn't the task on
+    // show, its change is recorded, and it merged or finished. In a map session (`isSession`) no row gets the agent
+    // `●`, since the running agents are the map's and the agents atom records no task.
+    const mapTasks = (scope: string, mp: MapView, defaultOpen: boolean, isSession: boolean) => {
+      const all = mp.tasks ?? []
+      const key = `${scope}:maptasks`
+      const merged = mergedCount(mp, ms)
+      const isListOpen = folds[key] ?? defaultOpen
+      const isRunning = crew.some(a => a.endedAt === null)
+      const keyLines = wrap('key: the dots are Spec, Plan, Build, Review, Blind test, PR · – skipped', treeWidth, treeWidth - 5)
+      const rows = all.flatMap(task => {
+        const run = mp.runs.find(r => r.n === task.n) ?? null
+        const isShown = run !== null && run.slug === t?.slug
+        const state = taskState(task, mp, ms, !isSession && isShown && isRunning)
+        const isMerged = statesOf(mp, ms)?.[String(task.n)] === 'merged'
+        const rowKey = `${scope}:maptask:${task.n}`
+        const isOpenable = !isShown && run !== null && run.files !== null && (isMerged || isFinished(run.status))
+        const isRowOpen = isOpenable && (folds[rowKey] ?? false)
+        const row = taskRow(task, run, state, taskDots(run, task.tier, isMerged), isShown, isOpenable, isRowOpen, treeWidth)
+        const text = <Text wrap="truncate-end">{partsOf(rowKey, row.parts)}</Text>
+        return [
+          isOpenable
+            ? <Button key={rowKey} plain hover={{ color: 'claude' }} label={row.label} onPress={() => void update($, sections, f => ({ ...f, [rowKey]: !isRowOpen }))}>{text}</Button>
+            : <Box key={rowKey}>{text}</Box>,
+          row.sub ? <Box key={`${rowKey}:sub`}><Text dimColor wrap="truncate-end">{row.sub}</Text></Box> : null,
+          isRowOpen && run?.files ? (
+            <Box key={`${rowKey}:tree`} flexDirection="column" marginLeft={2}>
+              {findingsTree(run.slug, run.codeView, run.risk === 'HIGH', treeWidth - 2, { files: run.files.files, hasPlan: run.hasPlan, built: [], allBuilt: true, rereview: [] })}
+            </Box>
+          ) : null,
+        ]
+      })
+      return (
+        <Box key={`${key}-list`} flexDirection="column">
+          <Button
+            key={key}
+            plain
+            hover={{ color: 'claude' }}
+            label={`Tasks, ${merged} of ${all.length} merged, ${isListOpen ? 'open' : 'folded'}`}
+            onPress={() => void update($, sections, f => ({ ...f, [key]: !isListOpen }))}
+          >
+            <Text wrap="truncate-end">
+              <Text dimColor>{isListOpen ? '▾ ' : '▸ '}</Text>
+              <Text bold>Tasks</Text>
+              <Text>  </Text>
+              <Text color={all.length > 0 && merged === all.length ? 'success' : undefined}>{String(merged)}</Text>
+              <Text>{` of ${all.length} merged`}</Text>
+            </Text>
+          </Button>
+          {isListOpen ? [
+            ...keyLines.map((l, i) => (
+              <Box key={i === 0 ? `${key}-key` : `${key}-key-${i}`}><Text dimColor>{i === 0 ? l : `     ${l}`}</Text></Box>
+            )),
+            ...rows,
+          ] : null}
+        </Box>
+      )
+    }
+
     if (!t) {
       return (
         <Box flexDirection="column" gap={1}>
@@ -1391,6 +1451,7 @@ export const register: Register = (on, options) => {
           <Box key="map-task-line" flexDirection="row" flexWrap="wrap">
             {items.map((parts, i) => <Box key={`map-task-line:${i}`}><Text>{partsOf(`map-task-line:${i}`, parts)}</Text></Box>)}
           </Box>
+          {shownMap.tasks !== null ? mapTasks(t.slug, shownMap, isPrStage(t.status) || isHandoffOf(shownMap, ms), false) : null}
         </Box>
       )
     })()

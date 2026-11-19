@@ -5,6 +5,7 @@
 
 import type { MapLine, MapStates, MapTask, MapTaskRun, MapTicket, MapView } from '../../types'
 import { GLYPH, plural, section, stages, whoseMove } from './task'
+import { cellWidth, cutEnd, footprint } from './tree'
 import type { TreePart } from './tree'
 
 // bin/quorum-map's valid_slug and valid_session: checked before any path is built from them.
@@ -267,6 +268,29 @@ export function taskDots(run: MapTaskRun | null, tier: string, isMerged: boolean
   if (isMerged) return { parts, stage: 'done' }
   const at = rail.find(st => st.state === 'active' || st.state === 'waiting' || st.state === 'stuck')
   return { parts, stage: at ? SHORT_STAGES[at.name] ?? at.name : '' }
+}
+
+// The stage dots' columns on a task row: six dots, a space, and the stage name padded to 6.
+const DOTS_WIDTH = 13
+
+// A task row of the map's task list, `width` columns wide: a `▸`/`▾` lead when it opens, its state mark, `<n>
+// <request>` cut at the end (bold for the task on show), and on the right its six stage dots and stage name. `sub` is
+// its second line, `    <word> · PR #N · <tier> · <footprint>` without what's missing, cut to `width`; `label` says
+// the row in words.
+export function taskRow(task: MapTask, run: MapTaskRun | null, state: { word: string; mark: string; color: string } | null, dots: { parts: TreePart[]; stage: string }, isShown: boolean, isOpenable: boolean, isOpen: boolean, width: number): { parts: TreePart[]; sub: string; label: string } {
+  const lead: TreePart = isOpenable ? { text: isOpen ? '▾ ' : '▸ ', dim: true } : { text: '  ' }
+  const mark: TreePart[] = state ? [{ text: state.mark, color: state.color }, { text: ' ' }] : [{ text: '  ' }]
+  const title = cutEnd(`${task.n} ${task.request}`, width - 4 - DOTS_WIDTH - 1)
+  const gap = ' '.repeat(Math.max(1, width - 4 - cellWidth(title) - DOTS_WIDTH))
+  const tier = run?.risk || task.tier
+  const fp = run?.files ? footprint(run.files, run.rounds, '') : null
+  const sub = [state?.word ?? '', run?.pr ? `PR #${run.pr}` : '', tier, fp ? fp.parts.map(p => p.map(x => x.text).join('')).join(' · ') : '']
+    .filter(Boolean).join(' · ')
+  return {
+    parts: [lead, ...mark, { text: title, bold: isShown }, { text: gap }, ...dots.parts, { text: ` ${dots.stage.padEnd(6)}`, dim: true }],
+    sub: sub ? cutEnd(`    ${sub}`, width) : '',
+    label: [`Task ${task.n}`, task.request, state?.word ?? '', dots.stage, tier, isOpenable ? (isOpen ? 'open' : 'folded') : ''].filter(Boolean).join(', '),
+  }
 }
 
 // The stored result after a `quorum-map tasks` run for `slug` (`parsed` is null when it failed): a failure keeps the

@@ -5347,6 +5347,14 @@ test('task states come from quorum-map in the background, cached for two minutes
     await clock.settle()
   }
   const withStatus = (status: string) => onMap(status, 'csv-everywhere', 2)
+  // Each task row's lead and mark, and its second line, with the list opened if it's folded.
+  const taskLines = async () => {
+    const p = await $.ui.mount(ON_TERMINAL)
+    if ((await p.find({ type: 'Button', key: 'export-csv:maptasks' }))?.text.startsWith('▸')) await p.press({ key: 'export-csv:maptasks' })
+    const out = await Promise.all([1, 2, 3].map(async n => [(await boxText(p, `export-csv:maptask:${n}`))?.slice(0, 4), await boxText(p, `export-csv:maptask:${n}:sub`)]))
+    await p.unmount()
+    return out
+  }
 
   // A session start runs it once, in the background: the hook returns while the run is pending.
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
@@ -5357,11 +5365,15 @@ test('task states come from quorum-map in the background, cached for two minutes
   expect(runs[0]?.init).toEqual({ cwd: '/repo', env: { CLAUDE_PROJECT_DIR: '/repo' }, timeoutMs: 15_000 })
   // With no states yet the line says so; a refresh while the run is in flight starts none.
   expect((await card()).line).toBe('task 2 of 3 · Import the rows back · task states unknown')
+  // With no states the task rows show no state word and no mark.
+  expect(await taskLines()).toEqual([['    ', '    MEDIUM'], ['    ', '    MEDIUM'], ['    ', '    LOW']])
   await refresh()
   expect(runs.length).toBe(1)
   await runs[0]?.answer(STATES)
   // Task 9 isn't in tasks.md, so it isn't counted: 1 of 3 merged.
   expect(await card()).toEqual({ stepper: '✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 1/3', line: 'task 2 of 3 · Import the rows back · next: 3 Add XLSX' })
+  // The rows read each task's state from the result.
+  expect(await taskLines()).toEqual([['  ✓ ', '    merged · MEDIUM'], ['  ○ ', '    building · MEDIUM'], ['  ○ ', '    ready · LOW']])
 
   // Within 2 minutes nothing runs; at 2 minutes it runs again.
   await clock.advance(60_000)
@@ -5370,7 +5382,9 @@ test('task states come from quorum-map in the background, cached for two minutes
   await clock.advance(60_000)
   await refresh()
   expect(runs.length).toBe(2)
-  await runs[1]?.answer(STATES)
+  // A blocked task waits on its blockers not merged.
+  await runs[1]?.answer(exited(0, '1\tready\t-\t-\tExport\n2\tblocked\texport-csv\t1\tImport\n3\tblocked\t-\t1,2\tAdd XLSX\n'))
+  expect(await taskLines()).toEqual([['  ○ ', '    ready · MEDIUM'], ['  ○ ', '    after task 1 · MEDIUM'], ['  ○ ', '    after task 1, 2 · LOW']])
 
   // A status change of the task on show runs it at once.
   await swap(withStatus('IN_REVIEW'))
@@ -5422,6 +5436,264 @@ test('task states come from quorum-map in the background, cached for two minutes
   await refresh()
   expect(runs.length).toBe(9)
   await runs[8]?.answer(STATES)
+})
+
+// ---- The Map card's task list
+
+const MAP_TASKS = 'export-csv:maptasks'
+const MAP_KEY = 'key: the dots are Spec, Plan, Build, Review, Blind test, PR · – skipped'
+// `quorum-map tasks`' stdout for the three tasks of TASKS_MD, in these states.
+const tasksOut = (s1: string, s2: string, s3: string) => `1\t${s1}\texport-csv\t-\tExport\n2\t${s2}\t-\t1\tImport\n3\t${s3}\t-\t1,2\tAdd XLSX\n`
+// A task row (a Button when it opens, else a Box): its text, label, and each part's text and look.
+async function taskRow(d: Drawn, n: number) {
+  const key = `export-csv:maptask:${n}`
+  const row = (await d.find({ type: 'Button', key })) ?? (await d.find({ type: 'Box', key }))
+  if (!row) return undefined
+  const parts = (((row.children[0] as Part | undefined)?.children ?? []) as Part[]).map(p => ({ text: p.children.join(''), color: p.props?.color, bold: p.props?.bold }))
+  return { type: row.type, text: row.text, label: row.props?.label, parts, sub: await boxText(d, `${key}:sub`) }
+}
+// The task rows drawn, by key.
+const taskKeys = async (d: Drawn) => [...await d.findAll({ type: 'Box' }), ...await d.findAll({ type: 'Button' })].map(x => x.key ?? '').filter(k => /:maptask:\d+$/.test(k))
+
+test("the map's task list folds during a task, opens at a hand-off, and shows each task's dots, state and footprint", async ($, on) => {
+  // Every hook goes in before the first $ call. mapstates reads as stored under an earlier shape while `old` holds a
+  // value, keeping the engine's version so a write still lands.
+  // `stored`: the value the engine holds.
+  let old: unknown
+  let stored: MapStates | null = null
+  const register = on as unknown as (event: string, matcher: unknown, hook: unknown) => void
+  register('state.get', { plugin: 'quorum', key: 'mapstates' }, async (_: unknown, e: unknown, next: (e: unknown) => Promise<{ value: { value: unknown; version: number } }>) => {
+    const r = await next(e)
+    stored = (r.value.value as { value?: MapStates | null } | undefined)?.value ?? stored
+    return old === undefined ? r : { value: { value: { shape: 'mapstates-0', value: old }, version: r.value.version } }
+  })
+  // The export-csv task is the map's task 1, with a recorded change.
+  const withList = (status: string, more: Record<string, string> = {}) => ({ ...onMap(status), [LIST]: filesTsv([fileRow('M', '3', '1', 'app/report.py', '1')]), ...more })
+  const files = withList('BUILDING')
+  const seen = world(on, files, '/repo', {}, [], { clock: false })
+  const clock = mock.clock(on)
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.description }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  // Each quorum-map run waits until the test answers it.
+  const runs: { argv: readonly string[]; answer: (stdout: string) => Promise<void> }[] = []
+  on('process.run', (_, e) => {
+    if (!isQuorumMap(e.argv)) throw new Error('gh: command not found')
+    return new Promise(resolve => {
+      runs.push({ argv: e.argv, answer: async stdout => { resolve({ value: exited(0, stdout) }); await clock.settle() } })
+    })
+  })
+  const refresh = async () => {
+    await $.tool.call({ tool: 'Bash', command: 'quorum-state get status' })
+    await clock.settle()
+  }
+  const swap = async (next: Record<string, string>) => {
+    await reload($, files, next)
+    await clock.settle()
+  }
+  // The next run, two minutes on, answered with `stdout`.
+  const rerun = async (stdout: string) => {
+    const n = runs.length
+    await clock.advance(120_000)
+    await refresh()
+    expect(runs.length).toBe(n + 1)
+    await runs[n]?.answer(stdout)
+  }
+  const wide = async <T,>(read: (d: Drawn) => Promise<T>) => {
+    const d = await $.ui.mount(AT_100)
+    const out = await read(d)
+    await d.unmount()
+    return out
+  }
+  const list = (d: Drawn) => d.find({ type: 'Button', key: MAP_TASKS })
+  // Whether the list is open: its glyph, and whether any task row is drawn.
+  const isOpen = () => wide(async d => {
+    const text = (await list(d))?.text ?? ''
+    const keys = await taskKeys(d)
+    expect(text.startsWith('▾') ? keys.length : 0).toBe(keys.length)
+    return text.startsWith('▾')
+  })
+  const press = async (key: string) => {
+    const d = await $.ui.mount(AT_100)
+    await d.press({ key })
+    await d.unmount()
+  }
+  const mark = (row: Awaited<ReturnType<typeof taskRow>>) => row?.parts[1]
+  const start = async () => {
+    await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+  }
+
+  // During Build the list is folded to one row.
+  await start()
+  expect(runs.length).toBe(1)
+  let d = await $.ui.mount(AT_100)
+  expect((await list(d))?.text).toBe('▸ Tasks  0 of 3 merged')
+  expect((await list(d))?.props?.label).toBe('Tasks, 0 of 3 merged, folded')
+  expect(await taskKeys(d)).toEqual([])
+  // A press opens it: the key line, then a row per task. With no states yet, no row has a state word or mark.
+  await d.press({ key: MAP_TASKS })
+  expect((await list(d))?.text).toBe('▾ Tasks  0 of 3 merged')
+  expect((await list(d))?.props?.label).toBe('Tasks, 0 of 3 merged, open')
+  expect(await boxText(d, 'export-csv:maptasks-key')).toBe(MAP_KEY)
+  expect(await taskKeys(d)).toEqual(['export-csv:maptask:1', 'export-csv:maptask:2', 'export-csv:maptask:3'])
+  expect((await taskRow(d, 1))?.text).toMatch(/^ {4}1 Export the sales rows as CSV +✓✓●○○○ Build +$/)
+  expect((await taskRow(d, 1))?.sub).toBe('    MEDIUM · 1 file · +3 −1 · 1 important · 1 nit')
+  expect((await taskRow(d, 3))?.sub).toBe('    LOW')
+  // A second press folds it again, and the choice is stored.
+  await d.press({ key: MAP_TASKS })
+  expect((await list(d))?.text).toBe('▸ Tasks  0 of 3 merged')
+  await d.unmount()
+
+  // The first result only records the ready set.
+  await runs[0]?.answer(tasksOut('BUILDING', 'blocked', 'blocked'))
+  expect(await isOpen()).toBe(false)
+  // Task 3 turns ready between two results: a hand-off, so the folded list opens by itself.
+  await rerun(tasksOut('BUILDING', 'blocked', 'ready'))
+  expect(await isOpen()).toBe(true)
+  d = await $.ui.mount(AT_100)
+  // The task on show: bold, no lead since it doesn't open, its dots and current stage, and its footprint.
+  const one = await taskRow(d, 1)
+  expect(one?.type).toBe('Box')
+  expect(one?.text).toMatch(/^ {2}○ 1 Export the sales rows as CSV +✓✓●○○○ Build +$/)
+  expect(cellWidth(one?.text ?? '')).toBe(AT_100.props.bodyColumns - 4)
+  expect(one?.parts.find(p => p.text.startsWith('1 Export'))?.bold).toBe(true)
+  expect(mark(one)).toMatchObject({ text: '○', color: 'subtle' })
+  expect(one?.sub).toBe('    building · MEDIUM · 1 file · +3 −1 · 1 important · 1 nit')
+  // Task 2 waits on task 1; task 3 is ready, and as a LOW task its fifth dot is skipped.
+  const two = await taskRow(d, 2)
+  expect(two?.text).toMatch(/^ {2}○ 2 Import the rows back +○○○○○○ +$/)
+  expect(two?.parts.find(p => p.text.startsWith('2 Import'))?.bold).toBeFalsy()
+  expect(mark(two)).toMatchObject({ text: '○', color: 'inactive' })
+  expect(two?.sub).toBe('    after task 1 · MEDIUM')
+  const three = await taskRow(d, 3)
+  expect(three?.text).toMatch(/^ {2}○ 3 Add XLSX +○○○○–○ +$/)
+  expect(mark(three)).toMatchObject({ text: '○', color: 'subtle' })
+  expect(three?.sub).toBe('    ready · LOW')
+  await d.unmount()
+  // A press after that keeps it folded, across results that change nothing, until the next such change.
+  await press(MAP_TASKS)
+  expect(await isOpen()).toBe(false)
+  await rerun(tasksOut('BUILDING', 'blocked', 'ready'))
+  expect(await isOpen()).toBe(false)
+  await rerun(tasksOut('BUILDING', 'blocked', 'blocked'))
+  expect(await isOpen()).toBe(false)
+  await rerun(tasksOut('BUILDING', 'blocked', 'ready'))
+  expect(await isOpen()).toBe(true)
+
+  // A reload: the first run after a session start answers task 3 blocked, and the next one after another session
+  // start answers it ready. The start forgot the ready set, so that only records it, and the list stays folded.
+  await clock.advance(120_000)
+  await start()
+  expect(runs.length).toBe(6)
+  await runs[5]?.answer(tasksOut('BUILDING', 'blocked', 'blocked'))
+  expect(await isOpen()).toBe(false)
+  await start()
+  expect(runs.length).toBe(6)
+  await clock.advance(120_000)
+  await swap(withList('BUILDING'))
+  expect(runs.length).toBe(7)
+  expect(runs[6]?.argv.slice(1)).toEqual(['--map', 'csv-everywhere', 'tasks'])
+  await runs[6]?.answer(tasksOut('BUILDING', 'blocked', 'ready'))
+  expect(await isOpen()).toBe(false)
+
+  // A value stored under mapstates-0 with task 3 blocked, tried just now, is dropped: with no attempt time a run starts
+  // at once, and its ready task 3 is only recorded. Read again, the stored states are this run's, and the list stays
+  // folded. Misread, the run would wait, and task 3 turning ready would open the list.
+  expect(stored?.triedAt).toBeGreaterThan(0)
+  old = { ...stored, states: { 1: 'BUILDING', 2: 'blocked', 3: 'blocked' }, ready: [], isHandoff: false }
+  await refresh()
+  expect(runs.length).toBe(8)
+  await runs[7]?.answer(tasksOut('BUILDING', 'blocked', 'ready'))
+  old = undefined
+  expect(await isOpen()).toBe(false)
+  expect(await wide(async x => boxText(x, 'map-task-line'))).toBe('task 1 of 3 · Export the sales rows as CSV · next: 3 Add XLSX')
+
+  // While the task waits on the person at the PR handoff, the list starts open; a press folds it, kept after a reload.
+  await swap(withList('AWAITING-HUMAN'))
+  expect(runs.length).toBe(9)
+  await runs[8]?.answer(tasksOut('AWAITING-HUMAN', 'blocked', 'ready'))
+  expect(await isOpen()).toBe(true)
+  d = await $.ui.mount(AT_100)
+  expect(mark(await taskRow(d, 1))).toMatchObject({ text: '◆', color: 'warning' })
+  expect((await taskRow(d, 1))?.sub).toMatch(/^ {4}your move · MEDIUM · /)
+  await d.unmount()
+  await press(MAP_TASKS)
+  expect(await isOpen()).toBe(false)
+  await swap(withList('AWAITING-HUMAN'))
+  expect(runs.length).toBe(9)
+  expect(await isOpen()).toBe(false)
+  await press(MAP_TASKS)
+  expect(await isOpen()).toBe(true)
+
+  // Each state's word and mark. In review with no agent running: ○; a halted task ✗; unknown: no word or mark.
+  await swap(withList('IN_REVIEW'))
+  expect(runs.length).toBe(10)
+  await runs[9]?.answer(tasksOut('IN_REVIEW', 'HALTED', 'unknown'))
+  d = await $.ui.mount(AT_100)
+  expect(mark(await taskRow(d, 1))).toMatchObject({ text: '○', color: 'subtle' })
+  expect((await taskRow(d, 1))?.sub).toMatch(/^ {4}in review · MEDIUM · /)
+  expect(mark(await taskRow(d, 2))).toMatchObject({ text: '✗', color: 'error' })
+  expect((await taskRow(d, 2))?.sub).toBe('    halted · MEDIUM')
+  expect((await taskRow(d, 3))?.text.slice(0, 4)).toBe('    ')
+  expect((await taskRow(d, 3))?.sub).toBe('    LOW')
+  await d.unmount()
+  // With an agent running, the task on show's row is ●; another task in review stays ○, since the agents atom
+  // records no task. A merged LOW task: every dot done but its skipped blind test, and `done`.
+  await $.agent.spawn({ tool_use_id: 'b1', prompt: 'Fix round 2', description: 'b1', subagentType: 'quorum:builder', parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
+  seen.live.push('b1')
+  await rerun(tasksOut('IN_REVIEW', 'IN_REVIEW', 'merged'))
+  d = await $.ui.mount(AT_100)
+  expect(mark(await taskRow(d, 1))).toMatchObject({ text: '●', color: 'claude' })
+  expect(mark(await taskRow(d, 2))).toMatchObject({ text: '○', color: 'subtle' })
+  expect((await taskRow(d, 2))?.sub).toBe('    in review · MEDIUM')
+  expect(mark(await taskRow(d, 3))).toMatchObject({ text: '✓', color: 'success' })
+  expect((await taskRow(d, 3))?.text).toMatch(/ ✓✓✓✓–✓ done +$/)
+  expect((await taskRow(d, 3))?.sub).toBe('    merged · LOW')
+  await d.unmount()
+  // Another task waiting on the person: your move, ◆. Task 3 turning ready opens the list as a hand-off.
+  seen.live.length = 0
+  await finish($, 'b1')
+  await rerun(tasksOut('IN_REVIEW', 'AWAITING-HUMAN', 'ready'))
+  d = await $.ui.mount(AT_100)
+  expect(mark(await taskRow(d, 1))).toMatchObject({ text: '○', color: 'subtle' })
+  expect(mark(await taskRow(d, 2))).toMatchObject({ text: '◆', color: 'warning' })
+  expect((await taskRow(d, 2))?.sub).toBe('    your move · MEDIUM')
+  await d.unmount()
+
+  // Task 2 merged, from its own worktree, with a PR, a recorded change, and a finding kept at its worktree's path.
+  // Its row opens to its file tree, read with its own roots, so the finding sits under src/.
+  const importTask = {
+    '.tasks/csv-import/state.md': '---\nslug: csv-import\nrisk: MEDIUM\nstatus: AWAITING-HUMAN\nround: 1\nmap: csv-everywhere\nmap_task: 2\nworktree: /wt/csv-import\npr: https://github.com/acme/app/pull/55\n---\n',
+    '.tasks/csv-import/files.tsv': filesTsv([fileRow('A', '12', '0', 'src/a.ts')]),
+    '.tasks/csv-import/review/round-1/survivors.md': survivorsMd(impAt('/wt/csv-import/src/a.ts:3')),
+  }
+  await swap(withList('IN_REVIEW', importTask))
+  await rerun(tasksOut('IN_REVIEW', 'merged', 'ready'))
+  d = await $.ui.mount(AT_100)
+  expect((await list(d))?.text).toBe('▾ Tasks  1 of 3 merged')
+  expect((await partOf(d, MAP_TASKS, '1'))?.props?.color).toBeUndefined()
+  const merged = await taskRow(d, 2)
+  expect(merged?.type).toBe('Button')
+  expect(merged?.text).toMatch(/^▸ ✓ 2 Import the rows back +✓✓✓✓✓✓ done +$/)
+  expect(merged?.label).toBe('Task 2, Import the rows back, merged, done, MEDIUM, folded')
+  expect(merged?.sub).toBe('    merged · PR #55 · MEDIUM · 1 file · +12 · 1 important')
+  expect((await treeButtons(d)).some(b => b.key?.startsWith('csv-import:tree:'))).toBe(false)
+  await d.press({ key: 'export-csv:maptask:2' })
+  expect((await taskRow(d, 2))?.text.startsWith('▾ ✓ 2 Import')).toBe(true)
+  expect((await taskRow(d, 2))?.label).toBe('Task 2, Import the rows back, merged, done, MEDIUM, open')
+  const tree = (await treeButtons(d)).map(b => b.key ?? '').filter(k => k.startsWith('csv-import:'))
+  expect(tree.some(k => k.startsWith('csv-import:tree:src/'))).toBe(true)
+  expect(tree.some(k => k.includes('/wt/'))).toBe(false)
+  // The task on show never opens: its row stays a Box.
+  expect((await taskRow(d, 1))?.type).toBe('Box')
+  await d.unmount()
+  // Every task merged: M in success.
+  await rerun(tasksOut('merged', 'merged', 'merged'))
+  d = await $.ui.mount(AT_100)
+  expect((await list(d))?.text).toBe('▾ Tasks  3 of 3 merged')
+  expect((await partOf(d, MAP_TASKS, '3'))?.props?.color).toBe('success')
+  expect((await list(d))?.props?.label).toBe('Tasks, 3 of 3 merged, open')
+  await d.unmount()
 })
 
 test("the task breakdown's review expects architecture and patterns, and security for a HIGH task or its reply", () => {
