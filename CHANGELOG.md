@@ -22,8 +22,8 @@ copy with `/plugin marketplace update`.
   the terminal only. It's `off` by default.
 - **The task's changed files are recorded.** `quorum-files record` writes the change to `.tasks/<slug>/files.tsv`:
   each file's git letter and line counts against the merge-base, the plan steps that name it, and whether it changed
-  since the last round. The plan, build, review-loop, and blind-test steps record it at their save points, so the
-  dashboard still only reads `.tasks/`.
+  since the last round. The plan, build, review-loop, and blind-test steps record it at their save points. The
+  stages record the file list, so the dashboard's tree needs no git of its own.
 - **The file tree in every stage.** In Plan the tree shows the files the plan's steps name
   (`4 steps · 9 files, 3 new`), in Build the change so far (`5 of 9 planned files changed · 1 unplanned`), and in
   Review the same tree with the findings. From Blind test on it folds to one `▸ Files` row that a press opens. Each
@@ -86,6 +86,24 @@ copy with `/plugin marketplace update`.
   The dashboard's findings tree shows `security` before such a finding's title and `!` after a `✗` or `↻` count
   that holds one (`✗2!`), with `! security` in the key; a fixed or dropped one keeps the word, muted. `REVIEW.md`'s
   finding format, and its template, describe the line.
+- **The Map card.** A task started from a map (`map` and `map_task` in its state.md) shows a Map card above its Task
+  card, or after it above the prompt: `Map · <title>` with the slug, the map's phases as a stepper
+  (`✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 1/3`, `◆` when the map waits on you), and
+  `task 1 of 3 · <request> · next: 3 <request>`. Under it, `▸ Tasks  1 of 3 merged` folds the map's tasks, each
+  with its state mark, its six stage dots, and its state word, PR, tier and footprint; it opens by itself at the PR
+  handoff and when a task turns ready, and a finished task with a recorded file list opens to its file tree. The
+  task states come from `bin/quorum-map tasks`, which the dashboard runs in the background about every two minutes,
+  and at once when the task's status changes; it asks git, or GitHub through `gh` when a task records a PR, whether
+  a task merged. Until a run finishes the line adds `· task states unknown`.
+- **The map session pane.** While this session works a `/quorum:map` (its `.tasks/.map-sessions/` marker), the band
+  shows a ` MAP ` badge, amber while the map waits on you, with the slug and the phase dots, and the pane shows the
+  Map card with the Destination, a Now card for the phase (`◆ waiting for you · answer ticket 04`,
+  `between tickets`, `hand off · reviewing the task breakdown`, `◆ waiting for you · approve the task breakdown`),
+  Tickets under their first blocker with their type and status (`you`, `agent`, `your answer`, `in progress`,
+  `claimed`, `ready`, `after 04`, `out of scope`) and a press for each one's gist, reason or question, the task
+  list, and Decisions, folded. Above the prompt the Now card comes first and the finished tickets and merged tasks
+  fold to `▸ ✓ 3 finished tickets` and `▸ ✓ 1 merged task`. The task on show is listed first under Other tasks.
+  `assets/src/dashboard-demo.sh --map` adds a five-ticket demo map to the demo task.
 
 ### Changed
 

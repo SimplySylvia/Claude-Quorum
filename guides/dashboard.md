@@ -70,17 +70,125 @@ finished with its PR open.</sub>
   the band and pane when there's no task. Finished reviews stay in a **Reviews** section, and an unfinished one is
   flagged as interrupted. A finished review's row opens to its findings tree too.
 
-The pane docks beside the chat in a wide fullscreen terminal, and sits above the prompt otherwise. The dashboard only
-reads `.tasks/`, so `claude -p`, cloud sessions, and the VS Code chat panel work as before, without it. It shows
-tasks and reviews; maps and research aren't on it yet.
+The pane docks beside the chat in a wide fullscreen terminal, and sits above the prompt otherwise. The dashboard reads
+`.tasks/`, and runs two commands in the background: `gh`, for the task's PR, and, for a [map](#maps), the plugin's
+`bin/quorum-map tasks`, which asks git, or GitHub through `gh` when a task records a PR, whether a task merged. None of
+it holds up a turn, and `claude -p`, cloud sessions, and the VS Code chat panel work as before, without it. It shows
+tasks, reviews, and maps; research isn't on the dashboard.
+
+## Maps
+
+A [map](research-and-maps.md) shows in two places: as a **Map card** on a task started from it, and as the whole pane
+in a `/quorum:map` session.
+
+### The Map card
+
+When the task on show records `map` and `map_task` in its state.md, and that map's files read, a Map card sits
+directly above the Task card. Above the prompt, the order is the Now card, the Task card, then the Map card. A task
+with no map, or whose map folder is missing, has no Map card and looks as it did.
+
+- **The title row:** `Map · <title>` with the map's slug on the right; a long title is cut at the end and never runs
+  into the slug.
+- **The stepper:** the map's four phases, `Chart · Tickets · Hand off · Tasks`, such as
+  `✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 1/3`. A done phase is `✓`, the current one `●`, or `◆` in amber when the
+  map waits on you, and a later one `○`. The map is in Chart while it has no tickets, in Tickets while any ticket is
+  open or claimed, in Tasks once `tasks.md` exists and its breakdown review has voted, or a task names the map, and
+  in Hand off between them. `Tickets 4/4` counts resolved of in-scope tickets (out-of-scope ones aren't counted), and
+  `Tasks 1/3` merged of all tasks.
+- **The task line:** `task 1 of 3 · Export the sales rows as CSV`, then `· next: 3 <request>` when another task is
+  ready, and `· task states unknown` until the first [task states](#where-task-states-come-from) arrive. A
+  `map_task` beyond the tasks in `tasks.md`, or no `tasks.md`, reads just `task 4`.
+- **The task list:** a `▸ Tasks  1 of 3 merged` row (the count green once every task merged) folds the map's tasks.
+  It starts folded during a task, and opens by itself at a hand-off: while the task waits at the PR handoff (`READY`
+  or `AWAITING-HUMAN`), and when a task turns `ready` between two task-state results. A press's choice is kept per
+  task, and wins until the next task turns ready. The first result after a reload opens nothing. Opened, it shows the
+  key line, `key: the dots are Spec, Plan, Build, Review, Blind test, PR · – skipped`, then a row per task:
+  - its state mark, then `<n> <request>`, cut at the end and bold for the task on show;
+  - on the right, the six stage dots from that task's state.md, as the Task card's stepper places them, with `–` for
+    a LOW task's blind test, then the current stage (`Build`, `Blind`, or `done` once merged);
+  - a second line with the state word, `· PR #55` when its state.md records a PR, its tier, and its footprint when
+    it has a recorded file list: `merged · PR #55 · MEDIUM · 1 file · +12 · 1 important`.
+
+  Each state reads as one word and one mark:
+
+  | State | Word | Mark |
+  |---|---|---|
+  | merged | `merged` | `✓` green |
+  | ready | `ready` | `○` |
+  | blocked | `after task 1, 2` (the blockers not merged yet) | `○` dim |
+  | `DRAFT-AWAITING-VISUAL-SIGNOFF`, `READY`, `AWAITING-HUMAN` | `your move` | `◆` amber |
+  | `PLANNING`, `BUILDING`, `IN_REVIEW`, `CONVERGED`, `BLIND-TEST` | the status in words (`in review`) | `●` while an agent of the task on show runs, else `○` |
+  | `HALTED`, `ESCALATED` | `halted`, `escalated` | `✗` red |
+  | unknown, or no state yet | none | none |
+
+  A merged or finished task with a recorded file list, other than the task on show, is a button: a press opens its
+  [file tree](#the-file-tree), read-only. Every row's label says it in words, such as
+  `Task 2, Import the rows back, merged, done, MEDIUM, folded`.
+
+### Where task states come from
+
+Whether a map's task is ready, blocked, under way, or merged comes from `bin/quorum-map --map <slug> tasks`, which
+the dashboard runs in the background and never waits on; it asks git, or GitHub through `gh` when a task records a
+PR, whether a task merged. It runs again at most every two minutes, and at once when the status of the task on show
+changes. A run that fails or takes more than 15 seconds keeps the last states, and the next try waits two minutes.
+
+### The map session
+
+While this session works a map (`/quorum:map` records it in `.tasks/.map-sessions/<session id>`), the map takes the
+band and the pane, even with a task on show. They go back to the task, or the empty pane, once the session leaves the
+map. Another session's map, including one a crashed session left behind, doesn't show here. A `quorum-map` call
+refreshes the dashboard at once, so a claimed or resolved ticket shows before the turn ends.
+
+- **The band:** a ` MAP ` badge, the map's slug, the four phase dots with the current phase by name, and
+  **Dashboard**. The badge is amber whenever the map waits on you (a claimed grilling or prototype ticket, or a task
+  breakdown waiting for your approval), and in Claude's colour otherwise.
+- **The Map card:** its title row and stepper, then the Destination and the tickets' summary, cut to the card.
+- **The Now card** says what the session is doing, its border amber when it waits on you:
+  - **Chart:** `charting the map`.
+  - **Tickets, with a ticket claimed:** `ticket 02 · research`, its title, its question, and a row per running agent
+    (`● Researcher  running 42s`). A claimed grilling ticket waits on you, since only you answer it:
+    `◆ waiting for you · answer ticket 04` (`◆ waiting for you · pick a variant for ticket 04` for a prototype).
+  - **Tickets, with none claimed:** `between tickets` and how many are ready (`2 ready`).
+  - **Hand off:** `hand off · writing the task breakdown`, then `hand off · reviewing the task breakdown` with the
+    review round's reviewer and voter rows, as the plan review shows them.
+  - **Tasks:** before any task starts, `◆ waiting for you · approve the task breakdown`, with `clean` or the
+    breakdown review's kept findings (`kept ✗2`); once one has, `task 1 · building`. Both list the ready tasks,
+    `ready: task 3 <request>`.
+- **Tickets,** open, with a summary such as `5 tickets · 2 resolved · 1 out of scope` (a zero count other than
+  `resolved` is left out, so `0 ready` doesn't show). Each ticket sits two columns under the first ticket it waits
+  on, at most three levels deep, so a long chain still fits. A row reads `▸`/`▾`, its mark, `NN <title>`, then on
+  the right its status:
+  - `you` (green `✓`) or `agent` (muted `✓`) for a resolved ticket, by who decided it;
+  - `your answer` (`◆`, amber) for a claimed grilling or prototype ticket. Another claimed ticket reads
+    `in progress` (`●`) while an agent runs in this session, and `claimed` (`○`) otherwise, so a stale claim never
+    looks busy;
+  - `ready` for an open ticket whose blockers are all closed, and `after 04` naming the blockers still open;
+  - `out of scope`.
+
+  An open ticket shows its type before its status (`grilling · ready`); in a tight row the type goes first, then the
+  title is cut at the end, and the row's label still names the type. A press on a row (`▸`/`▾`) opens or folds its
+  detail line, wrapped to the row's indent: a resolved ticket's gist with `· decided by you` or
+  `· decided by the agent`, an out-of-scope ticket's reason, or an open ticket's question. Resolved and out-of-scope
+  tickets start open and open ones folded, and the choice is kept.
+- **Tasks,** once `tasks.md` exists: the [task list](#the-map-card), open. No row gets an agent's `●` here, since the
+  running agents are the map's.
+- **Decisions,** folded: `▸ Decisions  2 so far` (or `none yet`). Opened, each of map.md's Decisions so far, ending
+  `· you` or `· agent`.
+- **Below them,** a running `/quorum:review`, past reviews, and Other tasks, with the task on show listed first,
+  whatever its status.
+
+Docked, the order is the Map card, the Now card, Tickets, Tasks, then Decisions. Above the prompt, the Now card comes
+first, then the Map card, and the finished work folds so the open work stays in view: `▸ ✓ 3 finished tickets` at the
+top of Tickets holds the resolved and out-of-scope tickets, and `▸ ✓ 1 merged task` under the task list's key line
+holds the merged tasks. A press opens either.
 
 ## The file tree
 
 While a task runs, the Now card shows the change as one tree of files: what the plan said each step would touch,
 what the build has changed so far, which changes no step planned, and where the review's findings land. The plan,
 build, review-loop, and blind-test steps record the list into `.tasks/<slug>/files.tsv` with `quorum-files record`
-at their save points (see [Repository layout](reference.md) in the reference), so the dashboard still only reads
-`.tasks/` and never runs git. The tree changes only when a stage records, with one exception: in Build and review,
+at their save points (see [Repository layout](reference.md) in the reference). The stages record the file list, so
+the tree needs no git of its own. The tree changes only when a stage records, with one exception: in Build and review,
 the file being edited is marked as it happens (see [the file being edited](#the-file-being-edited)).
 
 - **Plan:** directly under the Now card's title, a **Plan steps** list, one row per step of `plan.md`,
