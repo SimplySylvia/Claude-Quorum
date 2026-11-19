@@ -3,7 +3,7 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
-## Unreleased
+## 0.12.0 (2026-11-18)
 
 ### Added
 
