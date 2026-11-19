@@ -14,7 +14,11 @@ import {
   awaitingFrom, awaitingOf, cellWidth, changeHeader, confidenceRow, cutChain, cutEnd, cutMiddle, disputeDrops, footprint, iconsOn, isBigTree, markText, markWords, repoPath, roundKept, isEditShown, runEnds, splitLoc, stepFindings, stepRows, trackFindings, treeHeader, treeRows,
 } from '../../hooks/dashboard/tree'
 import type { TreeChange, TreeRow } from '../../hooks/dashboard/tree'
-import type { ChangedFile, FileList, FindingsView, TreeFinding } from '../../types'
+import {
+  MAX_TICKET_DEPTH, isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, openBlockers,
+  parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskState, ticketOrder, ticketStatus, ticketSummary,
+} from '../../hooks/dashboard/map'
+import type { ChangedFile, FileList, FindingsView, MapStates, MapTaskRun, MapTicket, MapView, TreeFinding } from '../../types'
 import { DEMO_DONE } from './fixtures/demo-done'
 import { DEMO_PLAN, DEMO_PLAN_SHOW } from './fixtures/demo-plan'
 import { NO_MAP_BASELINE } from './fixtures/no-map-baseline'
@@ -4771,4 +4775,365 @@ test('a task with no map and a session with no map session draw as they did', as
   const emptyBand = await draw(ON_BAND)
   const rows = { reviewPane, reviewInline, reviewBand, emptyPane, emptyBand }
   expect(rows).toEqual(NO_MAP_BASELINE)
+})
+
+// ---- Maps (hooks/dashboard/map.ts)
+
+const MAP_MD = `# Map: Export the sales rows everywhere
+
+## Destination
+
+<!-- What reaching the end of this map looks like: a set of tasks ready to spec, a decision to lock, or a change to
+     make. One or two lines; every session reads it before choosing a ticket. -->
+Every export the sales team uses
+  writes the same rows.
+
+## Notes
+
+<!-- The domain. -->
+
+## Decisions so far
+
+<!-- One line per resolved ticket. -->
+- [Which formats count as everywhere](tickets/01-which-formats-count-as-everywhere.md): CSV, XLSX and the web page
+- [How spreadsheets treat formula cells](tickets/02-how-spreadsheets-treat-formula-cells.md): prefix = + - @ with a quote
+
+## Not yet specified
+
+## Out of scope
+
+- [A PDF export](tickets/03-a-pdf-export.md): printing the web page covers it
+- Anything for the mobile app
+`
+
+const TICKET_FILES: Record<string, string> = {
+  '01-which-formats-count-as-everywhere.md': `# Which formats count as everywhere
+
+Type: grilling
+Blocked by: none
+Status: resolved
+Answered by: user
+
+## Question
+
+Which export formats does
+the sales team use?
+
+## Answer
+
+CSV, XLSX and the web page.
+`,
+  '02-how-spreadsheets-treat-formula-cells.md': `# How spreadsheets treat formula cells
+
+Type: research
+Blocked by: 01
+Status: resolved
+Answered by: agent
+
+## Question
+
+Which leading characters make a cell a formula?
+
+## Answer
+
+= + - @
+`,
+  '03-a-pdf-export.md': `# A PDF export
+
+Type: prototype
+Blocked by: none
+Status: out-of-scope
+
+## Question
+
+Does anyone need a PDF?
+
+## Out of scope
+
+printing the web page covers it
+`,
+  '04-where-the-export-button-goes.md': `# Where the export button goes
+
+Type: task
+Blocked by: 01, 03
+Status:   claimed  
+
+## Question
+
+Where on the page does the button sit?
+`,
+  '05-how-large-a-download.md': `# How large a download the browser handles
+
+Type: grilling
+Blocked by: 4
+Status: open
+
+## Question
+
+How many rows at most?
+
+## Notes
+
+Status: resolved
+`,
+}
+
+const TASKS_MD = `# Tasks
+
+1. Export the sales rows as CSV · tier: MEDIUM · blocked by: none · decisions: 01, 02
+2. Import the rows back · tier: MEDIUM · blocked by: 1 · decisions: 01
+3. Add XLSX · tier: LOW · blocked by: 1, 2 · decisions: 02
+Not a task: 4. at the start
+10.no space after the dot
+`
+
+const mapView = (over: Partial<MapView> = {}): MapView => ({
+  slug: 'csv-everywhere', title: 'Export the sales rows everywhere', destination: '', decisions: [], outOfScope: [],
+  tickets: [], tasks: null, review: null, runs: [], isSession: false, ...over,
+})
+const tk = (n: string, status: string, over: Partial<MapTicket> = {}): MapTicket => ({
+  n, title: `Ticket ${n}`, type: 'research', blockedBy: [], status, answeredBy: status === 'resolved' ? 'agent' : '', question: 'Why?', gist: '', ...over,
+})
+const mapRun = (n: number, slug: string, status: string, over: Partial<MapTaskRun> = {}): MapTaskRun => ({
+  n, slug, status, risk: 'MEDIUM', stage: stageOf(status, undefined), isFast: false, pr: null, files: null, rounds: [], codeView: null, hasPlan: false, ...over,
+})
+const voted = (important: number | null) => ({
+  round: 1, exists: true, reviewers: [], voter: { role: 'voter', findings: important === null ? null : { important, nit: 0, preExisting: 0 } }, survivors: null,
+})
+const stepperText = (m: MapView, s: MapStates | null = null) => mapStepper(m, s).map(p => p.map(x => x.text).join('')).join(' ')
+const statesFor = (slug: string, states: Record<string, string> | null): MapStates => ({ slug, states, triedAt: 0, ready: null, isHandoff: false })
+
+test("a map's title, destination, decisions, tickets and tasks are read as quorum-map reads them", () => {
+  const m = parseMapMd(MAP_MD)
+  expect(m.title).toBe('Export the sales rows everywhere')
+  expect(m.destination).toBe('Every export the sales team uses writes the same rows.')
+  expect(m.decisions).toEqual([
+    { text: '[Which formats count as everywhere](tickets/01-which-formats-count-as-everywhere.md): CSV, XLSX and the web page', ticket: '01', title: 'Which formats count as everywhere', gist: 'CSV, XLSX and the web page' },
+    { text: '[How spreadsheets treat formula cells](tickets/02-how-spreadsheets-treat-formula-cells.md): prefix = + - @ with a quote', ticket: '02', title: 'How spreadsheets treat formula cells', gist: 'prefix = + - @ with a quote' },
+  ])
+  expect(m.outOfScope).toEqual([
+    { text: '[A PDF export](tickets/03-a-pdf-export.md): printing the web page covers it', ticket: '03', title: 'A PDF export', gist: 'printing the web page covers it' },
+    { text: 'Anything for the mobile app', ticket: '', title: '', gist: '' },
+  ])
+  // A Destination holding only the template's comment is empty, and a title without `Map: ` is kept whole.
+  const bare = parseMapMd('# Sales exports\n\n## Destination\n\n<!-- What reaching the end looks like.\n     One or two lines. -->\n\n## Notes\n')
+  expect(bare).toEqual({ title: 'Sales exports', destination: '', decisions: [], outOfScope: [] })
+
+  const parsed = Object.keys(TICKET_FILES).sort().map(f => parseTicket(f, TICKET_FILES[f] ?? ''))
+  const tickets = joinGists(parsed.filter((t): t is MapTicket => t !== null), m.decisions, m.outOfScope)
+  expect(tickets).toEqual([
+    { n: '01', title: 'Which formats count as everywhere', type: 'grilling', blockedBy: [], status: 'resolved', answeredBy: 'user', question: 'Which export formats does the sales team use?', gist: 'CSV, XLSX and the web page' },
+    { n: '02', title: 'How spreadsheets treat formula cells', type: 'research', blockedBy: ['01'], status: 'resolved', answeredBy: 'agent', question: 'Which leading characters make a cell a formula?', gist: 'prefix = + - @ with a quote' },
+    { n: '03', title: 'A PDF export', type: 'prototype', blockedBy: [], status: 'out-of-scope', answeredBy: '', question: 'Does anyone need a PDF?', gist: 'printing the web page covers it' },
+    // The value is trimmed, as `field` trims it.
+    { n: '04', title: 'Where the export button goes', type: 'task', blockedBy: ['01', '03'], status: 'claimed', answeredBy: '', question: 'Where on the page does the button sit?', gist: '' },
+    // A blocker is padded to two digits; a `Status:` line after the first `## ` heading isn't the ticket's.
+    { n: '05', title: 'How large a download the browser handles', type: 'grilling', blockedBy: ['04'], status: 'open', answeredBy: '', question: 'How many rows at most?', gist: '' },
+  ])
+  // No `Status:` line before the first heading gives no ticket, so readMap gives no map.
+  expect(parseTicket('06-no-status.md', '# No status\n\nType: grilling\nBlocked by: none\n\n## Question\n\nWhy?\n\nStatus: open\n')).toBeNull()
+
+  expect(parseTasksMd(TASKS_MD)).toEqual([
+    { n: 1, request: 'Export the sales rows as CSV', tier: 'MEDIUM', blockedBy: [] },
+    { n: 2, request: 'Import the rows back', tier: 'MEDIUM', blockedBy: [1] },
+    { n: 3, request: 'Add XLSX', tier: 'LOW', blockedBy: [1, 2] },
+  ])
+  // quorum-map tasks' lines for tasks.md's numbers only.
+  expect(parseTaskStates('1\tmerged\tcsv-export\t-\tExport\n9\tmerged\t-\t-\tGone\n3\tready\t-\t1,2\tAdd XLSX\nnoise\n', [1, 2, 3]))
+    .toEqual({ 1: 'merged', 3: 'ready' })
+
+  expect(isMapSlug('csv-everywhere')).toBe(true)
+  expect(isMapSlug('v1.2')).toBe(true)
+  for (const bad of ['../x', '-x', 'CSV', '', 'a/b', 'a b']) expect(isMapSlug(bad)).toBe(false)
+  expect(isSessionId('sess-a_1')).toBe(true)
+  for (const bad of ['../x', '-x', '_x', '', 'a.b', 'a/b']) expect(isSessionId(bad)).toBe(false)
+})
+
+test("the map's phase and counts follow its tickets, tasks.md and session", () => {
+  const tasks = parseTasksMd(TASKS_MD)
+  const closed = [tk('01', 'resolved', { answeredBy: 'user', type: 'grilling' }), tk('02', 'resolved'), tk('03', 'out-of-scope')]
+
+  // No tickets: Chart.
+  expect(mapPhase(mapView())).toBe(0)
+  expect(stepperText(mapView())).toBe('● Chart ○ Tickets ○ Hand off ○ Tasks')
+  const chart = mapStepper(mapView(), null)
+  expect(chart[0]).toEqual([{ text: '●', color: 'claude' }, { text: ' Chart', bold: true }])
+  expect(chart[1]).toEqual([{ text: '○', color: 'inactive' }, { text: ' Tickets', dim: true }])
+
+  // An open ticket and an out-of-scope one among five: resolved of in-scope.
+  const five = [tk('01', 'resolved'), tk('02', 'resolved'), tk('03', 'open'), tk('04', 'claimed'), tk('05', 'out-of-scope')]
+  expect(mapPhase(mapView({ tickets: five }))).toBe(1)
+  expect(stepperText(mapView({ tickets: five }))).toBe('✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks')
+  expect(mapStepper(mapView({ tickets: five }), null)[0]).toEqual([{ text: '✓', color: 'success' }, { text: ' Chart', dim: true }])
+
+  // Every ticket closed and no tasks.md: Hand off.
+  expect(stepperText(mapView({ tickets: closed }))).toBe('✓ Chart ✓ Tickets 2/2 ● Hand off ○ Tasks')
+  // tasks.md with no review stays at Hand off, in a map session or not: no marker plays a part.
+  for (const isSession of [true, false]) {
+    expect(mapPhase(mapView({ tickets: closed, tasks, isSession }))).toBe(2)
+    expect(stepperText(mapView({ tickets: closed, tasks, isSession }))).toBe('✓ Chart ✓ Tickets 2/2 ● Hand off ○ Tasks 0/3')
+  }
+  // A round whose votes.md isn't written yet doesn't count.
+  expect(stepperText(mapView({ tickets: closed, tasks, review: voted(null) }))).toBe('✓ Chart ✓ Tickets 2/2 ● Hand off ○ Tasks 0/3')
+
+  // A reviewed breakdown with no task started waits on the user to approve it.
+  const reviewed = mapView({ tickets: closed, tasks, review: voted(1) })
+  expect(mapPhase(reviewed)).toBe(3)
+  expect(mapWaits(reviewed)).toBe(true)
+  expect(stepperText(reviewed)).toBe('✓ Chart ✓ Tickets 2/2 ✓ Hand off ◆ Tasks 0/3')
+  expect(mapStepper(reviewed, null)[3]?.[0]).toEqual({ text: '◆', color: 'warning' })
+
+  // Once a task names the map, the agent works it.
+  const started = mapView({ tickets: closed, tasks, review: voted(1), runs: [mapRun(1, 'csv-export', 'BUILDING')] })
+  expect(mapWaits(started)).toBe(false)
+  expect(stepperText(started)).toBe('✓ Chart ✓ Tickets 2/2 ✓ Hand off ● Tasks 0/3')
+  // A run alone, with no review, is Tasks too.
+  expect(mapPhase(mapView({ tickets: closed, tasks, runs: [mapRun(1, 'csv-export', 'BUILDING')] }))).toBe(3)
+
+  // Merged of all, from the states stored for this map only.
+  const merged = statesFor('csv-everywhere', { 1: 'merged', 2: 'BUILDING', 3: 'ready' })
+  expect(stepperText(started, merged)).toBe('✓ Chart ✓ Tickets 2/2 ✓ Hand off ● Tasks 1/3')
+  expect(mergedCount(started, merged)).toBe(1)
+  expect(readyTasks(started, merged).map(t => t.n)).toEqual([3])
+  const beta = { ...merged, slug: 'beta' }
+  expect(stepperText(started, beta)).toBe('✓ Chart ✓ Tickets 2/2 ✓ Hand off ● Tasks 0/3')
+  expect(statesOf(started, beta)).toBeNull()
+  expect(readyTasks(started, beta)).toEqual([])
+
+  // A claimed ticket wins over a started task: the phase is Tickets.
+  const reopened = mapView({ tickets: [...closed, tk('04', 'claimed')], tasks, runs: [mapRun(1, 'csv-export', 'BUILDING')] })
+  expect(mapPhase(reopened)).toBe(1)
+  expect(stepperText(reopened)).toBe('✓ Chart ● Tickets 2/3 ○ Hand off ○ Tasks 0/3')
+})
+
+test('tickets sit under their first blocker, at most three levels deep, each drawn once', () => {
+  // 02's first blocker doesn't exist, so it sits at the top level; 04 and 05 wait on each other.
+  const tickets = [tk('01', 'open'), tk('02', 'open', { blockedBy: ['09'] }), tk('03', 'open', { blockedBy: ['01'] }), tk('04', 'open', { blockedBy: ['05'] }), tk('05', 'open', { blockedBy: ['04'] })]
+  expect(ticketOrder(tickets).map(e => [e.ticket.n, e.depth])).toEqual([['01', 0], ['03', 1], ['02', 0], ['04', 0], ['05', 1]])
+  expect(openBlockers(tickets[1] as MapTicket, tickets)).toEqual(['09'])
+  expect(ticketStatus(tickets[1] as MapTicket, tickets, false).word).toBe('after 09')
+
+  // A chain of ten: the walk goes all the way down, and the depth stops at three.
+  const chain = Array.from({ length: 10 }, (_, i) => tk(String(i + 1).padStart(2, '0'), 'open', { blockedBy: i === 0 ? [] : [String(i).padStart(2, '0')] }))
+  expect(MAX_TICKET_DEPTH).toBe(3)
+  expect(ticketOrder(chain).map(e => e.depth)).toEqual([0, 1, 2, 3, 3, 3, 3, 3, 3, 3])
+  expect(ticketOrder(chain).map(e => e.ticket.n)).toEqual(chain.map(t => t.n))
+})
+
+test('a ticket reads its status, mark and type, and the map its summary and the ticket being worked', () => {
+  const all = [
+    tk('01', 'resolved', { type: 'grilling', answeredBy: 'user' }),
+    tk('02', 'resolved', { type: 'research', answeredBy: 'agent' }),
+    tk('03', 'claimed', { type: 'grilling' }),
+    tk('04', 'claimed', { type: 'research' }),
+    tk('05', 'open', { type: 'grilling', blockedBy: ['01'] }),
+    tk('06', 'open', { type: 'task', blockedBy: ['04', '02', '03'] }),
+    tk('07', 'out-of-scope', { type: 'prototype' }),
+    tk('08', 'claimed', { type: 'prototype' }),
+  ]
+  const at = (n: string, running = false) => ticketStatus(all.find(t => t.n === n) as MapTicket, all, running)
+  expect(at('01')).toEqual({ mark: '✓', markColor: 'success', word: 'you', wordColor: 'success', type: null, words: 'resolved, decided by you' })
+  expect(at('02')).toEqual({ mark: '✓', markColor: 'subtle', word: 'agent', wordColor: 'claude', type: null, words: 'resolved, decided by the agent' })
+  expect(at('03', true)).toEqual({ mark: '◆', markColor: 'warning', word: 'your answer', wordColor: 'warning', type: 'grilling', words: 'your answer' })
+  expect(at('08').mark).toBe('◆')
+  // A claimed research ticket is in progress only while an agent runs, so a stale claim never looks busy.
+  expect(at('04', true)).toEqual({ mark: '●', markColor: 'claude', word: 'in progress', wordColor: 'claude', type: 'research', words: 'in progress' })
+  expect(at('04', false)).toEqual({ mark: '○', markColor: 'subtle', word: 'claimed', wordColor: 'subtle', type: 'research', words: 'claimed' })
+  expect(at('05')).toEqual({ mark: '○', markColor: 'subtle', word: 'ready', wordColor: 'subtle', type: 'grilling', words: 'ready' })
+  // Every blocker still open, in Blocked by order.
+  expect(at('06')).toEqual({ mark: '○', markColor: 'inactive', word: 'after 04, 03', wordColor: 'inactive', type: 'task', words: 'after 04, 03' })
+  expect(at('07')).toEqual({ mark: '–', markColor: 'inactive', word: 'out of scope', wordColor: '', type: null, words: 'out of scope' })
+
+  expect(isClosed(all[0] as MapTicket)).toBe(true)
+  expect(isClosed(all[6] as MapTicket)).toBe(true)
+  expect(isClosed(all[2] as MapTicket)).toBe(false)
+  expect(all.filter(t => isFrontier(t, all)).map(t => t.n)).toEqual(['05'])
+
+  expect(ticketSummary(all)).toBe('8 tickets · 2 resolved · 1 out of scope · 1 ready')
+  expect(ticketSummary([tk('01', 'open'), tk('02', 'open', { blockedBy: ['01'] })])).toBe('2 tickets · 0 resolved · 1 ready')
+  expect(ticketSummary([tk('01', 'resolved')])).toBe('1 ticket · 1 resolved')
+
+  // A claimed grilling or prototype ticket wins over an earlier claimed one, since it waits on the user.
+  const both = [tk('01', 'resolved'), tk('02', 'claimed', { type: 'research' }), tk('03', 'open'), tk('04', 'claimed', { type: 'grilling' })]
+  expect(nowTicket(both)?.n).toBe('04')
+  expect(mapWaits(mapView({ tickets: both }))).toBe(true)
+  const research = [tk('01', 'resolved'), tk('02', 'claimed', { type: 'research' }), tk('03', 'claimed', { type: 'task' })]
+  expect(nowTicket(research)?.n).toBe('02')
+  expect(mapWaits(mapView({ tickets: research }))).toBe(false)
+  expect(nowTicket([tk('01', 'open')])).toBeNull()
+})
+
+test("a map task's state reads as one word and one mark, for the map its states belong to", () => {
+  const tasks = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(n => ({ n, request: `Task ${n}`, tier: 'MEDIUM', blockedBy: n === 4 ? [1, 2, 3] : [] }))
+  const m = mapView({ tasks })
+  const s = statesFor('csv-everywhere', {
+    1: 'merged', 2: 'BUILDING', 3: 'ready', 4: 'blocked', 5: 'READY', 6: 'AWAITING-HUMAN', 7: 'DRAFT-AWAITING-VISUAL-SIGNOFF', 8: 'HALTED', 9: 'ESCALATED', 10: 'unknown',
+  })
+  const at = (n: number, running = false, states: MapStates | null = s) => taskState(tasks[n - 1] as (typeof tasks)[number], m, states, running)
+  expect(at(1)).toEqual({ word: 'merged', mark: '✓', color: 'success' })
+  expect(at(2, true)).toEqual({ word: 'building', mark: '●', color: 'claude' })
+  expect(at(2, false)).toEqual({ word: 'building', mark: '○', color: 'subtle' })
+  expect(at(3)).toEqual({ word: 'ready', mark: '○', color: 'subtle' })
+  // Its blockers that aren't merged.
+  expect(at(4)).toEqual({ word: 'after task 2, 3', mark: '○', color: 'inactive' })
+  for (const n of [5, 6, 7]) expect(at(n, true)).toEqual({ word: 'your move', mark: '◆', color: 'warning' })
+  expect(at(8)).toEqual({ word: 'halted', mark: '✗', color: 'error' })
+  expect(at(9)).toEqual({ word: 'escalated', mark: '✗', color: 'error' })
+  expect(at(10)).toBeNull()
+  expect(at(11)).toBeNull()
+  expect(at(1, false, null)).toBeNull()
+  expect(taskState(tasks[0] as (typeof tasks)[number], m, { ...s, slug: 'beta' }, false)).toBeNull()
+  for (const [status, word] of [['IN_REVIEW', 'in review'], ['BLIND-TEST', 'blind test'], ['PLANNING', 'planning'], ['CONVERGED', 'converged']]) {
+    expect(taskState(tasks[1] as (typeof tasks)[number], m, statesFor('csv-everywhere', { 2: status ?? '' }), false)?.word).toBe(word)
+  }
+  expect(isHandoffOf(m, { ...s, isHandoff: true })).toBe(true)
+  expect(isHandoffOf(m, { ...s, slug: 'beta', isHandoff: true })).toBe(false)
+  expect(isHandoffOf(m, null)).toBe(false)
+})
+
+test("a map task's dots follow its state.md, and a merged task's are done", () => {
+  const glyphs = (d: { parts: { text: string }[] }) => d.parts.map(p => p.text).join('')
+  const building = taskDots(mapRun(1, 'csv-export', 'BUILDING'), 'MEDIUM', false)
+  expect(glyphs(building)).toBe('✓✓●○○○')
+  expect(building.stage).toBe('Build')
+  expect(building.parts[2]).toEqual({ text: '●', color: 'claude' })
+  // No run yet: every stage to do, with a LOW task's blind test skipped.
+  const none = taskDots(null, 'LOW', false)
+  expect(glyphs(none)).toBe('○○○○–○')
+  expect(none.stage).toBe('')
+  // A run's own risk wins over tasks.md's tier; merged turns every stage but a skipped one done.
+  const merged = taskDots(mapRun(2, 'csv-import', 'READY', { risk: 'LOW' }), 'MEDIUM', true)
+  expect(glyphs(merged)).toBe('✓✓✓✓–✓')
+  expect(merged.stage).toBe('done')
+  expect(taskDots(mapRun(2, 'csv-import', 'READY'), 'MEDIUM', false).stage).toBe('PR')
+  expect(taskDots(mapRun(2, 'csv-import', 'CONVERGED'), 'MEDIUM', false).stage).toBe('Blind')
+  expect(taskDots(mapRun(2, 'csv-import', 'HALTED', { stage: 3 }), 'MEDIUM', false).stage).toBe('Review')
+  expect(glyphs(taskDots(mapRun(3, 'fast', 'BUILDING', { risk: 'LOW', isFast: true }), 'LOW', false))).toBe('✓–●○–○')
+})
+
+test("a quorum-map tasks result is stored for its map, and a task newly ready marks a hand-off", () => {
+  const tasks = parseTasksMd(TASKS_MD)
+  // The first result only records the ready set.
+  const first = nextStates(null, 'csv-everywhere', { 1: 'merged', 2: 'blocked', 3: 'blocked' }, 1000, tasks)
+  expect(first).toEqual({ value: { slug: 'csv-everywhere', states: { 1: 'merged', 2: 'blocked', 3: 'blocked' }, triedAt: 1000, ready: [], isHandoff: false }, isReadyChange: false })
+  // Task 2 turns ready.
+  const second = nextStates(first.value, 'csv-everywhere', { 1: 'merged', 2: 'ready', 3: 'blocked' }, 2000, tasks)
+  expect(second).toEqual({ value: { slug: 'csv-everywhere', states: { 1: 'merged', 2: 'ready', 3: 'blocked' }, triedAt: 2000, ready: [2], isHandoff: true }, isReadyChange: true })
+  // The hand-off stays until a new map; a result with nothing newly ready isn't a change.
+  const third = nextStates(second.value, 'csv-everywhere', { 1: 'merged', 2: 'ready', 3: 'blocked' }, 3000, tasks)
+  expect(third.isReadyChange).toBe(false)
+  expect(third.value.isHandoff).toBe(true)
+  // A failed run keeps the last states and ready set, and stamps the attempt.
+  const failed = nextStates(second.value, 'csv-everywhere', null, 4000, tasks)
+  expect(failed).toEqual({ value: { ...second.value, triedAt: 4000 }, isReadyChange: false })
+  // With no ready set recorded (after a reload), a ready task only records it.
+  const reloaded = nextStates({ ...first.value, ready: null, isHandoff: false }, 'csv-everywhere', { 1: 'merged', 2: 'ready', 3: 'blocked' }, 5000, tasks)
+  expect(reloaded.isReadyChange).toBe(false)
+  expect(reloaded.value.isHandoff).toBe(false)
+  expect(reloaded.value.ready).toEqual([2])
+  // Another map's result carries nothing over, whether the run fails or not.
+  expect(nextStates(second.value, 'beta', null, 6000, tasks)).toEqual({ value: { slug: 'beta', states: null, triedAt: 6000, ready: null, isHandoff: false }, isReadyChange: false })
+  const beta = nextStates(second.value, 'beta', { 1: 'ready' }, 7000, tasks)
+  expect(beta.isReadyChange).toBe(false)
+  expect(beta.value).toEqual({ slug: 'beta', states: { 1: 'ready' }, triedAt: 7000, ready: [1], isHandoff: false })
 })

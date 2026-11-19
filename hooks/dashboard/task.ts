@@ -35,6 +35,20 @@ const NEXT: Record<string, string> = {
 
 export const isStuck = (status: string) => status === 'HALTED' || status === 'ESCALATED'
 
+// A stage's mark and its colour, on the stage rail and the map's task dots.
+export const GLYPH: Record<Stage['state'], [string, string]> = {
+  done: ['✓', 'success'],
+  active: ['●', 'claude'],
+  waiting: ['◆', 'warning'],
+  stuck: ['✗', 'error'],
+  todo: ['○', 'inactive'],
+  skipped: ['–', 'inactive'],
+}
+
+// The status badge's color: amber when the task waits on the person, red when it's stuck, else the accent.
+export const whoseMove = (status: string) =>
+  isStuck(status) ? 'error' : status === 'READY' || status === 'AWAITING-HUMAN' || status === 'DRAFT-AWAITING-VISUAL-SIGNOFF' ? 'warning' : 'claude'
+
 const unquote = (v: string) => {
   if (v.startsWith('"')) {
     let out = ''
@@ -305,7 +319,7 @@ export function reviewer(role: string, text: string | undefined): Reviewer {
   return text === undefined ? { role, findings: null } : { role, findings: countFindings(text) }
 }
 
-function section(text: string, heading: string): string[] {
+export function section(text: string, heading: string): string[] {
   const lines = text.split('\n')
   const start = lines.findIndex(l => l.trim() === `## ${heading}`)
   if (start < 0) return []

@@ -307,7 +307,7 @@ function fit(parts: TreePart[], max: number): TreePart[] {
 }
 
 // Words onto lines of at most `first` columns, then `rest`; a word too long for a line is cut at its end.
-function wrap(text: string, first: number, rest: number): string[] {
+export function wrap(text: string, first: number, rest: number): string[] {
   const lines: string[] = []
   let room = Math.max(1, first)
   let cur = ''

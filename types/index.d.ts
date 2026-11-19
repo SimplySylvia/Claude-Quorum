@@ -208,6 +208,57 @@ export type QuorumAgent = {
 // What the agents since the last /quorum:* command used, and how many ran on each model.
 export type Spend = { agents: number; tokensIn: number; tokensCached: number; tokensOut: number; models: [string, number][] }
 
+// A `- ` line of map.md's Decisions so far or Out of scope. A line `- [title](tickets/NN-x.md): gist` fills `ticket`
+// (NN), `title` and `gist`; any other line keeps only `text`, and `ticket` is ''.
+export type MapLine = { text: string; ticket: string; title: string; gist: string }
+
+// One tickets/NN-<name>.md, as bin/quorum-map reads it: `n` is NN, `blockedBy` the blockers' NNs in `Blocked by:`
+// order, `question` the text under `## Question`, and `gist` the decision's gist from map.md (an out-of-scope
+// ticket's reason), '' when map.md lists none.
+export type MapTicket = { n: string; title: string; type: string; blockedBy: string[]; status: string; answeredBy: string; question: string; gist: string }
+
+// One numbered line of tasks.md: its request, `tier:`, and `blocked by:` task numbers.
+export type MapTask = { n: number; request: string; tier: string; blockedBy: number[] }
+
+// A task started from the map (its state.md's `map` names it, `map_task` is `n`): what its row and tree show.
+export type MapTaskRun = {
+  n: number
+  slug: string
+  status: string
+  risk: string
+  stage: number
+  isFast: boolean
+  pr: number | null
+  files: FileList | null
+  rounds: Round[]
+  codeView: FindingsView | null
+  hasPlan: boolean
+}
+
+// The latest tasks-review/round-N/ of the map's task breakdown; `exists` is false before any round.
+export type MapReview = { round: number; exists: boolean; reviewers: Reviewer[]; voter: Reviewer; survivors: Findings | null }
+
+// A map, from .tasks/map-<slug>/: map.md's title, Destination, Decisions so far and Out of scope lines, its tickets
+// in file order, tasks.md's tasks (null when tasks.md is missing), the breakdown's review, the tasks started from it,
+// and whether it's on show because this session's map-session marker names it.
+export type MapView = {
+  slug: string
+  title: string
+  destination: string
+  decisions: MapLine[]
+  outOfScope: MapLine[]
+  tickets: MapTicket[]
+  tasks: MapTask[] | null
+  review: MapReview | null
+  runs: MapTaskRun[]
+  isSession: boolean
+}
+
+// The last `quorum-map --map <slug> tasks` result: each task's state by number (null before any success), when it
+// was last tried, the tasks it found ready (null before any success), and whether a task turned ready between two
+// results, which opens the map's task list.
+export type MapStates = { slug: string; states: Record<string, string> | null; triedAt: number; ready: number[] | null; isHandoff: boolean }
+
 declare module 'claude-code' {
   interface PluginState {
     quorum: {

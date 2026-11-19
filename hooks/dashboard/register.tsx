@@ -8,9 +8,9 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { Blind, ChangedFile, Check, Findings, FindingsView, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, RoundKept, Section, Snapshot, Stage } from '../../types'
 import {
-  ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, isStuck, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
+  GLYPH, ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, parsePlanSteps, SLICE_AT, stageOf, stages, tokenCount,
-  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep, editPath, unmetNote, unmetNow, unmetWords, checksRow, blindSummary,
+  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep, editPath, unmetNote, unmetNow, unmetWords, checksRow, blindSummary, whoseMove,
 } from './task'
 import { awaitingFrom, awaitingOf, cellWidth, changeHeader, cutEnd, confidenceRow, footprint, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows } from './tree'
 import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
@@ -54,15 +54,6 @@ const TOASTS: Record<string, string> = {
   ESCALATED: 'ESCALATED: the Stop-hook checks failed 3 times',
   READY: 'READY for /quorum:pr-draft',
   'AWAITING-HUMAN': 'waiting for your review',
-}
-
-const GLYPH: Record<Stage['state'], [string, string]> = {
-  done: ['✓', 'success'],
-  active: ['●', 'claude'],
-  waiting: ['◆', 'warning'],
-  stuck: ['✗', 'error'],
-  todo: ['○', 'inactive'],
-  skipped: ['–', 'inactive'],
 }
 
 const REQUIREMENT_GLYPH = { pass: ['✓', 'success'], fail: ['✗', 'error'], open: ['○', 'inactive'], none: ['–', 'inactive'] } as const
@@ -381,10 +372,6 @@ async function fillPrompt($: EngineInterface, cmd: string) {
   const text = draft.startsWith(cmd) ? draft : draft ? `${cmd} ${draft}` : `${cmd} `
   await $.prompt.fill({ text, cursor: text.length }).catch(() => undefined)
 }
-
-// The status badge's color: amber when the task waits on the person, red when it's stuck, else the accent.
-const whoseMove = (status: string) =>
-  isStuck(status) ? 'error' : status === 'READY' || status === 'AWAITING-HUMAN' || status === 'DRAFT-AWAITING-VISUAL-SIGNOFF' ? 'warning' : 'claude'
 
 // Ask GitHub for the task branch's PR, at most every PR_TTL_MS unless `force`d, and only once the task waits on one.
 // It runs after the hook that started it; a missing or signed-out gh is remembered as UNKNOWN until the TTL passes.
