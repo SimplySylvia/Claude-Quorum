@@ -16,7 +16,7 @@ import {
 } from './task'
 import { awaitingFrom, awaitingOf, cellWidth, changeHeader, cutEnd, confidenceRow, footprint, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows, wrap } from './tree'
 import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
-import { isHandoffOf, isMapSlug, isSessionId, joinGists, mapStepper, mergedCount, nextStates, parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskRow, taskState } from './map'
+import { isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskRow, taskState, ticketOrder, ticketRow, ticketSummary, wrapWhole } from './map'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
@@ -381,21 +381,28 @@ async function mapToShow($: EngineInterface, root: string, session: string, sess
 const OTHERS_SHOWN = 6
 
 // The repo's other unfinished tasks (not standalone reviews), newest first: what else is in flight, in this working
-// tree or in a worktree of its own.
-async function othersSnapshot($: EngineInterface, root: string, current: string): Promise<OtherTask[]> {
+// tree or in a worktree of its own. `shownFirst`, the task on show while a map session takes the pane, comes first
+// whatever its status, and counts toward OTHERS_SHOWN.
+async function othersSnapshot($: EngineInterface, root: string, current: string, shownFirst = ''): Promise<OtherTask[]> {
   const tasks = `${root}/.tasks`
+  const taskAt = async (name: string) => {
+    const changedAt = (await $.fs.stat(`${tasks}/${name}/state.md`).catch(() => null))?.mtimeMs ?? -1
+    if (changedAt < 0) return null
+    const fm = parseFrontmatter((await readOr($, `${tasks}/${name}/state.md`)) ?? '')
+    return { fm, task: { slug: name, status: scalar(fm, 'status'), risk: scalar(fm, 'risk'), worktree: scalar(fm, 'worktree'), changedAt } }
+  }
   // A task with its own worktree is a link to its folder there.
-  const dirs = (await $.fs.list(tasks).catch(() => [])).filter(e => (e.kind === 'dir' || e.isLink) && e.name !== current && !isReviewId(e.name))
+  const dirs = (await $.fs.list(tasks).catch(() => [])).filter(e => (e.kind === 'dir' || e.isLink) && e.name !== current && e.name !== shownFirst && !isReviewId(e.name))
   const out: OtherTask[] = []
   for (const e of dirs) {
-    const changedAt = (await $.fs.stat(`${tasks}/${e.name}/state.md`).catch(() => null))?.mtimeMs ?? -1
-    if (changedAt < 0) continue
-    const fm = parseFrontmatter((await readOr($, `${tasks}/${e.name}/state.md`)) ?? '')
-    const status = scalar(fm, 'status')
-    if (scalar(fm, 'kind') === 'review' || !status || isFinished(status)) continue
-    out.push({ slug: e.name, status, risk: scalar(fm, 'risk'), worktree: scalar(fm, 'worktree'), changedAt })
+    const found = await taskAt(e.name)
+    if (!found) continue
+    const { fm, task } = found
+    if (scalar(fm, 'kind') === 'review' || !task.status || isFinished(task.status)) continue
+    out.push(task)
   }
-  return out.sort((a, b) => b.changedAt - a.changedAt).slice(0, OTHERS_SHOWN)
+  const first = shownFirst ? (await taskAt(shownFirst))?.task : undefined
+  return [...(first ? [first] : []), ...out.sort((a, b) => b.changedAt - a.changedAt)].slice(0, OTHERS_SHOWN)
 }
 
 // How many reviews the dashboard keeps: the live one and the history under it.
@@ -591,10 +598,11 @@ async function refresh($: EngineInterface, maxRounds: number, forcePr = false): 
   const { tasksRoot } = await gitPaths($, sessionRoot)
   const found = await reviewsSnapshot($, tasksRoot, session, sessionRoot)
   await update($, reviews, () => found)
-  const elsewhere = await othersSnapshot($, tasksRoot, after?.slug ?? '')
-  await update($, otherTasks, () => elsewhere)
   const shown = await mapToShow($, tasksRoot, session, sessionRoot, after)
   await update($, map, () => shown)
+  // While a map session takes the pane, the task on show is listed first under Other tasks.
+  const elsewhere = await othersSnapshot($, tasksRoot, after?.slug ?? '', shown?.isSession && after ? after.slug : '')
+  await update($, otherTasks, () => elsewhere)
   // In the background, so a slow GitHub never holds up the turn; a failed lookup just leaves the last answer.
   if (after) void lookupPr($, after, forcePr).catch(() => undefined)
   // The same for quorum-map, run again at once when the task on show changes status.
@@ -671,7 +679,7 @@ export const register: Register = (on, options) => {
     if ((await read($, mapStates)) !== null) await update($, mapStates, s => (s === null ? s : { ...s, ready: null, isHandoff: false }))
     // The band above the prompt says it all, so Quorum keeps no status line; clear one an earlier version set.
     $.ui.status(undefined)
-    if ((await refresh($, maxRounds)) || liveReview(await read($, reviews))) void open($)
+    if ((await refresh($, maxRounds)) || liveReview(await read($, reviews)) || (await read($, map))?.isSession) void open($)
     return next(e)
   })
 
@@ -697,13 +705,14 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // Every status change goes through bin/quorum-state or quorum-active-task, and quorum-files records the change, so
-  // re-read after those. The dashboard only watches: if one of its hooks fails, the call goes on as if it weren't there.
+  // Every status change goes through bin/quorum-state or quorum-active-task, quorum-files records the change, and
+  // quorum-map enters, claims, resolves and leaves a map, so re-read after those. The dashboard only watches: if one
+  // of its hooks fails, the call goes on as if it weren't there.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
     // `gh pr create` or a push can open or change the PR: look it up again now.
     const isPrCommand = /\bgh\s+pr\b|\bgit\s+push\b/.test(e.command)
-    if (isPrCommand || /quorum-(state|active-task|branch|files)|\.tasks\//.test(e.command)) await refresh($, maxRounds, isPrCommand)
+    if (isPrCommand || /quorum-(state|active-task|branch|files|map)|\.tasks\//.test(e.command)) await refresh($, maxRounds, isPrCommand)
     return ran
   }).catch(($, e, next) => next(e))
 
@@ -787,9 +796,27 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const t = await read($, task)
     const r = liveReview(await read($, reviews))
-    if ((!t && !r) || e.props.hasSurvey) return next(e)
+    const m = await read($, map)
+    if ((!t && !r && !m?.isSession) || e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const columns = e.props.bodyColumns ?? 120
+    // A map session: four items, so the band never crowds. The badge is amber while the map waits on the person; the
+    // phase dots, then the current phase by name.
+    if (m?.isSession) {
+      const phases = mapStepper(m, await read($, mapStates))
+      const current = phases[mapPhase(m)]
+      return (
+        <Box flexDirection="row" gap={2}>
+          <Text backgroundColor={mapWaits(m) ? 'warning' : 'claude'} color="inverseText" bold> MAP </Text>
+          <Text dimColor>{m.slug}</Text>
+          <Text>
+            {phases.map((p, i) => <Text key={`phase-${i}`} color={p[0]?.color}>{p[0]?.text}</Text>)}
+            <Text bold>{current?.[1]?.text ?? ''}</Text>
+          </Text>
+          <Button key="open" label="Dashboard" onPress={() => open($, true)} />
+        </Box>
+      )
+    }
     // No task, only a review: its status, what it reviews, and how far it got.
     if (!t && r) {
       return (
@@ -952,7 +979,7 @@ export const register: Register = (on, options) => {
     // disputes.md dropped, and the pipeline's next step, so the verdict sits on this row. `awaiting` of the kept
     // IMPORTANT findings are awaiting re-review: `↻`, and a fix round reads `→ re-review`. `prefix` names the round
     // when the verdict is an earlier round's (`round 1: `).
-    const voterLine = (kind: 'plan' | 'review' | 'standalone', survivors: Findings | null, round: number, of: number, status: string, dropped: number, awaiting = 0, prefix = '') => {
+    const voterLine = (kind: 'plan' | 'review' | 'standalone' | 'breakdown', survivors: Findings | null, round: number, of: number, status: string, dropped: number, awaiting = 0, prefix = '') => {
       const label = ROLE_LABEL.voter ?? 'voter'
       if (!survivors) return pending('voter', label)
       const [glyph, color] = survivors.important > awaiting ? ['✗', 'error'] : awaiting > 0 ? ['↻', 'warning'] : ['✓', 'success']
@@ -1174,6 +1201,152 @@ export const register: Register = (on, options) => {
             )),
             ...rows,
           ] : null}
+        </Box>
+      )
+    }
+
+    // The Map card's head, in a map's task and in a map session: the title row, `Map · <title>` cut by cells before the
+    // slug, then the phase stepper, wrapping between phases.
+    const mapHead = (mp: MapView) => [
+      <Box key="map-card:title" flexDirection="row" justifyContent="space-between" gap={1}>
+        <Box flexShrink={1}>
+          <Text wrap="truncate-end">
+            <Text dimColor>Map · </Text>
+            <Text bold>{cutEnd(mp.title, treeWidth - cellWidth('Map · ') - cellWidth(mp.slug) - 1)}</Text>
+          </Text>
+        </Box>
+        <Text dimColor>{mp.slug}</Text>
+      </Box>,
+      <Box key="map-card:stepper" flexDirection="row" flexWrap="wrap">
+        {mapStepper(mp, ms).map((parts, i) => (
+          <Box key={`map-card:phase-${i}`}><Text>{i > 0 ? ' ' : ''}{partsOf(`map-card:phase-${i}`, parts)}</Text></Box>
+        ))}
+      </Box>,
+    ]
+
+    // A map session takes the pane, even with a task on show: the Map card (with the Destination and the tickets'
+    // summary, no task line), the map's Now card, Tickets, Decisions, then a running review, past reviews and the
+    // other tasks (the task on show first).
+    if (m?.isSession) {
+      const scopeOf = `map-${m.slug}`
+      const phase = mapPhase(m)
+      const nowColor = mapWaits(m) ? 'warning' : 'claude'
+      const isRunning = crew.some(a => a.endedAt === null)
+      // A line of the Now card's body: text, cut to the card (dim unless `isPlain`), or a drawn row.
+      type NowLine = { text: string; isPlain?: true } | { node: unknown }
+      const nowCard = (): { title: string; body: NowLine[] } => {
+        if (phase === 0) return { title: 'charting the map', body: [] }
+        if (phase === 1) {
+          const tk = nowTicket(m.tickets)
+          if (!tk) return { title: 'between tickets', body: [{ text: `${m.tickets.filter(x => isFrontier(x, m.tickets)).length} ready` }] }
+          const title = tk.type === 'grilling' ? `◆ waiting for you · answer ticket ${tk.n}`
+            : tk.type === 'prototype' ? `◆ waiting for you · pick a variant for ticket ${tk.n}` : `ticket ${tk.n} · ${tk.type}`
+          const agentLines = crew.filter(a => a.endedAt === null).map(a => ({ node: line(a.role, 'running', ROLE_LABEL[a.role] ?? a.role, `running ${seconds(a, clockNow)}`) }))
+          return { title, body: [{ text: tk.title, isPlain: true as const }, { text: tk.question }, ...agentLines].filter(l => !('text' in l) || l.text !== '') }
+        }
+        const review = m.review
+        if (phase === 2) {
+          if (!review?.exists) return { title: 'hand off · writing the task breakdown', body: [] }
+          return {
+            title: 'hand off · reviewing the task breakdown',
+            body: [...review.reviewers.map(r => ({ node: reviewerLine(r) })), { node: voterLine('breakdown', review.survivors, review.round, 0, '', 0) }],
+          }
+        }
+        const ready = readyTasks(m, ms).map(x => ({ text: `ready: task ${x.n} ${x.request}` }))
+        if (m.runs.length === 0) {
+          const kept = review?.survivors ?? review?.voter.findings ?? null
+          return { title: '◆ waiting for you · approve the task breakdown', body: [{ text: kept && kept.important > 0 ? `kept ✗${kept.important}` : 'clean' }, ...ready] }
+        }
+        // The first started task not merged, its word from its own state.md's status; else the last one, merged.
+        const states = statesOf(m, ms)
+        const started = [...m.runs].sort((a, b) => a.n - b.n)
+        const live = started.find(r => states?.[String(r.n)] !== 'merged')
+        const shownRun = live ?? started.at(-1)
+        const shownTask = shownRun ? m.tasks?.find(x => x.n === shownRun.n) ?? { n: shownRun.n, request: '', tier: '', blockedBy: [] } : null
+        const word = !shownRun || !shownTask ? ''
+          : !live ? 'merged'
+            : taskState(shownTask, m, { slug: m.slug, states: { ...(states ?? {}), [String(shownRun.n)]: shownRun.status }, triedAt: 0, ready: null, isHandoff: false }, false)?.word ?? ''
+        return { title: [`task ${shownRun?.n ?? ''}`, word].filter(Boolean).join(' · '), body: ready }
+      }
+      const now = nowCard()
+
+      const ticketsKey = `${scopeOf}:tickets`
+      const isTicketsOpen = folds[ticketsKey] ?? true
+      const summary = ticketSummary(m.tickets)
+      // A ticket row opens to its detail line, hung at the `NN` column and wrapped whole: a resolved ticket's gist and
+      // who decided, an out-of-scope ticket's reason, an open or claimed ticket's question.
+      const ticketRows = () => ticketOrder(m.tickets).flatMap(entry => {
+        const tk = entry.ticket
+        const key = `${scopeOf}:ticket:${tk.n}`
+        const isRowOpen = folds[key] ?? isClosed(tk)
+        const row = ticketRow(entry, m.tickets, isRunning, isRowOpen, treeWidth)
+        const detail = tk.status === 'resolved' ? [tk.gist, `decided by ${tk.answeredBy === 'user' ? 'you' : 'the agent'}`].filter(Boolean).join(' · ')
+          : tk.status === 'out-of-scope' ? tk.gist : tk.question
+        const indent = 4 + 2 * entry.depth
+        return [
+          <Button key={key} plain hover={{ color: 'claude' }} label={row.label} onPress={() => void update($, sections, f => ({ ...f, [key]: !isRowOpen }))}>
+            <Text wrap="truncate-end">{partsOf(key, row.parts)}</Text>
+          </Button>,
+          ...(isRowOpen && detail ? wrapWhole(detail, treeWidth - indent, treeWidth - indent).map((l, i) => (
+            <Box key={`${key}:more-${i}`} marginLeft={indent}><Text dimColor>{l}</Text></Box>
+          )) : []),
+        ]
+      })
+      const decisionsKey = `${scopeOf}:decisions`
+      const isDecisionsOpen = folds[decisionsKey] ?? false
+      const decided = m.decisions.length > 0 ? `${m.decisions.length} so far` : 'none yet'
+      // `<title>: <gist> · you|agent`, the decider being the linked ticket's Answered by, wrapped whole.
+      const decisionRows = () => m.decisions.flatMap((dl, i) => {
+        const tk = dl.ticket ? m.tickets.find(x => x.n === dl.ticket) : undefined
+        const text = dl.ticket ? `${[dl.title, dl.gist].filter(Boolean).join(': ')}${tk ? ` · ${tk.answeredBy === 'user' ? 'you' : 'agent'}` : ''}` : dl.text
+        return wrapWhole(text, treeWidth - 2, treeWidth - 2).map((l, j) => (
+          <Box key={`${scopeOf}:decision:${i}-${j}`} marginLeft={2}><Text dimColor>{l}</Text></Box>
+        ))
+      })
+      // A section's row, as `fold` draws one: `▸`/`▾`, its name, and its summary, labelled in words.
+      const sectionRow = (key: string, name: string, text: string, isRowOpen: boolean) => (
+        <Button key={key} plain hover={{ color: 'claude' }} label={`${name}, ${text}, ${isRowOpen ? 'open' : 'folded'}`} onPress={() => void update($, sections, f => ({ ...f, [key]: !isRowOpen }))}>
+          <Text wrap="truncate-end">
+            <Text dimColor>{isRowOpen ? '▾ ' : '▸ '}</Text>
+            <Text bold>{name}</Text>
+            <Text>  </Text>
+            <Text>{cutEnd(text, treeWidth - 4 - cellWidth(name))}</Text>
+          </Text>
+        </Button>
+      )
+
+      return (
+        <Box flexDirection="column" gap={1}>
+          <Box key="map-card" borderStyle="round" borderColor="subtle" flexDirection="column" paddingX={1}>
+            {mapHead(m)}
+            {m.destination ? <Box key="map-card:destination"><Text dimColor>{cutEnd(m.destination, treeWidth)}</Text></Box> : null}
+            {m.tickets.length > 0 ? <Box key="map-card:summary"><Text dimColor>{cutEnd(summary, treeWidth)}</Text></Box> : null}
+          </Box>
+          <Box key="map-now" borderStyle="round" borderColor={nowColor} flexDirection="column" paddingX={1}>
+            {wrapWhole(now.title, treeWidth - cellWidth('Now · '), treeWidth).map((l, i) => (
+              <Box key={`map-now:title-${i}`}>
+                <Text>{i === 0 ? <Text bold>Now · </Text> : null}<Text bold color={nowColor}>{l}</Text></Text>
+              </Box>
+            ))}
+            {now.body.map((l, i) => (
+              <Box key={`map-now:line-${i}`}>
+                {'node' in l ? l.node as never : <Text dimColor={!l.isPlain}>{cutEnd(l.text, treeWidth)}</Text>}
+              </Box>
+            ))}
+          </Box>
+          {m.tickets.length > 0 ? (
+            <Box key={`${ticketsKey}-section`} flexDirection="column">
+              {sectionRow(ticketsKey, 'Tickets', summary, isTicketsOpen)}
+              {isTicketsOpen ? ticketRows() : null}
+            </Box>
+          ) : null}
+          <Box key={`${decisionsKey}-section`} flexDirection="column">
+            {sectionRow(decisionsKey, 'Decisions', decided, isDecisionsOpen)}
+            {isDecisionsOpen ? decisionRows() : null}
+          </Box>
+          {reviewCard}
+          {reviewsFold}
+          {tasksFold}
         </Box>
       )
     }
@@ -1434,20 +1607,7 @@ export const register: Register = (on, options) => {
       ] : [[{ text: `task ${k}` }]]
       return (
         <Box key="map-card" borderStyle="round" borderColor="subtle" flexDirection="column" paddingX={1}>
-          <Box key="map-card:title" flexDirection="row" justifyContent="space-between" gap={1}>
-            <Box flexShrink={1}>
-              <Text wrap="truncate-end">
-                <Text dimColor>Map · </Text>
-                <Text bold>{cutEnd(shownMap.title, treeWidth - cellWidth('Map · ') - cellWidth(shownMap.slug) - 1)}</Text>
-              </Text>
-            </Box>
-            <Text dimColor>{shownMap.slug}</Text>
-          </Box>
-          <Box key="map-card:stepper" flexDirection="row" flexWrap="wrap">
-            {mapStepper(shownMap, ms).map((parts, i) => (
-              <Box key={`map-card:phase-${i}`}><Text>{i > 0 ? ' ' : ''}{partsOf(`map-card:phase-${i}`, parts)}</Text></Box>
-            ))}
-          </Box>
+          {mapHead(shownMap)}
           <Box key="map-task-line" flexDirection="row" flexWrap="wrap">
             {items.map((parts, i) => <Box key={`map-task-line:${i}`}><Text>{partsOf(`map-task-line:${i}`, parts)}</Text></Box>)}
           </Box>

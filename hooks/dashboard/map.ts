@@ -5,7 +5,7 @@
 
 import type { MapLine, MapStates, MapTask, MapTaskRun, MapTicket, MapView } from '../../types'
 import { GLYPH, plural, section, stages, whoseMove } from './task'
-import { cellWidth, cutEnd, footprint } from './tree'
+import { cellWidth, cutEnd, footprint, wrap } from './tree'
 import type { TreePart } from './tree'
 
 // bin/quorum-map's valid_slug and valid_session: checked before any path is built from them.
@@ -178,6 +178,53 @@ export function ticketStatus(t: MapTicket, all: MapTicket[], isAgentRunning: boo
   }
   const open = openBlockers(t, all)
   return open.length === 0 ? row('○', 'subtle', 'ready', 'subtle') : row('○', 'inactive', `after ${open.join(', ')}`, 'inactive')
+}
+
+// A ticket row, `width` columns wide: a `▸`/`▾` lead, its mark, an indent of 2 per level, `NN `, the title (dim once
+// closed), then right-aligned `<type> · <status>`, at least one space after the title. When the row is too wide the
+// type drops first, then the title is cut by cells. `label` says it all in words, the type included.
+export function ticketRow(entry: { ticket: MapTicket; depth: number }, all: MapTicket[], isAgentRunning: boolean, isOpen: boolean, width: number): { parts: TreePart[]; label: string } {
+  const { ticket: t, depth } = entry
+  const st = ticketStatus(t, all, isAgentRunning)
+  const used = 4 + 2 * depth + 3
+  const withType = st.type ? `${st.type} · ${st.word}` : st.word
+  const hasType = st.type !== null && used + cellWidth(t.title) + 1 + cellWidth(withType) <= width
+  const right = hasType ? withType : st.word
+  const title = cutEnd(t.title, width - used - 1 - cellWidth(right))
+  const word: TreePart = st.wordColor ? { text: st.word, color: st.wordColor } : { text: st.word, dim: true }
+  return {
+    parts: [
+      { text: isOpen ? '▾ ' : '▸ ', dim: true },
+      { text: st.mark, color: st.markColor },
+      { text: ` ${' '.repeat(2 * depth)}` },
+      { text: `${t.n} `, dim: true },
+      { text: title, dim: isClosed(t) },
+      { text: ' '.repeat(Math.max(1, width - used - cellWidth(title) - cellWidth(right))) },
+      ...(hasType ? [{ text: `${st.type} · `, dim: true }] : []),
+      word,
+    ],
+    label: [`Ticket ${t.n}`, t.title, t.type, st.words, isOpen ? 'open' : 'folded'].filter(Boolean).join(', '),
+  }
+}
+
+// Words onto lines as wrap() does, with a word wider than a line first split into pieces (by code point) that fit,
+// so nothing is cut: for detail lines and titles that must show whole.
+export function wrapWhole(text: string, first: number, rest: number): string[] {
+  const max = Math.max(1, Math.min(first, rest))
+  const pieces = text.split(/\s+/).filter(Boolean).flatMap(word => {
+    if (cellWidth(word) <= max) return [word]
+    const out: string[] = []
+    let cur = ''
+    for (const c of word) {
+      if (cur && cellWidth(cur) + cellWidth(c) > max) {
+        out.push(cur)
+        cur = ''
+      }
+      cur += c
+    }
+    return [...out, cur]
+  })
+  return wrap(pieces.join(' '), first, rest)
 }
 
 // ---- The stored quorum-map tasks result: only the map it was run for reads it.

@@ -314,6 +314,7 @@ export const ROLE_LABEL: Record<string, string> = {
   logic: 'Logic & edge cases', architecture: 'Architecture & drift', patterns: 'Patterns', docs: 'Docs',
   tests: 'Test adequacy', a11y: 'Accessibility', security: 'Security', voter: 'Verifier vote',
   feasibility: 'Feasibility critic', improver: 'Spec improver', blind: 'Blind user', triage: 'Friction triage',
+  researcher: 'Researcher',
 }
 
 // The reviewers a round runs, per skills/plan, skills/review-loop, skills/review (`standalone`) and skills/map's
@@ -555,9 +556,11 @@ export const isFinished = (status: string) => status === 'READY' || status === '
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 // The voter row's next step, as the pipeline takes it: a code review fixes and re-reviews until `of` rounds, then
-// halts; a plan is revised once, then waits on the person; a standalone review fixes only once it is FIXING.
-export function voterNext(kind: 'plan' | 'review' | 'standalone', important: number, round: number, of: number, status: string): string {
+// halts; a plan is revised once, then waits on the person; a standalone review fixes only once it is FIXING; a map's
+// task breakdown is ready for the person when clean, and else is the person's call.
+export function voterNext(kind: 'plan' | 'review' | 'standalone' | 'breakdown', important: number, round: number, of: number, status: string): string {
   if (kind === 'standalone') return status === 'FIXING' ? 'fix' : 'done'
+  if (kind === 'breakdown') return important === 0 ? 'ready for you' : 'your call'
   if (kind === 'plan') return important === 0 ? 'ready for you' : round >= 2 ? 'your call' : 'revise the plan'
   return important === 0 ? 'converges' : round >= of ? 'halts' : 'fix round'
 }
