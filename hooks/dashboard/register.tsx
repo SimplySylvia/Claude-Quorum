@@ -1145,22 +1145,41 @@ export const register: Register = (on, options) => {
       )
     })()
 
+    // The row the finished tickets or merged tasks fold under above the prompt: `▸ ✓ N finished tickets`, labelled with
+    // what it holds, folded by default.
+    const finishedRow = (key: string, text: string, ns: string[], isRowOpen: boolean) => (
+      <Button key={key} plain hover={{ color: 'claude' }} label={[text, ...ns, isRowOpen ? 'open' : 'folded'].join(', ')} onPress={() => void update($, sections, f => ({ ...f, [key]: !isRowOpen }))}>
+        <Text wrap="truncate-end">
+          <Text dimColor>{isRowOpen ? '▾ ' : '▸ '}</Text>
+          <Text color="success">✓</Text>
+          <Text>{` ${text}`}</Text>
+        </Text>
+      </Button>
+    )
+
     // A map's task list, kept open or folded under `<scope>:maptasks`: `▸ Tasks  M of N merged`, then the key line and
     // a row per tasks.md task with its second line. A row opens to its read-only file tree when it isn't the task on
-    // show, its change is recorded, and it merged or finished. In a map session (`isSession`) no row gets the agent
-    // `●`, since the running agents are the map's and the agents atom records no task.
-    const mapTasks = (scope: string, mp: MapView, defaultOpen: boolean, isSession: boolean) => {
+    // show, its change is recorded, and it merged or finished. With `foldMerged` (above the prompt in a map session),
+    // the merged tasks fold under one `<scope>:merged` row after the key line, `▸ ✓ N merged tasks`. In a map session
+    // (`isSession`) no row gets the agent `●`, since the running agents are the map's and the agents atom records no
+    // task.
+    const mapTasks = (scope: string, mp: MapView, defaultOpen: boolean, foldMerged: boolean, isSession: boolean) => {
       const all = mp.tasks ?? []
       const key = `${scope}:maptasks`
       const merged = mergedCount(mp, ms)
       const isListOpen = folds[key] ?? defaultOpen
       const isRunning = crew.some(a => a.endedAt === null)
       const keyLines = wrap('key: the dots are Spec, Plan, Build, Review, Blind test, PR · – skipped', treeWidth, treeWidth - 5)
+      const isMergedTask = (task: MapTask) => statesOf(mp, ms)?.[String(task.n)] === 'merged'
+      const mergedKey = `${scope}:merged`
+      const mergedTasks = foldMerged ? all.filter(isMergedTask) : []
+      const isMergedOpen = folds[mergedKey] ?? false
       const rows = all.flatMap(task => {
         const run = mp.runs.find(r => r.n === task.n) ?? null
         const isShown = run !== null && run.slug === t?.slug
         const state = taskState(task, mp, ms, !isSession && isShown && isRunning)
-        const isMerged = statesOf(mp, ms)?.[String(task.n)] === 'merged'
+        const isMerged = isMergedTask(task)
+        if (isMerged && mergedTasks.length > 0 && !isMergedOpen) return []
         const rowKey = `${scope}:maptask:${task.n}`
         const isOpenable = !isShown && run !== null && run.files !== null && (isMerged || isFinished(run.status))
         const isRowOpen = isOpenable && (folds[rowKey] ?? false)
@@ -1199,6 +1218,7 @@ export const register: Register = (on, options) => {
             ...keyLines.map((l, i) => (
               <Box key={i === 0 ? `${key}-key` : `${key}-key-${i}`}><Text dimColor>{i === 0 ? l : `     ${l}`}</Text></Box>
             )),
+            mergedTasks.length > 0 ? finishedRow(mergedKey, plural(mergedTasks.length, 'merged task'), mergedTasks.map(x => String(x.n)), isMergedOpen) : null,
             ...rows,
           ] : null}
         </Box>
@@ -1225,10 +1245,12 @@ export const register: Register = (on, options) => {
     ]
 
     // A map session takes the pane, even with a task on show: the Map card (with the Destination and the tickets'
-    // summary, no task line), the map's Now card, Tickets, Decisions, then a running review, past reviews and the
-    // other tasks (the task on show first).
+    // summary, no task line), the map's Now card, Tickets, Tasks (once tasks.md exists), Decisions, then a running
+    // review, past reviews and the other tasks (the task on show first). Above the prompt the Now card comes first,
+    // and the finished tickets and merged tasks fold to one row each, so the open work stays in view.
     if (m?.isSession) {
       const scopeOf = `map-${m.slug}`
+      const isInline = e.props.placement === 'inline'
       const phase = mapPhase(m)
       const nowColor = mapWaits(m) ? 'warning' : 'claude'
       const isRunning = crew.some(a => a.endedAt === null)
@@ -1275,8 +1297,12 @@ export const register: Register = (on, options) => {
       const summary = ticketSummary(m.tickets)
       // A ticket row opens to its detail line, hung at the `NN` column and wrapped whole: a resolved ticket's gist and
       // who decided, an out-of-scope ticket's reason, an open or claimed ticket's question.
+      const finishedKey = `${scopeOf}:finished`
+      const finished = isInline ? m.tickets.filter(isClosed).map(x => x.n) : []
+      const isFinishedOpen = folds[finishedKey] ?? false
       const ticketRows = () => ticketOrder(m.tickets).flatMap(entry => {
         const tk = entry.ticket
+        if (finished.length > 0 && !isFinishedOpen && isClosed(tk)) return []
         const key = `${scopeOf}:ticket:${tk.n}`
         const isRowOpen = folds[key] ?? isClosed(tk)
         const row = ticketRow(entry, m.tickets, isRunning, isRowOpen, treeWidth)
@@ -1315,31 +1341,40 @@ export const register: Register = (on, options) => {
         </Button>
       )
 
+      const mapCard = (
+        <Box key="map-card" borderStyle="round" borderColor="subtle" flexDirection="column" paddingX={1}>
+          {mapHead(m)}
+          {m.destination ? <Box key="map-card:destination"><Text dimColor>{cutEnd(m.destination, treeWidth)}</Text></Box> : null}
+          {m.tickets.length > 0 ? <Box key="map-card:summary"><Text dimColor>{cutEnd(summary, treeWidth)}</Text></Box> : null}
+        </Box>
+      )
+      const nowBox = (
+        <Box key="map-now" borderStyle="round" borderColor={nowColor} flexDirection="column" paddingX={1}>
+          {wrapWhole(now.title, treeWidth - cellWidth('Now · '), treeWidth).map((l, i) => (
+            <Box key={`map-now:title-${i}`}>
+              <Text>{i === 0 ? <Text bold>Now · </Text> : null}<Text bold color={nowColor}>{l}</Text></Text>
+            </Box>
+          ))}
+          {now.body.map((l, i) => (
+            <Box key={`map-now:line-${i}`}>
+              {'node' in l ? l.node as never : <Text dimColor={!l.isPlain}>{cutEnd(l.text, treeWidth)}</Text>}
+            </Box>
+          ))}
+        </Box>
+      )
       return (
         <Box flexDirection="column" gap={1}>
-          <Box key="map-card" borderStyle="round" borderColor="subtle" flexDirection="column" paddingX={1}>
-            {mapHead(m)}
-            {m.destination ? <Box key="map-card:destination"><Text dimColor>{cutEnd(m.destination, treeWidth)}</Text></Box> : null}
-            {m.tickets.length > 0 ? <Box key="map-card:summary"><Text dimColor>{cutEnd(summary, treeWidth)}</Text></Box> : null}
-          </Box>
-          <Box key="map-now" borderStyle="round" borderColor={nowColor} flexDirection="column" paddingX={1}>
-            {wrapWhole(now.title, treeWidth - cellWidth('Now · '), treeWidth).map((l, i) => (
-              <Box key={`map-now:title-${i}`}>
-                <Text>{i === 0 ? <Text bold>Now · </Text> : null}<Text bold color={nowColor}>{l}</Text></Text>
-              </Box>
-            ))}
-            {now.body.map((l, i) => (
-              <Box key={`map-now:line-${i}`}>
-                {'node' in l ? l.node as never : <Text dimColor={!l.isPlain}>{cutEnd(l.text, treeWidth)}</Text>}
-              </Box>
-            ))}
-          </Box>
+          {isInline ? [nowBox, mapCard] : [mapCard, nowBox]}
           {m.tickets.length > 0 ? (
             <Box key={`${ticketsKey}-section`} flexDirection="column">
               {sectionRow(ticketsKey, 'Tickets', summary, isTicketsOpen)}
-              {isTicketsOpen ? ticketRows() : null}
+              {isTicketsOpen ? [
+                finished.length > 0 ? finishedRow(finishedKey, plural(finished.length, 'finished ticket'), finished, isFinishedOpen) : null,
+                ...ticketRows(),
+              ] : null}
             </Box>
           ) : null}
+          {m.tasks !== null ? mapTasks(scopeOf, m, true, isInline, true) : null}
           <Box key={`${decisionsKey}-section`} flexDirection="column">
             {sectionRow(decisionsKey, 'Decisions', decided, isDecisionsOpen)}
             {isDecisionsOpen ? decisionRows() : null}
@@ -1611,7 +1646,7 @@ export const register: Register = (on, options) => {
           <Box key="map-task-line" flexDirection="row" flexWrap="wrap">
             {items.map((parts, i) => <Box key={`map-task-line:${i}`}><Text>{partsOf(`map-task-line:${i}`, parts)}</Text></Box>)}
           </Box>
-          {shownMap.tasks !== null ? mapTasks(t.slug, shownMap, isPrStage(t.status) || isHandoffOf(shownMap, ms), false) : null}
+          {shownMap.tasks !== null ? mapTasks(t.slug, shownMap, isPrStage(t.status) || isHandoffOf(shownMap, ms), false, false) : null}
         </Box>
       )
     })()

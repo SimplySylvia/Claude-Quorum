@@ -20,7 +20,7 @@ import {
 } from '../../hooks/dashboard/map'
 import type { ChangedFile, FileList, FindingsView, MapStates, MapTaskRun, MapTicket, MapView, TreeFinding } from '../../types'
 import { DEMO_DONE } from './fixtures/demo-done'
-import { DEMO_MAP, DEMO_MAP_TICKETS } from './fixtures/demo-map'
+import { DEMO_MAP, DEMO_MAP_TASKS, DEMO_MAP_TICKETS } from './fixtures/demo-map'
 import { DEMO_PLAN, DEMO_PLAN_SHOW } from './fixtures/demo-plan'
 import { NO_MAP_BASELINE } from './fixtures/no-map-baseline'
 
@@ -6111,4 +6111,308 @@ test('wrapWhole splits a word too long for a line, and wraps other words as wrap
   expect(wrapWhole(text, 12, 16)).toEqual(wrap(text, 12, 16))
   // An astral letter is one piece, never split in half.
   expect(wrapWhole('𝔼'.repeat(5), 2, 2)).toEqual(['𝔼𝔼', '𝔼𝔼', '𝔼'])
+})
+
+// ---- The map pane's layout, marks and labels
+
+const INLINE = { ...ON_TERMINAL, props: { ...PANE.props, placement: 'inline' } } as const
+const MAP_PARTS = ['map-card', 'map-now', `${MAP_SCOPE}:tickets`, `${MAP_SCOPE}:maptasks`, `${MAP_SCOPE}:decisions`]
+// The map pane's cards and sections, in drawn order.
+const mapOrder = async (d: Drawn) => (await d.findAll({})).map(e => e.key ?? '').filter(k => MAP_PARTS.includes(k))
+// Every keyed row of the map's pane a line of its own: what mapRowsFit measures, besides each `map-` Button.
+const MAP_ROWS = /^(map-card:(phase-\d+|destination|summary)|map-now:(title|line)-\d+|map-task-line:\d+|.+:maptasks-key(-\d+)?|.+:maptask:\d+(:sub)?|.+:ticket:\d\d:more-\d+|.+:decision:\d+-\d+)$/
+// Each drawn row of the map's pane wider than the card (46 cells at 50 columns), measured whole: every Button keyed
+// `map-…` and every row Box in MAP_ROWS, and the title row as its title, one gap and the slug, whether or not the
+// engine puts the gap in the Box's text. `measured` counts the rows, so a pane with none can't pass.
+async function mapRowsFit(d: Drawn, slug = 'csv-everywhere') {
+  const width = PANE.props.bodyColumns - 4
+  const over: string[] = []
+  let measured = 0
+  for (const b of await d.findAll({ type: 'Button' })) {
+    const key = b.key ?? ''
+    if (!key.startsWith('map-') && !MAP_ROWS.test(key)) continue
+    measured++
+    if (cellWidth(b.text) > width) over.push(`${key} (${cellWidth(b.text)}): ${b.text}`)
+  }
+  for (const b of await d.findAll({ type: 'Box' })) {
+    const key = b.key ?? ''
+    const w = key === 'map-card:title' ? cellWidth(b.text.replace(new RegExp(` *${slug}$`), '')) + 1 + cellWidth(slug)
+      : MAP_ROWS.test(key) ? cellWidth(b.text) : null
+    if (w === null) continue
+    measured++
+    if (w > width) over.push(`${key} (${w}): ${b.text}`)
+  }
+  return { measured, over }
+}
+// A row showing `full` whole, or cut at the end: a start of it followed by `…`.
+const isWholeOrCut = (row: string | undefined, full: string) =>
+  (row ?? '').includes(full) || Array.from({ length: full.length - 1 }, (_, k) => full.slice(0, k + 1)).some(p => (row ?? '').includes(`${p}…`))
+// The map session's task rows drawn, by number, in drawn order.
+const mapTaskNs = async (d: Drawn) => (await d.findAll({})).map(e => e.key ?? '').filter(k => k.startsWith(`${MAP_SCOPE}:maptask:`) && /:\d+$/.test(k)).map(k => Number(k.split(':').at(-1)))
+
+test("the map pane's order and folded rows follow the layout, and fit at 50 columns", async ($, on) => {
+  // Task 1 merged, 2 and 3 ready; ticket 04 claimed, 01 to 03 closed.
+  const files: Record<string, string> = inSession({ tickets: DEMO_LIKE })
+  world(on, files)
+  on('process.run', (_, e) => {
+    if (!isQuorumMap(e.argv)) throw new Error('gh: command not found')
+    return { value: exited(0, tasksOut('merged', 'ready', 'ready')) }
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await settle()
+  const fits = async (d: Drawn) => {
+    const { measured, over } = await mapRowsFit(d)
+    expect(over).toEqual([])
+    expect(measured).toBeGreaterThan(10)
+  }
+  const button = (d: Drawn, key: string) => d.find({ type: 'Button', key })
+  const FINISHED = `${MAP_SCOPE}:finished`
+  const MERGED = `${MAP_SCOPE}:merged`
+  const titles: Record<string, string> = { '01': 'Which formats count as everywhere', '02': 'How spreadsheets treat formula cells', '03': 'A PDF export', '04': 'Where the export button goes', '05': 'How large a download the browser handles' }
+
+  // Docked: the Map card, Now, Tickets, Tasks, Decisions, every row drawn, nothing folded away.
+  let d = await $.ui.mount(ON_TERMINAL)
+  expect(await mapOrder(d)).toEqual(MAP_PARTS)
+  expect(await button(d, FINISHED)).toBeUndefined()
+  expect(await button(d, MERGED)).toBeUndefined()
+  expect(await ticketNs(d)).toEqual(['01', '02', '04', '05', '03'])
+  expect(await mapTaskNs(d)).toEqual([1, 2, 3])
+  for (const [n, title] of Object.entries(titles)) expect(isWholeOrCut(await ticketText(d, n), title)).toBe(true)
+  expect(await ticketText(d, '05')).toContain('…')
+  await fits(d)
+  await d.unmount()
+
+  // Above the prompt: Now first, then the Map card, Tickets, Tasks, and Decisions folded. The finished tickets and the
+  // merged task fold to one row each, at the top of their section's body; the open rows keep their depth.
+  d = await $.ui.mount(INLINE)
+  expect(await mapOrder(d)).toEqual(['map-now', 'map-card', `${MAP_SCOPE}:tickets`, `${MAP_SCOPE}:maptasks`, `${MAP_SCOPE}:decisions`])
+  expect((await button(d, `${MAP_SCOPE}:decisions`))?.text).toBe('▸ Decisions  2 so far')
+  expect((await button(d, FINISHED))?.text).toBe('▸ ✓ 3 finished tickets')
+  expect((await partOf(d, FINISHED, '✓'))?.props?.color).toBe('success')
+  expect(await ticketNs(d)).toEqual(['04', '05'])
+  expect(indentOf(await ticketText(d, '04'))).toBe(2)
+  expect(indentOf(await ticketText(d, '05'))).toBe(4)
+  expect((await d.findAll({ type: 'Box' })).some(b => /:ticket:0[123]:more-/.test(b.key ?? ''))).toBe(false)
+  expect((await button(d, MERGED))?.text).toBe('▸ ✓ 1 merged task')
+  expect(await mapTaskNs(d)).toEqual([2, 3])
+  const keys = (await d.findAll({})).map(e => e.key ?? '')
+  expect(keys.indexOf(`${MAP_SCOPE}:tickets`)).toBeLessThan(keys.indexOf(FINISHED))
+  expect(keys.indexOf(FINISHED)).toBeLessThan(keys.indexOf(ticketKey('04')))
+  expect(keys.indexOf(`${MAP_SCOPE}:maptasks-key`)).toBeLessThan(keys.indexOf(MERGED))
+  expect(keys.indexOf(MERGED)).toBeLessThan(keys.indexOf(`${MAP_SCOPE}:maptask:2`))
+  await fits(d)
+  // A press opens each to the rows it holds.
+  await d.press({ key: FINISHED })
+  await d.press({ key: MERGED })
+  expect((await button(d, FINISHED))?.text).toBe('▾ ✓ 3 finished tickets')
+  expect((await button(d, MERGED))?.text).toBe('▾ ✓ 1 merged task')
+  expect(await ticketNs(d)).toEqual(['01', '02', '04', '05', '03'])
+  expect(await ticketMore(d, '03')).toEqual(['printing the web page covers it'])
+  expect(await mapTaskNs(d)).toEqual([1, 2, 3])
+  await fits(d)
+  // The choice is kept, so fold the finished tickets again for the 99-ticket map below.
+  await d.press({ key: FINISHED })
+  expect(await ticketNs(d)).toEqual(['04', '05'])
+  await d.unmount()
+
+  // Tasks, with no task started and task 3's request 60 characters long: its ready line is cut at the end to the card.
+  const long = 'Add an XLSX download beside each CSV export on the sale page'
+  expect(long.length).toBe(60)
+  const closed = ticketsWith({ '04': 'out-of-scope', '05': 'out-of-scope' })
+  await reload($, files, inSession({ tickets: closed, tasksMd: TASKS_MD.replace('Add XLSX', long) }, { [`${MAP_DIR}/tasks-review/round-1/votes.md`]: NOTHING_KEPT }))
+  d = await $.ui.mount(ON_TERMINAL)
+  const ready = (await mapNowLines(d)).find(l => l.startsWith('ready: task 3 '))
+  expect(cellWidth(ready ?? '')).toBeLessThanOrEqual(PANE.props.bodyColumns - 4)
+  expect(ready?.endsWith('…')).toBe(true)
+  const row3 = (await d.find({ type: 'Box', key: `${MAP_SCOPE}:maptask:3` }))?.text
+  expect(isWholeOrCut(row3, `3 ${long}`)).toBe(true)
+  expect(row3).toContain('…')
+  await fits(d)
+  await d.unmount()
+
+  // 99 tickets, 01 to 60 resolved and 61 to 99 open, each blocked by the one before, and no tasks.md.
+  const nn = (i: number) => String(i).padStart(2, '0')
+  const many = Object.fromEntries(Array.from({ length: 99 }, (_, i) => [
+    `${nn(i + 1)}-step.md`,
+    ticketMd(`Step ${nn(i + 1)}`, 'research', i === 0 ? 'none' : nn(i), i < 60 ? 'resolved' : 'open', i < 60 ? 'Answered by: agent\n' : ''),
+  ]))
+  await reload($, files, inSession({ tickets: many, tasksMd: null }))
+  const all = Array.from({ length: 99 }, (_, i) => nn(i + 1))
+  // Docked: every ticket drawn once, none indented past 6 columns.
+  d = await $.ui.mount(ON_TERMINAL)
+  const drawn = await ticketNs(d)
+  expect([...drawn].sort()).toEqual(all)
+  for (const n of all) expect(indentOf(await ticketText(d, n)) ?? 99).toBeLessThanOrEqual(6)
+  await fits(d)
+  await d.unmount()
+  // Above the prompt: the 60 finished fold to one row, and only 61 to 99 have rows.
+  d = await $.ui.mount(INLINE)
+  expect((await button(d, FINISHED))?.text).toBe('▸ ✓ 60 finished tickets')
+  expect(await ticketNs(d)).toEqual(all.slice(60))
+  await fits(d)
+  await d.unmount()
+})
+
+test('one mark per state: ◆ for your turn, ● while an agent works', async ($, on) => {
+  const files: Record<string, string> = onMap('AWAITING-HUMAN')
+  const seen = world(on, files)
+  let answer = tasksOut('AWAITING-HUMAN', 'blocked', 'blocked')
+  on('process.run', (_, e) => {
+    if (!isQuorumMap(e.argv)) throw new Error('gh: command not found')
+    return { value: exited(0, answer) }
+  })
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.description }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await settle()
+  // The task row's state mark, and its current stage dot: the one dot neither done, to do nor skipped.
+  const marks = async (d: Drawn, key: string) => {
+    const row = (await d.find({ type: 'Button', key })) ?? (await d.find({ type: 'Box', key }))
+    const parts = (((row?.children[0] as Part | undefined)?.children ?? []) as Part[]).map(p => ({ text: p.children.join(''), color: p.props?.color }))
+    return { mark: parts[1], dot: parts.slice(5, 11).find(p => !['✓', '○', '–'].includes(p.text)) }
+  }
+  const openList = async (d: Drawn, key: string) => {
+    if (!(await d.find({ type: 'Button', key }))?.text.startsWith('▾')) await d.press({ key })
+  }
+
+  // The task on show waits on the user: ◆ in warning, on its row and its current dot.
+  let d = await $.ui.mount(AT_100)
+  await openList(d, MAP_TASKS)
+  expect(await marks(d, 'export-csv:maptask:1')).toEqual({ mark: { text: '◆', color: 'warning' }, dot: { text: '◆', color: 'warning' } })
+  await d.unmount()
+  // Building, with a builder running: ● in the accent colour, on both.
+  answer = tasksOut('BUILDING', 'blocked', 'blocked')
+  await reload($, files, onMap('BUILDING'))
+  await settle()
+  seen.live.push('b1')
+  await $.agent.spawn(BUILDER)
+  d = await $.ui.mount(AT_100)
+  await openList(d, MAP_TASKS)
+  expect(await marks(d, 'export-csv:maptask:1')).toEqual({ mark: { text: '●', color: 'claude' }, dot: { text: '●', color: 'claude' } })
+  await d.unmount()
+  await finish($, 'b1')
+  seen.live.length = 0
+
+  // In a map session, with the same task on show and a researcher running: the running agent is the map's, so the
+  // task's row gets ○, not ●.
+  await reload($, files, { ...onMap('BUILDING'), '.tasks/.map-sessions/sess-a': 'csv-everywhere\n' })
+  await $.agent.spawn(RESEARCHER)
+  d = await $.ui.mount(ON_TERMINAL)
+  expect((await marks(d, `${MAP_SCOPE}:maptask:1`)).mark).toEqual({ text: '○', color: 'subtle' })
+  await d.unmount()
+
+  // Tickets: a claimed grilling ticket waits on the user (◆), a claimed research ticket's agent works (●).
+  const titles: string[] = []
+  const nowTitle = async (d: Drawn) => {
+    const title = await mapNowTitle(d)
+    titles.push(title)
+    return title
+  }
+  await reload($, files, inSession({ tickets: ticketsWith({ '02': 'claimed' }, { '04': 'grilling' }) }))
+  d = await $.ui.mount(ON_TERMINAL)
+  expect((await partOf(d, ticketKey('04'), '◆'))?.props?.color).toBe('warning')
+  expect((await partOf(d, ticketKey('02'), '●'))?.props?.color).toBe('claude')
+  await nowTitle(d)
+  await d.unmount()
+  // Every title that says it's the user's turn starts with ◆: answer, pick a variant, approve the breakdown.
+  await reload($, files, inSession({ tickets: ticketsWith({}, { '04': 'prototype' }) }))
+  await look($, nowTitle)
+  const closed = ticketsWith({ '04': 'out-of-scope', '05': 'out-of-scope' })
+  await reload($, files, inSession({ tickets: closed }, { [`${MAP_DIR}/tasks-review/round-1/votes.md`]: NOTHING_KEPT }))
+  await look($, nowTitle)
+  expect(titles.length).toBe(3)
+  for (const title of titles) {
+    expect(title).toContain('waiting for you')
+    expect(title.replace(/^Now · /, '').startsWith('◆ ')).toBe(true)
+  }
+})
+
+test("the map's rows are Buttons labelled in words", async ($, on) => {
+  const files: Record<string, string> = onMap('BUILDING')
+  world(on, files)
+  let answer = tasksOut('BUILDING', 'blocked', 'blocked')
+  on('process.run', (_, e) => {
+    if (!isQuorumMap(e.argv)) throw new Error('gh: command not found')
+    return { value: exited(0, answer) }
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await settle()
+  const label = async (d: Drawn, key: string) => (await d.find({ type: 'Button', key }))?.props.label as string | undefined
+
+  // The task's Map card: the list row says how many merged, and whether it's open.
+  let d = await $.ui.mount(AT_100)
+  expect(await label(d, MAP_TASKS)).toBe('Tasks, 0 of 3 merged, folded')
+  await d.press({ key: MAP_TASKS })
+  expect(await label(d, MAP_TASKS)).toBe('Tasks, 0 of 3 merged, open')
+  await d.unmount()
+
+  // A map session above the prompt, with task 2 merged and its change recorded, and the task on show in review.
+  const importTask = {
+    '.tasks/csv-import/state.md': '---\nslug: csv-import\nrisk: MEDIUM\nstatus: AWAITING-HUMAN\nround: 1\nmap: csv-everywhere\nmap_task: 2\npr: https://github.com/acme/app/pull/55\n---\n',
+    '.tasks/csv-import/files.tsv': filesTsv([fileRow('A', '12', '0', 'src/a.ts')]),
+  }
+  answer = tasksOut('IN_REVIEW', 'merged', 'ready')
+  await reload($, files, { ...onMap('IN_REVIEW', 'csv-everywhere', 1, { tickets: DEMO_LIKE }), ...importTask, '.tasks/.map-sessions/sess-a': 'csv-everywhere\n' })
+  await settle()
+  d = await $.ui.mount(INLINE)
+  expect(await label(d, `${MAP_SCOPE}:maptasks`)).toBe('Tasks, 1 of 3 merged, open')
+  expect(await label(d, `${MAP_SCOPE}:finished`)).toBe('3 finished tickets, 01, 02, 03, folded')
+  expect(await label(d, `${MAP_SCOPE}:merged`)).toBe('1 merged task, 2, folded')
+  await d.press({ key: `${MAP_SCOPE}:finished` })
+  await d.press({ key: `${MAP_SCOPE}:merged` })
+  expect(await label(d, `${MAP_SCOPE}:finished`)).toBe('3 finished tickets, 01, 02, 03, open')
+  expect(await label(d, `${MAP_SCOPE}:merged`)).toBe('1 merged task, 2, open')
+  // A task row that opens names its number, request, state, stage, tier and whether it's open.
+  expect(await label(d, `${MAP_SCOPE}:maptask:2`)).toBe('Task 2, Import the rows back, merged, done, MEDIUM, folded')
+  await d.press({ key: `${MAP_SCOPE}:maptask:2` })
+  expect(await label(d, `${MAP_SCOPE}:maptask:2`)).toBe('Task 2, Import the rows back, merged, done, MEDIUM, open')
+  // A ticket row names its number, title, type and status, with who decided.
+  expect(await ticketLabel(d, '01')).toBe('Ticket 01, Which formats count as everywhere, grilling, resolved, decided by you, open')
+  expect(await ticketLabel(d, '02')).toBe('Ticket 02, How spreadsheets treat formula cells, research, resolved, decided by the agent, open')
+  expect(await ticketLabel(d, '04')).toBe('Ticket 04, Where the export button goes, grilling, your answer, folded')
+  // Every row of the map's pane is a Button labelled in words, not its drawn text.
+  const rows = (await d.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith(`${MAP_SCOPE}:`))
+  expect(rows.length).toBeGreaterThan(8)
+  for (const b of rows) {
+    const l = b.props.label as string
+    expect(l).toMatch(/[a-z]{2,}/)
+    expect(l).not.toBe(b.text)
+  }
+  await d.unmount()
+})
+
+test("the demo map's task shows its Map card, and its session shows ticket 04 waiting on you", async ($, on) => {
+  // The demo's --stage done --map files, their placeholders filled in as the demo handoff test fills them; the map's
+  // csv-export/state.md, which names the map, stands in for the plain one.
+  const DEMO_HEAD = '0123456789abcdef0123456789abcdef01234567'
+  const restore = (text: string) => text.split('<time>').join('2000000000').split('<sha>').join(DEMO_HEAD).split('<short>').join(DEMO_HEAD.slice(0, 7))
+  const files: Record<string, string> = {
+    '.git/HEAD': 'ref: refs/heads/feat/csv-export\n',
+    '.git/refs/heads/feat/csv-export': `${DEMO_HEAD}\n`,
+    '.tasks/csv-export/plan.md': DEMO_PLAN,
+  }
+  for (const [name, text] of Object.entries(DEMO_DONE)) files[`.tasks/csv-export/${name}`] = restore(text)
+  for (const [path, text] of Object.entries(DEMO_MAP)) files[`.tasks/${path}`] = restore(text)
+  expect(files['.tasks/csv-export/state.md']).toContain('map: csv-everywhere')
+  world(on, files)
+  on('process.run', (_, e) => {
+    if (!isQuorumMap(e.argv)) throw new Error('gh: command not found')
+    return { value: exited(0, DEMO_MAP_TASKS) }
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await settle()
+
+  // The task: its Map card above the Task card, as task 1 of the map's 3.
+  let d = await $.ui.mount(AT_100)
+  expect(await cardOrder(d)).toEqual(['map-card', 'header', 'now'])
+  expect(await boxText(d, 'map-task-line:0')).toBe('task 1 of 3 · Export the sales rows as CSV')
+  await d.unmount()
+
+  // This session's marker names the map: the map takes the pane, and ticket 04 waits on the user.
+  await reload($, files, { ...files, '.tasks/.map-sessions/sess-a': 'csv-everywhere\n' })
+  d = await $.ui.mount(ON_TERMINAL)
+  expect(await d.find({ type: 'Box', key: 'header' })).toBeUndefined()
+  expect(await mapNowTitle(d)).toBe('Now · ◆ waiting for you · answer ticket 04')
+  expect((await d.find({ type: 'Box', key: 'map-now' }))?.props.borderColor).toBe('warning')
+  await d.unmount()
 })
