@@ -17,6 +17,7 @@ import type { TreeChange, TreeRow } from '../../hooks/dashboard/tree'
 import type { ChangedFile, FileList, FindingsView, TreeFinding } from '../../types'
 import { DEMO_DONE } from './fixtures/demo-done'
 import { DEMO_PLAN, DEMO_PLAN_SHOW } from './fixtures/demo-plan'
+import { NO_MAP_BASELINE } from './fixtures/no-map-baseline'
 
 const state = (status: string, extra = '') => `---
 slug: export-csv
@@ -4723,4 +4724,51 @@ test('the demo handoff shows the blind run row, the stamped checks and the fixed
   expect(await labelAt(pane, fixed)).toContain('CSV formula injection, security: injection')
   expect((await partsAt(pane, fixed)).find(p => p.text === 'security ')?.props.dimColor).toBe(true)
   await pane.unmount()
+})
+
+// Every drawn element, in findAll order: each Text with its look, each Button with its key and label, and each keyed
+// Box. Text keys aren't included, because the engine doesn't report them.
+async function drawnRows(d: Drawn) {
+  return (await d.findAll({})).flatMap(e => {
+    if (e.type === 'Text') return [{ type: e.type, text: e.text, color: e.props.color, bold: e.props.bold, dimColor: e.props.dimColor, backgroundColor: e.props.backgroundColor }]
+    if (e.type === 'Button') return [{ type: e.type, key: e.key, text: e.text, label: e.props.label }]
+    if (e.type === 'Box' && e.key !== undefined) return [{ type: e.type, key: e.key, text: e.text }]
+    return []
+  })
+}
+
+test('a task with no map and a session with no map session draw as they did', async ($, on) => {
+  // One world per test, so the files change in place: the IN_REVIEW task first, then a repo with no .tasks/, each
+  // read by a fresh session start.
+  const files: Record<string, string> = repo('IN_REVIEW')
+  world(on, files)
+  on('process.run', () => { throw new Error('gh: command not found') })
+  // With no task the band leaves the row to the engine, which draws this.
+  on('ui.render', ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>engine</Text>
+  })
+  const start = async () => {
+    await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+    await settle()
+  }
+  const draw = async (at: typeof ON_TERMINAL | typeof ON_BAND) => {
+    const d = await $.ui.mount(at)
+    const rows = await drawnRows(d)
+    await d.unmount()
+    return rows
+  }
+  const INLINE = { ...ON_TERMINAL, props: { ...PANE.props, placement: 'inline' } } as const
+  const ON_BAND = { ...BAND, surface: 'terminal' } as const
+  await start()
+  const reviewPane = await draw(ON_TERMINAL)
+  const reviewInline = await draw(INLINE)
+  const reviewBand = await draw(ON_BAND)
+  for (const k of Object.keys(files)) delete files[k]
+  files['.git/HEAD'] = 'ref: refs/heads/main\n'
+  await start()
+  const emptyPane = await draw(ON_TERMINAL)
+  const emptyBand = await draw(ON_BAND)
+  const rows = { reviewPane, reviewInline, reviewBand, emptyPane, emptyBand }
+  expect(rows).toEqual(NO_MAP_BASELINE)
 })
