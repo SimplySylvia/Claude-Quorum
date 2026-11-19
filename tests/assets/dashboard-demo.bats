@@ -92,3 +92,45 @@ sys.exit(bad)
   echo "$output"
   [ "$status" -eq 0 ]
 }
+
+@test "map: the dashboard fixtures match the files the demo writes" {
+  run "$SCRIPT" "$DEMO/done" --stage done --map
+  [ "$status" -eq 0 ]
+  tickets=$(cd "$DEMO/done" && CLAUDE_PROJECT_DIR="$DEMO/done" "$BIN/quorum-map" --map csv-everywhere tickets)
+  tasks=$(cd "$DEMO/done" && CLAUDE_PROJECT_DIR="$DEMO/done" "$BIN/quorum-map" --map csv-everywhere tasks)
+  # The fixture's placeholders, in the order its header comment gives: the time, then full SHAs, then short ones.
+  run python3 -I -c '
+import glob, json, os, re, sys
+fixture, root, tickets, tasks = sys.argv[1], sys.argv[2], sys.argv[3] + "\n", sys.argv[4] + "\n"
+lines = open(fixture, encoding="utf-8").readlines() if os.path.exists(fixture) else []
+def export(name):
+    line = [l for l in lines if l.startswith("export const " + name + " = ")]
+    return json.loads(line[0].split(" = ", 1)[1].rstrip().rstrip(";")) if line else None
+def norm(s):
+    s = re.sub(r"recorded=[0-9]+", "recorded=<time>", s)
+    s = re.sub(r"[0-9a-f]{40}", "<sha>", s)
+    return re.sub(r"(?<![0-9A-Za-z])[0-9a-f]{7,39}(?![0-9A-Za-z])", "<short>", s)
+want = export("DEMO_MAP") or {}
+keys = ["map-csv-everywhere/map.md", "map-csv-everywhere/tasks.md", "csv-export/state.md"]
+keys += sorted(os.path.relpath(f, root) for f in glob.glob(root + "/map-csv-everywhere/tickets/*.md"))
+bad = 0
+for k in keys:
+    got = norm(open(root + "/" + k, encoding="utf-8").read())
+    if k not in want:
+        print("missing: " + k); bad = 1
+    elif want[k] != got:
+        print("differs: " + k); bad = 1
+for k in want:
+    if k not in keys:
+        print("differs: " + k + " (the demo no longer writes it)"); bad = 1
+for name, got in (("DEMO_MAP_TICKETS", tickets), ("DEMO_MAP_TASKS", tasks)):
+    w = export(name)
+    if w is None:
+        print("missing: " + name); bad = 1
+    elif w != norm(got):
+        print("differs: " + name); bad = 1
+sys.exit(bad)
+' "$REPO_ROOT/tests/dashboard/fixtures/demo-map.ts" "$DEMO/done/.tasks" "$tickets" "$tasks"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}

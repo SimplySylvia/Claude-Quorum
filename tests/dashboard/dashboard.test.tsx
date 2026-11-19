@@ -20,6 +20,7 @@ import {
 } from '../../hooks/dashboard/map'
 import type { ChangedFile, FileList, FindingsView, MapStates, MapTaskRun, MapTicket, MapView, TreeFinding } from '../../types'
 import { DEMO_DONE } from './fixtures/demo-done'
+import { DEMO_MAP, DEMO_MAP_TICKETS } from './fixtures/demo-map'
 import { DEMO_PLAN, DEMO_PLAN_SHOW } from './fixtures/demo-plan'
 import { NO_MAP_BASELINE } from './fixtures/no-map-baseline'
 
@@ -4947,6 +4948,17 @@ test("a map's title, destination, decisions, tickets and tasks are read as quoru
   for (const bad of ['../x', '-x', 'CSV', '', 'a/b', 'a b']) expect(isMapSlug(bad)).toBe(false)
   expect(isSessionId('sess-a_1')).toBe(true)
   for (const bad of ['../x', '-x', '_x', '', 'a.b', 'a/b']) expect(isSessionId(bad)).toBe(false)
+})
+
+test('the demo map reads the same tickets quorum-map lists', () => {
+  // The demo's ticket files, parsed in file-name order, as quorum-map tickets prints them:
+  // NN<TAB>TYPE<TAB>STATUS<TAB>BLOCKED_BY<TAB>TITLE, BLOCKED_BY being - or a list like 01,03.
+  const map: Record<string, string> = DEMO_MAP
+  const files = Object.keys(map).filter(k => k.startsWith('map-csv-everywhere/tickets/')).sort()
+  const rows = files.map(k => parseTicket(k.slice(k.lastIndexOf('/') + 1), map[k] ?? ''))
+    .map(t => (t === null ? 'no ticket' : [t.n, t.type, t.status, t.blockedBy.length === 0 ? '-' : t.blockedBy.join(','), t.title].join('\t')))
+  expect(rows.length).toBe(5)
+  expect(rows.map(r => `${r}\n`).join('')).toBe(DEMO_MAP_TICKETS)
 })
 
 test("the map's phase and counts follow its tickets, tasks.md and session", () => {

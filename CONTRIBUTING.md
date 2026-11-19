@@ -136,12 +136,14 @@ motion, to viewers who ask for reduced motion.
 `assets/src/dashboard-demo.sh` builds a repo whose `.tasks/` holds one MEDIUM task partway through Quorum, and a
 LOW one building in its own git worktree for the pane's **Other tasks** list, so you
 can see the dashboard and the band above the prompt without running a real task, and screenshot them for the README. It writes
-every file as the skills would have saved it and calls no model:
+every file as the skills would have saved it and calls no model. `--map`, with any stage, also writes the map
+`map-csv-everywhere/` and makes csv-export its task 1:
 
 ```bash
 assets/src/dashboard-demo.sh /tmp/quorum-demo                 # code review round 2, two reviewers in
 assets/src/dashboard-demo.sh /tmp/quorum-demo --stage blind   # blind test run 1 saved
 assets/src/dashboard-demo.sh /tmp/quorum-demo --stage done    # AWAITING-HUMAN, proof at HEAD, PR #42 recorded
+assets/src/dashboard-demo.sh /tmp/quorum-demo --map           # also the map csv-everywhere, ticket 04 waiting on you
 cd /tmp/quorum-demo && claude --plugin-dir <this repo>
 ```
 

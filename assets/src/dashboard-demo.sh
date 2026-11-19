@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build a demo repo whose .tasks/ holds one Quorum task, for seeing and screenshotting the dashboard.
 #
-#   assets/src/dashboard-demo.sh DEST [--stage review|blind|done]
+#   assets/src/dashboard-demo.sh DEST [--stage review|blind|done] [--map]
 #
 # DEST becomes the sales-app fixture, bootstrapped for Quorum, on the branch feat/csv-export, with a MEDIUM task
 # "csv-export" whose files are what the skills would have saved by then:
@@ -11,6 +11,9 @@
 #   done    AWAITING-HUMAN: a passing proof-final.md at HEAD, pr.md drafted, and the PR recorded
 # At every stage, a second task, "summary-dollars" (LOW), is building in its own git worktree, so the pane's Other
 # tasks list has a row.
+# With --map, at any stage, the task also comes from a map: .tasks/map-csv-everywhere/ holds five tickets (two
+# resolved, one out of scope, one claimed and waiting on you, one open behind it) and a tasks.md of three tasks, and
+# csv-export records itself as the map's task 1.
 # Nothing here calls a model; every file is written as is. Then open Claude Code in DEST with this plugin:
 #   cd DEST && claude --plugin-dir <this repo>
 # Bash 3.2 compatible.
@@ -18,12 +21,14 @@ set -euo pipefail
 
 die() { echo "dashboard-demo.sh: $*" >&2; exit 1; }
 
-dest=${1:-}; [ -n "$dest" ] || die "usage: dashboard-demo.sh DEST [--stage review|blind|done]"
+dest=${1:-}; [ -n "$dest" ] || die "usage: dashboard-demo.sh DEST [--stage review|blind|done] [--map]"
 shift
 stage=review
+map=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --stage) stage=${2:-}; shift 2 ;;
+    --map) map=1; shift ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -366,6 +371,38 @@ mkdir -p ".tasks/$other"
 printf '# Show summary totals as dollars\n\n## Requirements\n1. `report.py summary` prints each total as dollars.\n' > ".tasks/$other/rd.md"
 "$bin/quorum-state" --task "$other" set plan_approved 2026-11-09
 "$bin/quorum-branch" start "$other" --worktree >/dev/null
+
+# ---------------------------------------------------------------- the map csv-export came from (--map)
+if [ "$map" = 1 ]; then
+  m() { "$bin/quorum-map" --map csv-everywhere "$@" >/dev/null; }
+  m init "Export the sales rows everywhere"
+  python3 - <<'PY'
+p = ".tasks/map-csv-everywhere/map.md"
+s = open(p).read()
+s = s.replace("## Destination\n\n", "## Destination\n\nEvery place that shows the sales rows can export them, with each task ready to spec.\n\n", 1)
+open(p, "w").write(s)
+PY
+  m new grilling "Which formats count as everywhere" "Is CSV enough, or do users also need a spreadsheet file or a PDF?"
+  m new research "How spreadsheets treat formula cells" "Which leading characters make a spreadsheet run a cell as a formula?"
+  m new grilling "A PDF export" "Should the export also print a PDF of the rows?"
+  m new grilling "Where the web page's export button goes" "Should the button sit above the table or in its menu?"
+  m new research "How large a download the browser handles" "How many rows can one download hold before the browser struggles?"
+  m block 04 01
+  m block 05 04
+  m claim 01
+  m resolve 01 user "CSV everywhere first; a spreadsheet file can wait" "CSV, from the CLI and the web page. A spreadsheet file can wait for a later map."
+  m claim 02
+  m resolve 02 agent "A leading = + - or @ runs as a formula, so quote it" "Spreadsheets run a cell as a formula when it starts with =, +, - or @. Prefix such a cell with a quote."
+  m rule-out 03 "Nobody asked for a PDF; printing the CSV covers it"
+  m claim 04
+  cat > .tasks/map-csv-everywhere/tasks.md <<'MD'
+1. Export the sales rows as CSV · tier: MEDIUM · blocked by: none · decisions: 01, 02
+2. Add an export button to the web page's sales table · tier: MEDIUM · blocked by: 1 · decisions: 01
+3. Quote formula cells in the summary output · tier: LOW · blocked by: none · decisions: 02
+MD
+  state set map csv-everywhere
+  state set map_task 1
+fi
 
 echo "Demo repo ready at $dest (stage: $stage, status: $(state get status))."
 echo "Open it with the dashboard:  cd $dest && claude --plugin-dir $repo"
