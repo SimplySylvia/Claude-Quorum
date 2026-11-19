@@ -1,9 +1,9 @@
 // Quorum's dashboard: a band above the prompt, and a pane with what the current stage is doing (each reviewer of the
 // round, the blind test's reports), how the task's checks stand, its stages, review rounds and running agents, and
-// standalone reviews (/quorum:review): the one running now, and the ones before it, and the map a task was started
-// from. It reads .tasks/, and runs two commands in the background: `gh` for the task's PR, and the plugin's
-// `bin/quorum-map tasks` for the map's task states, which asks git, or GitHub through `gh` when a task records a PR,
-// whether a task merged. The skills and bin/ scripts stay the source of truth.
+// standalone reviews (/quorum:review): the one running now, and the ones before it; the Map card of the map a task was
+// started from, and, in a /quorum:map session, the map itself. It reads .tasks/, and runs two commands in the
+// background: `gh` for the task's PR, and the plugin's `bin/quorum-map tasks` for the map's task states, which asks
+// git, or GitHub through `gh` when a task records a PR, whether a task merged. The skills and bin/ scripts stay the source of truth.
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
@@ -496,11 +496,12 @@ async function lookupMapStates($: EngineInterface, slug: string, root: string, t
     if (force || slug !== run.inFlight) run.queued = slug
     return
   }
-  const startedAt = await $.clock.now()
-  const known = await read($, mapStates)
-  if (!force && known?.slug === slug && startedAt - known.triedAt < MAP_TTL_MS) return
+  // Claimed before any await, so a second call can't pass the check above before this one sets it.
   run.inFlight = slug
   try {
+    const startedAt = await $.clock.now()
+    const known = await read($, mapStates)
+    if (!force && known?.slug === slug && startedAt - known.triedAt < MAP_TTL_MS) return
     const ran = await $.process.run([`${$.plugin.root}/bin/quorum-map`, '--map', slug, 'tasks'], { cwd: root, env: { CLAUDE_PROJECT_DIR: root }, timeoutMs: 15_000 }).catch(() => null)
     const parsed = ran && ran.exitCode === 0 ? parseTaskStates(ran.stdout, tasks.map(t => t.n)) : null
     let isReadyChange = false
@@ -1158,8 +1159,8 @@ export const register: Register = (on, options) => {
     )
 
     // A map's task list, kept open or folded under `<scope>:maptasks`: `▸ Tasks  M of N merged`, then the key line and
-    // a row per tasks.md task with its second line. A row opens to its read-only file tree when it isn't the task on
-    // show, its change is recorded, and it merged or finished. With `foldMerged` (above the prompt in a map session),
+    // a row per tasks.md task with its second line. A row opens to its read-only file tree when its change is recorded
+    // and it merged or finished, and it isn't the task on show outside a map session (whose Now card holds its tree). With `foldMerged` (above the prompt in a map session),
     // the merged tasks fold under one `<scope>:merged` row after the key line, `▸ ✓ N merged tasks`. In a map session
     // (`mp.isSession`) no row gets the agent `●`, since the running agents are the map's and the agents atom records
     // no task.
@@ -1181,7 +1182,7 @@ export const register: Register = (on, options) => {
         const isMerged = isMergedTask(task)
         if (isMerged && mergedTasks.length > 0 && !isMergedOpen) return []
         const rowKey = `${scope}:maptask:${task.n}`
-        const isOpenable = !isShown && run !== null && run.files !== null && (isMerged || isFinished(run.status))
+        const isOpenable = (!isShown || mp.isSession) && run !== null && run.files !== null && (isMerged || isFinished(run.status))
         const isRowOpen = isOpenable && (folds[rowKey] ?? false)
         const row = taskRow(task, run, state, taskDots(run, task.tier, isMerged), isShown, isOpenable, isRowOpen, treeWidth)
         const text = <Text wrap="truncate-end">{partsOf(rowKey, row.parts)}</Text>

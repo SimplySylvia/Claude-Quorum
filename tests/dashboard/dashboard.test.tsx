@@ -16,7 +16,7 @@ import {
 import type { TreeChange, TreeRow } from '../../hooks/dashboard/tree'
 import {
   MAX_TICKET_DEPTH, isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, openBlockers,
-  parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskState, ticketOrder, ticketStatus, ticketSummary, wrapWhole,
+  parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskState, ticketOrder, ticketRow, ticketStatus, ticketSummary, wrapWhole,
 } from '../../hooks/dashboard/map'
 import type { ChangedFile, FileList, FindingsView, MapStates, MapTaskRun, MapTicket, MapView, TreeFinding } from '../../types'
 import { DEMO_DONE } from './fixtures/demo-done'
@@ -5144,6 +5144,13 @@ test('a ticket reads its status, mark and type, and the map its summary and the 
   expect(nowTicket(research)?.n).toBe('02')
   expect(mapWaits(mapView({ tickets: research }))).toBe(false)
   expect(nowTicket([tk('01', 'open')])).toBeNull()
+
+  // A ticket with no Type: line has no type to show, so its row draws no ` · ` and is exactly the card's width.
+  const untyped = tk('01', 'open', { type: '' })
+  expect(ticketStatus(untyped, [untyped], false).type).toBeNull()
+  const row = ticketRow({ ticket: untyped, depth: 0 }, [untyped], false, false, 50).parts.map(p => p.text).join('')
+  expect(row).not.toContain('·')
+  expect(cellWidth(row)).toBe(50)
 })
 
 test("a map task's state reads as one word and one mark, for the map its states belong to", () => {
@@ -5267,7 +5274,7 @@ test("a map's task shows a Map card above its Task card, and a task with no map 
   const cut = await boxText(d, 'map-card:title')
   expect(cut).toMatch(/^Map · Export the sales rows ev…/)
   expect(cut).toMatch(/csv-everywhere$/)
-  expect(cellWidth('Map · Export the sales rows ev…') + 1 + cellWidth('csv-everywhere')).toBeLessThanOrEqual(PANE.props.bodyColumns - 4)
+  expect(cellWidth((cut ?? '').replace(/ *csv-everywhere$/, '')) + 1 + cellWidth('csv-everywhere')).toBeLessThanOrEqual(PANE.props.bodyColumns - 4)
   await d.unmount()
 
   // map_task beyond tasks.md's three tasks: just `task 4`.
@@ -5351,6 +5358,19 @@ test('task states come from quorum-map in the background, cached for two minutes
   const files = onMap('BUILDING', 'csv-everywhere', 2)
   world(on, files, '/repo', {}, [], { clock: false })
   const clock = mock.clock(on)
+  // While `gate` is set, the next read of the stored states waits until the test opens it, so a lookup can be held
+  // between its in-flight check and its run.
+  let gate: { hit: () => void; open: Promise<void> } | null = null
+  const register = on as unknown as (event: string, matcher: unknown, hook: unknown) => void
+  register('state.get', { plugin: 'quorum', key: 'mapstates' }, async (_: unknown, e: unknown, next: (e: unknown) => Promise<unknown>) => {
+    const held = gate
+    if (held) {
+      gate = null
+      held.hit()
+      await held.open
+    }
+    return next(e)
+  })
   type Run = { argv: readonly string[]; init: unknown; answer: (r: ReturnType<typeof exited> | Error) => Promise<void> }
   const runs: Run[] = []
   on('process.run', (_, e) => new Promise((resolve, reject) => {
@@ -5424,10 +5444,13 @@ test('task states come from quorum-map in the background, cached for two minutes
   expect(runs.length).toBe(4)
   await swap(withStatus('IN_REVIEW'))
   expect(runs.length).toBe(4)
+  // A minute on, so the queued run's attempt is stamped later than runs[3]'s.
+  await clock.advance(60_000)
   await runs[3]?.answer(STATES)
   expect(runs.length).toBe(5)
 
-  // A non-zero exit keeps the states and stamps the attempt: a minute later nothing runs.
+  // A non-zero exit keeps the states and stamps the attempt: a minute later nothing runs, though it's two minutes
+  // since runs[3] began.
   await runs[4]?.answer(exited(1))
   expect(await card()).toEqual({ stepper: '✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 1/3', line: 'task 2 of 3 · Import the rows back · next: 3 Add XLSX' })
   await clock.advance(60_000)
@@ -5465,6 +5488,19 @@ test('task states come from quorum-map in the background, cached for two minutes
   await refresh()
   expect(runs.length).toBe(9)
   await runs[8]?.answer(STATES)
+
+  // Past the 2 minutes, a second lookup starts while the first still awaits the stored states: only one runs.
+  await clock.advance(120_000)
+  let open = () => {}
+  const hit = new Promise<void>(resolve => { gate = { hit: resolve, open: new Promise<void>(o => { open = o }) } })
+  await $.tool.call({ tool: 'Bash', command: 'quorum-state get status' })
+  await hit
+  await $.tool.call({ tool: 'Bash', command: 'quorum-state get status' })
+  open()
+  await clock.settle()
+  expect(runs.length).toBe(10)
+  await runs[9]?.answer(STATES)
+  expect(runs.length).toBe(10)
 })
 
 // ---- The Map card's task list
@@ -5722,6 +5758,18 @@ test("the map's task list folds during a task, opens at a hand-off, and shows ea
   expect((await list(d))?.text).toBe('▾ Tasks  3 of 3 merged')
   expect((await partOf(d, MAP_TASKS, '3'))?.props?.color).toBe('success')
   expect((await list(d))?.props?.label).toBe('Tasks, 3 of 3 merged, open')
+  await d.unmount()
+
+  // In a map session the map takes the pane and the task's Now card isn't drawn, so the task on show, finished
+  // with a recorded change, opens to its file tree from its row.
+  await swap({ ...withList('AWAITING-HUMAN'), '.tasks/.map-sessions/sess-a': 'csv-everywhere\n' })
+  await runs.at(-1)?.answer(tasksOut('AWAITING-HUMAN', 'merged', 'merged'))
+  d = await $.ui.mount(AT_100)
+  const shownKey = `${MAP_SCOPE}:maptask:1`
+  expect((await d.find({ type: 'Button', key: shownKey }))?.props.label).toBe('Task 1, Export the sales rows as CSV, your move, PR, MEDIUM, folded')
+  expect((await treeButtons(d)).some(b => b.key?.startsWith('export-csv:tree:'))).toBe(false)
+  await d.press({ key: shownKey })
+  expect((await treeButtons(d)).some(b => b.key?.startsWith('export-csv:tree:app/'))).toBe(true)
   await d.unmount()
 })
 

@@ -121,9 +121,9 @@ with no map, or whose map folder is missing, has no Map card and looks as it did
   | `HALTED`, `ESCALATED` | `halted`, `escalated` | `✗` red |
   | unknown, or no state yet | none | none |
 
-  A merged or finished task with a recorded file list, other than the task on show, is a button: a press opens its
-  [file tree](#the-file-tree), read-only. Every row's label says it in words, such as
-  `Task 2, Import the rows back, merged, done, MEDIUM, folded`.
+  A merged or finished task with a recorded file list is a button: a press opens its [file tree](#the-file-tree),
+  read-only. The task on show is one only in a map session, since otherwise its own Now card holds its tree.
+  Every row's label says it in words, such as `Task 2, Import the rows back, merged, done, MEDIUM, folded`.
 
 ### Where task states come from
 

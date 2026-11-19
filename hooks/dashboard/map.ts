@@ -163,10 +163,10 @@ export function nowTicket(tickets: MapTicket[]): MapTicket | null {
 }
 
 // A ticket row's mark and status, and their colours (a `wordColor` of '' draws dim). `type` shows while the ticket
-// is open or claimed, else it's null. `words`, for a label, adds who decided a resolved ticket.
+// is open or claimed and has one, else it's null. `words`, for a label, adds who decided a resolved ticket.
 export function ticketStatus(t: MapTicket, all: MapTicket[], isAgentRunning: boolean): { mark: string; markColor: string; word: string; wordColor: string; type: string | null; words: string } {
   const row = (mark: string, markColor: string, word: string, wordColor: string, words = word) =>
-    ({ mark, markColor, word, wordColor, type: isClosed(t) ? null : t.type, words })
+    ({ mark, markColor, word, wordColor, type: isClosed(t) || t.type === '' ? null : t.type, words })
   if (t.status === 'resolved') {
     return t.answeredBy === 'user'
       ? row('✓', 'success', 'you', 'success', 'resolved, decided by you')
@@ -277,7 +277,7 @@ export function mapStepper(m: MapView, s: MapStates | null): TreePart[][] {
     m.tasks !== null && m.tasks.length > 0 ? ` ${mergedCount(m, s)}/${m.tasks.length}` : '',
   ]
   return MAP_PHASES.map((name, i) => {
-    const [mark, color] = i < phase ? ['✓', 'success'] : i > phase ? ['○', 'inactive'] : mapWaits(m) ? ['◆', 'warning'] : ['●', 'claude']
+    const [mark, color] = GLYPH[i < phase ? 'done' : i > phase ? 'todo' : mapWaits(m) ? 'waiting' : 'active']
     const label = ` ${name}${counts[i] ?? ''}`
     return [{ text: mark, color }, i === phase ? { text: label, bold: true } : { text: label, dim: true }]
   })
