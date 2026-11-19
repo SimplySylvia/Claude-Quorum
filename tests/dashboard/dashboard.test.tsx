@@ -4477,7 +4477,7 @@ test('a value stored by the previous shape is dropped, not misread', async ($, o
     return old[key] === undefined ? r : { value: { value: { shape: tag, value: old[key] }, version: r.value.version } }
   }
   const register = on as unknown as (event: string, matcher: unknown, hook: unknown) => void
-  register('state.get', { plugin: 'quorum', key: 'task' }, stand('task', 'task-16'))
+  register('state.get', { plugin: 'quorum', key: 'task' }, stand('task', 'task-17'))
   register('state.get', { plugin: 'quorum', key: 'reviews' }, stand('reviews', 'reviews-2'))
   const reviewing = {
     '.git/HEAD': 'ref: refs/heads/main\n',
@@ -4506,7 +4506,7 @@ test('a value stored by the previous shape is dropped, not misread', async ($, o
   expect(snapshot).toBeDefined()
   expect(running).toBeDefined()
 
-  // (a) A task stored under task-16, with no task on disk: declined, so the band is the engine's.
+  // (a) A task stored under task-17, with no task on disk: declined, so the band is the engine's.
   await reload($, files, { '.git/HEAD': 'ref: refs/heads/main\n' })
   old.task = snapshot
   await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/state.md', content: '' })
@@ -4904,7 +4904,35 @@ const voted = (important: number | null) => ({
 const stepperText = (m: MapView, s: MapStates | null = null) => mapStepper(m, s).map(p => p.map(x => x.text).join('')).join(' ')
 const statesFor = (slug: string, states: Record<string, string> | null): MapStates => ({ slug, states, triedAt: 0, ready: null, isHandoff: false })
 
-test("a map's title, destination, decisions, tickets and tasks are read as quorum-map reads them", () => {
+// A map's files under .tasks/map-<slug>/: MAP_MD, TICKET_FILES and TASKS_MD unless given, and null leaves one out
+// (`tickets: null`, the whole tickets/ folder).
+type MapFiles = { slug?: string; mapMd?: string | null; tickets?: Record<string, string> | null; tasksMd?: string | null }
+function mapFiles(o: MapFiles = {}): Record<string, string> {
+  const dir = `.tasks/map-${o.slug ?? 'csv-everywhere'}`
+  const out: Record<string, string> = {}
+  if (o.mapMd !== null) out[`${dir}/map.md`] = o.mapMd ?? MAP_MD
+  for (const [name, text] of Object.entries(o.tickets === null ? {} : o.tickets ?? TICKET_FILES)) out[`${dir}/tickets/${name}`] = text
+  if (o.tasksMd !== null) out[`${dir}/tasks.md`] = o.tasksMd ?? TASKS_MD
+  return out
+}
+// The export-csv task in `status`, its state.md naming map `map` and, unless `k` is null, `map_task: k`, beside that
+// map's files (`files`, as mapFiles takes them).
+const onMap = (status: string, map = 'csv-everywhere', k: number | null = 1, files: MapFiles = {}): Record<string, string> => ({
+  ...repo(status),
+  '.tasks/export-csv/state.md': state(status, `map: ${map}\n${k === null ? '' : `map_task: ${k}\n`}`),
+  ...mapFiles({ slug: map, ...files }),
+})
+// A keyed Box's text, as drawn.
+const boxText = async (d: Drawn, key: string) => (await d.find({ type: 'Box', key }))?.text
+// What process.run answers for a finished child.
+const exited = (exitCode: number, stdout = '') => ({ exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
+
+test("a map's title, destination, decisions, tickets and tasks are read as quorum-map reads them", async ($, on) => {
+  // The pane cases at the end read these files: the export-csv task, started from the map as its task 1.
+  const files = onMap('BUILDING')
+  world(on, files)
+  on('process.run', () => { throw new Error('quorum-map: not run in this test') })
+
   const m = parseMapMd(MAP_MD)
   expect(m.title).toBe('Export the sales rows everywhere')
   expect(m.destination).toBe('Every export the sales team uses writes the same rows.')
@@ -4948,6 +4976,20 @@ test("a map's title, destination, decisions, tickets and tasks are read as quoru
   for (const bad of ['../x', '-x', 'CSV', '', 'a/b', 'a b']) expect(isMapSlug(bad)).toBe(false)
   expect(isSessionId('sess-a_1')).toBe(true)
   for (const bad of ['../x', '-x', '_x', '', 'a.b', 'a/b']) expect(isSessionId(bad)).toBe(false)
+
+  // Through the pane: the map's files read, so its task shows the Map card.
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await settle()
+  expect(await look($, async p => p.find({ type: 'Box', key: 'map-card' }))).toBeDefined()
+  // No map.md, or a ticket file with no Status: line: no map, so no card, and nothing throws.
+  await reload($, files, onMap('BUILDING', 'csv-everywhere', 1, { mapMd: null }))
+  expect(await look($, async p => p.find({ type: 'Box', key: 'map-card' }))).toBeUndefined()
+  expect(await look($, async p => p.find({ type: 'Box', key: 'header' }))).toBeDefined()
+  await reload($, files, onMap('BUILDING', 'csv-everywhere', 1, { tickets: { ...TICKET_FILES, '06-no-status.md': '# No status\n\nType: grilling\nBlocked by: none\n\n## Question\n\nWhy?\n\nStatus: open\n' } }))
+  expect(await look($, async p => p.find({ type: 'Box', key: 'map-card' }))).toBeUndefined()
+  // No tickets/ folder: a map with no tickets, in the Chart phase.
+  await reload($, files, onMap('BUILDING', 'csv-everywhere', 1, { tickets: null }))
+  expect(await look($, async p => boxText(p, 'map-card:stepper'))).toMatch(/^● Chart/)
 })
 
 test('the demo map reads the same tickets quorum-map lists', () => {
@@ -5148,4 +5190,246 @@ test("a quorum-map tasks result is stored for its map, and a task newly ready ma
   const beta = nextStates(second.value, 'beta', { 1: 'ready' }, 7000, tasks)
   expect(beta.isReadyChange).toBe(false)
   expect(beta.value).toEqual({ slug: 'beta', states: { 1: 'ready' }, triedAt: 7000, ready: [1], isHandoff: false })
+})
+
+// ---- The Map card during a map's task
+
+const AT_100 = { ...ON_TERMINAL, props: { ...PANE.props, bodyColumns: 100 } } as const
+const INLINE_100 = { ...AT_100, props: { ...AT_100.props, placement: 'inline' } } as const
+// The cards' keyed Boxes in drawn order: the Map card, the Task card and the Now card.
+const cardOrder = async (d: Drawn) => (await d.findAll({ type: 'Box' })).map(b => b.key ?? '').filter(k => ['map-card', 'header', 'now'].includes(k))
+const isQuorumMap = (argv: readonly string[]) => /\/bin\/quorum-map$/.test(argv[0] ?? '')
+
+test("a map's task shows a Map card above its Task card, and a task with no map shows none", async ($, on) => {
+  // state.md names the map but not which of its tasks this is: no card, and quorum-map isn't run.
+  const files = onMap('BUILDING', 'csv-everywhere', null)
+  world(on, files)
+  const runs: string[][] = []
+  on('process.run', (_, e) => {
+    runs.push([...e.argv])
+    return { value: exited(0, '1\tBUILDING\texport-csv\t-\tExport\n2\tblocked\t-\t1\tImport\n3\tready\t-\t1,2\tAdd XLSX\n') }
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await settle()
+  expect(await look($, async p => p.find({ type: 'Box', key: 'map-card' }))).toBeUndefined()
+  expect(runs.filter(isQuorumMap)).toEqual([])
+
+  // Task 1 of the map: the card sits above the Task card, docked, with the title, the slug, the stepper and the line.
+  await reload($, files, onMap('BUILDING'))
+  await settle()
+  expect(runs.filter(isQuorumMap).length).toBe(1)
+  let d = await $.ui.mount(AT_100)
+  expect(await cardOrder(d)).toEqual(['map-card', 'header', 'now'])
+  const title = await boxText(d, 'map-card:title')
+  // The Box's text joins the title's Text and the slug's.
+  expect(title).toBe('Map · Export the sales rows everywherecsv-everywhere')
+  expect(await boxText(d, 'map-card:stepper')).toBe('✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 0/3')
+  expect((await d.findAll({ type: 'Box' })).filter(b => /^map-card:phase-\d$/.test(b.key ?? '')).length).toBe(4)
+  expect(await boxText(d, 'map-task-line')).toBe('task 1 of 3 · Export the sales rows as CSV · next: 3 Add XLSX')
+  expect(await boxText(d, 'map-task-line:0')).toBe('task 1 of 3 · Export the sales rows as CSV')
+  expect(await boxText(d, 'map-task-line:1')).toBe(' · next: 3 Add XLSX')
+  await d.unmount()
+  // Above the prompt: the Now card, the Task card, then the Map card.
+  d = await $.ui.mount(INLINE_100)
+  expect(await cardOrder(d)).toEqual(['now', 'header', 'map-card'])
+  await d.unmount()
+  // At 50 columns the title is cut at the end and never runs into the slug.
+  d = await $.ui.mount(ON_TERMINAL)
+  const cut = await boxText(d, 'map-card:title')
+  expect(cut).toMatch(/^Map · Export the sales rows ev…/)
+  expect(cut).toMatch(/csv-everywhere$/)
+  expect(cellWidth('Map · Export the sales rows ev…') + 1 + cellWidth('csv-everywhere')).toBeLessThanOrEqual(PANE.props.bodyColumns - 4)
+  await d.unmount()
+
+  // map_task beyond tasks.md's three tasks: just `task 4`.
+  await reload($, files, onMap('BUILDING', 'csv-everywhere', 4))
+  expect(await look($, async p => boxText(p, 'map-task-line'))).toBe('task 4')
+  // No tasks.md: just `task 1`.
+  await reload($, files, onMap('BUILDING', 'csv-everywhere', 1, { tasksMd: null }))
+  expect(await look($, async p => boxText(p, 'map-task-line'))).toBe('task 1')
+
+  // A title with typographic quotes and an astral letter at the cut's last cell: cut by cells, whole characters.
+  const unicode = MAP_MD.replace('# Map: Export the sales rows everywhere', '# Map: Export — “quoted” rows 𝔼 everywhere for each region')
+  await reload($, files, onMap('BUILDING', 'csv-everywhere', 1, { mapMd: unicode }))
+  const odd = await look($, async p => boxText(p, 'map-card:title'))
+  expect(odd?.startsWith('Map · Export — “quoted” rows 𝔼…')).toBe(true)
+  expect(odd).toMatch(/csv-everywhere$/)
+  expect(odd).not.toMatch(/\p{Cs}/u)
+
+  // No map, and a map whose folder is missing: no card, and the same rows.
+  await reload($, files, repo('BUILDING'))
+  const plain = await look($, drawnRows)
+  expect(plain.some(r => r.type === 'Box' && r.key === 'map-card')).toBe(false)
+  await reload($, files, { ...repo('BUILDING'), '.tasks/export-csv/state.md': state('BUILDING', 'map: csv-everywhere\nmap_task: 1\n') })
+  expect(await look($, drawnRows)).toEqual(plain)
+})
+
+test('a map state stored by the previous shape is dropped, not misread', async ($, on) => {
+  // As the shape test above: each state.get answers what the engine holds, wrapped under an earlier tag once `old`
+  // holds a value, and keeps the engine's version so a write still lands.
+  const old: { task: unknown; mapstates: unknown } = { task: undefined, mapstates: undefined }
+  const latest: { task: unknown; mapstates: unknown } = { task: undefined, mapstates: undefined }
+  type Read = { value: { value: unknown; version: number } }
+  const stand = (key: 'task' | 'mapstates', tag: string) => async (_: unknown, e: unknown, next: (e: unknown) => Promise<Read>) => {
+    const r = await next(e)
+    const stored = r.value.value as { value?: unknown } | undefined
+    if (stored?.value !== undefined && stored.value !== null) latest[key] = stored.value
+    return old[key] === undefined ? r : { value: { value: { shape: tag, value: old[key] }, version: r.value.version } }
+  }
+  const register = on as unknown as (event: string, matcher: unknown, hook: unknown) => void
+  register('state.get', { plugin: 'quorum', key: 'mapstates' }, stand('mapstates', 'mapstates-0'))
+  register('state.get', { plugin: 'quorum', key: 'task' }, stand('task', 'task-17'))
+  const files = onMap('BUILDING')
+  world(on, files)
+  let answer = exited(0, '1\tmerged\tcsv-export\t-\tExport\n2\tblocked\t-\t1\tImport\n3\tready\t-\t1,2\tAdd XLSX\n')
+  on('process.run', () => ({ value: answer }))
+  on('ui.render', ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>engine</Text>
+  })
+  const line = () => look($, async p => boxText(p, 'map-task-line'))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await settle()
+  // A real result for the map, as the dashboard keeps it.
+  expect(await line()).toBe('task 1 of 3 · Export the sales rows as CSV · next: 3 Add XLSX')
+  const states = latest.mapstates
+  const snapshot = latest.task
+  expect(states).toMatchObject({ slug: 'csv-everywhere', states: { 1: 'merged' } })
+  expect(snapshot).toBeDefined()
+
+  // (a) That result stored under mapstates-0: declined, so after a reload the states are unknown, and the next run,
+  // which fails, finds none to keep.
+  old.mapstates = states
+  answer = exited(1)
+  await reload($, files, onMap('BUILDING'))
+  await settle()
+  expect(await line()).toMatch(/ · task states unknown$/)
+  expect(await look($, async p => boxText(p, 'map-card:stepper'))).toMatch(/Tasks 0\/3$/)
+
+  // (b) A task stored under task-17, with no task on disk: declined, so the band is the engine's.
+  old.mapstates = undefined
+  await reload($, files, { '.git/HEAD': 'ref: refs/heads/main\n' })
+  old.task = snapshot
+  await $.tool.call({ tool: 'Write', file_path: '/repo/.tasks/export-csv/state.md', content: '' })
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ type: 'Text', text: /^ BUILDING $/ })).toBeUndefined()
+  expect(await band.find({ type: 'Text', text: /^engine$/ })).toBeDefined()
+  await band.unmount()
+})
+
+test('task states come from quorum-map in the background, cached for two minutes, and a failed run keeps the last result', async ($, on) => {
+  // The export-csv task is the map's task 2. Each quorum-map run waits until the test answers it.
+  const files = onMap('BUILDING', 'csv-everywhere', 2)
+  world(on, files, '/repo', {}, [], { clock: false })
+  const clock = mock.clock(on)
+  type Run = { argv: readonly string[]; init: unknown; answer: (r: ReturnType<typeof exited> | Error) => Promise<void> }
+  const runs: Run[] = []
+  on('process.run', (_, e) => new Promise((resolve, reject) => {
+    runs.push({
+      argv: e.argv,
+      init: e.init,
+      answer: async r => {
+        if (r instanceof Error) reject(r)
+        else resolve({ value: r })
+        await clock.settle()
+      },
+    })
+  }))
+  const STATES = exited(0, '1\tmerged\tcsv-old\t-\tExport\n2\tBUILDING\texport-csv\t1\tImport\n3\tready\t-\t1,2\tAdd XLSX\n9\tmerged\t-\t-\tGone\n')
+  const card = () => look($, async p => ({ stepper: await boxText(p, 'map-card:stepper') ?? '', line: await boxText(p, 'map-task-line') ?? '' }))
+  // A refresh, or a reload of the files, then what it started in the background, up to a pending run.
+  const refresh = async () => {
+    await $.tool.call({ tool: 'Bash', command: 'quorum-state get status' })
+    await clock.settle()
+  }
+  const swap = async (next: Record<string, string>) => {
+    await reload($, files, next)
+    await clock.settle()
+  }
+  const withStatus = (status: string) => onMap(status, 'csv-everywhere', 2)
+
+  // A session start runs it once, in the background: the hook returns while the run is pending.
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(runs.length).toBe(1)
+  expect(isQuorumMap(runs[0]?.argv ?? [])).toBe(true)
+  expect(runs[0]?.argv.slice(1)).toEqual(['--map', 'csv-everywhere', 'tasks'])
+  expect(runs[0]?.init).toEqual({ cwd: '/repo', env: { CLAUDE_PROJECT_DIR: '/repo' }, timeoutMs: 15_000 })
+  // With no states yet the line says so; a refresh while the run is in flight starts none.
+  expect((await card()).line).toBe('task 2 of 3 · Import the rows back · task states unknown')
+  await refresh()
+  expect(runs.length).toBe(1)
+  await runs[0]?.answer(STATES)
+  // Task 9 isn't in tasks.md, so it isn't counted: 1 of 3 merged.
+  expect(await card()).toEqual({ stepper: '✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 1/3', line: 'task 2 of 3 · Import the rows back · next: 3 Add XLSX' })
+
+  // Within 2 minutes nothing runs; at 2 minutes it runs again.
+  await clock.advance(60_000)
+  await refresh()
+  expect(runs.length).toBe(1)
+  await clock.advance(60_000)
+  await refresh()
+  expect(runs.length).toBe(2)
+  await runs[1]?.answer(STATES)
+
+  // A status change of the task on show runs it at once.
+  await swap(withStatus('IN_REVIEW'))
+  expect(runs.length).toBe(3)
+  await runs[2]?.answer(STATES)
+  // A status change while a run is in flight starts one more run when it ends.
+  await swap(withStatus('BUILDING'))
+  expect(runs.length).toBe(4)
+  await swap(withStatus('IN_REVIEW'))
+  expect(runs.length).toBe(4)
+  await runs[3]?.answer(STATES)
+  expect(runs.length).toBe(5)
+
+  // A non-zero exit keeps the states and stamps the attempt: a minute later nothing runs.
+  await runs[4]?.answer(exited(1))
+  expect(await card()).toEqual({ stepper: '✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 1/3', line: 'task 2 of 3 · Import the rows back · next: 3 Add XLSX' })
+  await clock.advance(60_000)
+  await refresh()
+  expect(runs.length).toBe(5)
+  // So does a rejection (a timeout, or no such program).
+  await clock.advance(60_000)
+  await refresh()
+  expect(runs.length).toBe(6)
+  await runs[5]?.answer(new Error('timed out'))
+  expect((await card()).stepper).toBe('✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 1/3')
+  await clock.advance(60_000)
+  await refresh()
+  expect(runs.length).toBe(6)
+
+  // Another map: csv-everywhere's states don't read as beta's. While beta's run is pending its tasks are unknown.
+  const beta = MAP_MD.replace('# Map: Export the sales rows everywhere', '# Map: Beta')
+  await swap({ ...onMap('IN_REVIEW', 'beta', 2, { mapMd: beta }), ...mapFiles() })
+  expect(runs.length).toBe(7)
+  expect(runs[6]?.argv.slice(1)).toEqual(['--map', 'beta', 'tasks'])
+  expect(await card()).toEqual({ stepper: '✓ Chart ● Tickets 2/4 ○ Hand off ○ Tasks 0/3', line: 'task 2 of 3 · Import the rows back · task states unknown' })
+  await runs[6]?.answer(exited(0, ''))
+
+  // No task on show, and this session's map-session marker: the same runs, for the map it names.
+  await swap({ '.git/HEAD': 'ref: refs/heads/main\n', ...mapFiles(), '.tasks/.map-sessions/sess-a': 'csv-everywhere\n' })
+  expect(runs.length).toBe(8)
+  expect(runs[7]?.argv.slice(1)).toEqual(['--map', 'csv-everywhere', 'tasks'])
+  await refresh()
+  expect(runs.length).toBe(8)
+  await runs[7]?.answer(STATES)
+  await clock.advance(60_000)
+  await refresh()
+  expect(runs.length).toBe(8)
+  await clock.advance(60_000)
+  await refresh()
+  expect(runs.length).toBe(9)
+  await runs[8]?.answer(STATES)
+})
+
+test("the task breakdown's review expects architecture and patterns, and security for a HIGH task or its reply", () => {
+  const roles = (risk: string, files: Record<string, string> = {}) => roundReviewers('breakdown', risk, files).map(r => r.role)
+  expect(roles('MEDIUM')).toEqual(['architecture', 'patterns'])
+  expect(roles('MEDIUM', { 'security.md': NOTHING_KEPT })).toEqual(['architecture', 'patterns', 'security'])
+  expect(roles('HIGH')).toEqual(['architecture', 'patterns', 'security'])
+  // The breakdown review runs no logic reviewer, so a stray logic.md adds nothing.
+  expect(roles('MEDIUM', { 'logic.md': SURVIVORS })).toEqual(['architecture', 'patterns'])
+  expect(roundReviewers('breakdown', 'MEDIUM', { 'patterns.md': SURVIVORS })[1]?.findings).toEqual({ important: 1, nit: 1, preExisting: 0 })
 })

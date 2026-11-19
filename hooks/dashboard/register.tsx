@@ -1,33 +1,47 @@
 // Quorum's dashboard: a band above the prompt, and a pane with what the current stage is doing (each reviewer of the
 // round, the blind test's reports), how the task's checks stand, its stages, review rounds and running agents, and
-// standalone reviews (/quorum:review): the one running now, and the ones before it. It only reads .tasks/; the skills and bin/ scripts stay the
-// source of truth.
+// standalone reviews (/quorum:review): the one running now, and the ones before it, and the map a task was started
+// from. It reads .tasks/, and runs two commands in the background: `gh` for the task's PR, and the plugin's
+// `bin/quorum-map tasks` for the map's task states, which asks git, or GitHub through `gh` when a task records a PR,
+// whether a task merged. The skills and bin/ scripts stay the source of truth.
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Blind, ChangedFile, Check, Findings, FindingsView, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, RoundKept, Section, Snapshot, Stage } from '../../types'
+import type { Blind, ChangedFile, Check, Findings, FindingsView, MapReview, MapTask, MapTaskRun, MapTicket, MapView, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, RoundKept, Section, Snapshot, Stage } from '../../types'
 import {
   GLYPH, ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
-  parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, parsePlanSteps, SLICE_AT, stageOf, stages, tokenCount,
+  parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, parsePlanSteps, SLICE_AT, stageFor, stages, tokenCount,
   nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep, editPath, unmetNote, unmetNow, unmetWords, checksRow, blindSummary, whoseMove,
 } from './task'
 import { awaitingFrom, awaitingOf, cellWidth, changeHeader, cutEnd, confidenceRow, footprint, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows } from './tree'
 import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
+import { isMapSlug, isSessionId, joinGists, mapStepper, nextStates, parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf } from './map'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
 // Change a tag when its value's fields change: it declines what an earlier version stored.
-const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-17' })
+const task = atom({ plugin: 'quorum', key: 'task' } as const, null, { shape: 'task-18' })
 const agents = atom({ plugin: 'quorum', key: 'agents' } as const, [], { shape: 'agents-3' })
 const pr = atom({ plugin: 'quorum', key: 'pr' } as const, null, { shape: 'pr-1' })
 const reviews = atom({ plugin: 'quorum', key: 'reviews' } as const, [], { shape: 'reviews-3' })
 const otherTasks = atom({ plugin: 'quorum', key: 'others' } as const, [], { shape: 'others-1' })
-// Sections and findings-tree rows the person opened or closed in the pane, by `<slug>:<section>`, or
-// `<scope>:tree:<path>` for a tree row (`<scope>` is the task's slug or the review's id).
+// Sections and rows the person opened or closed in the pane, by `<slug>:<section>`, `<scope>:tree:<path>` for a tree
+// row, `<scope>:maptasks` for a map's task list and `<scope>:maptask:<n>` for one of its tasks (`<scope>` is the
+// task's slug, the review's id, or `map-<map slug>` in a map session), and in a map session `map-<map slug>:tickets`,
+// `map-<map slug>:ticket:<NN>`, `map-<map slug>:decisions`, `map-<map slug>:finished` and `map-<map slug>:merged`.
 const sections = atom({ plugin: 'quorum', key: 'sections' } as const, {}, { shape: 'sections-1' })
+// The map on show: this session's map (its map-session marker names it), else the task's; null for none.
+const map = atom({ plugin: 'quorum', key: 'map' } as const, null, { shape: 'map-1' })
+// The last `quorum-map tasks` result, for the map its slug names.
+const mapStates = atom({ plugin: 'quorum', key: 'mapstates' } as const, null, { shape: 'mapstates-1' })
 // How long a PR lookup stands before the next refresh asks GitHub again.
 const PR_TTL_MS = 2 * 60 * 1000
+// How long a `quorum-map tasks` attempt stands before the next refresh runs it again.
+const MAP_TTL_MS = 120_000
+// The `quorum-map tasks` run in flight, by map slug ('' for none), and the map whose run waits for it to end.
+// Kept in memory only; a session start replaces it, so a run from before only settles its own.
+let mapRun = { inFlight: '', queued: '' }
 // Bumped every second while a Quorum agent runs, so the pane's running times count up.
 const clock = atom({ plugin: 'quorum', key: 'now' } as const, 0)
 let ticker: Timer | null = null
@@ -223,12 +237,7 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     roots: [sessionRoot, root, scalar(fm, 'worktree')],
   }
 
-  // ESCALATED records the status it interrupted; HALTED comes from the review loop, or from blind test after 2 runs.
-  const stage = status === 'ESCALATED' && scalar(fm, 'escalated_from')
-    ? stageOf(scalar(fm, 'escalated_from'), undefined)
-    : status === 'HALTED' && count(fm, 'blind_runs') > 0
-      ? STAGES.indexOf('Blind test')
-      : stageOf(status, previous?.slug === slug ? previous.stage : undefined)
+  const stage = stageFor(fm, previous?.slug === slug ? previous.stage : undefined)
   const blindRuns = count(fm, 'blind_runs')
 
   const dir = `${root}/.tasks/${slug}`
@@ -288,7 +297,84 @@ async function snapshot($: EngineInterface, maxRounds: number, previous: Snapsho
     files,
     codeView,
     rereview,
+    mapSlug: isMapSlug(scalar(fm, 'map')) ? scalar(fm, 'map') : '',
+    mapTask: count(fm, 'map_task'),
   }
+}
+
+// The files a breakdown review round may hold: its reviewers' replies, the voter's, and what survived.
+const BREAKDOWN_FILES = ['architecture.md', 'patterns.md', 'security.md', 'votes.md', 'survivors.md']
+
+// A map, from `${root}/.tasks/map-<slug>/` as bin/quorum-map reads it: map.md, its tickets, tasks.md, the latest
+// tasks-review/round-N/, and every task whose state.md names it with a map_task. Null for an invalid slug, a missing
+// map.md, or a ticket file with no Status: line. `sessionRoot` is one of the roots a run's finding paths are read
+// against, as a task's are.
+async function readMap($: EngineInterface, root: string, slug: string, sessionRoot: string, isSession: boolean): Promise<MapView | null> {
+  if (!isMapSlug(slug)) return null
+  const dir = `${root}/.tasks/map-${slug}`
+  const mapMd = await readOr($, `${dir}/map.md`)
+  if (mapMd === null) return null
+  const { title, destination, decisions, outOfScope } = parseMapMd(mapMd)
+  const names = (await $.fs.list(`${dir}/tickets`).catch(() => [])).map(e => e.name).filter(n => /^\d\d-.*\.md$/.test(n)).sort()
+  const parsed: MapTicket[] = []
+  for (const name of names) {
+    const ticket = parseTicket(name, (await readOr($, `${dir}/tickets/${name}`)) ?? '')
+    if (ticket === null) return null
+    parsed.push(ticket)
+  }
+  const tasksMd = await readOr($, `${dir}/tasks.md`)
+  const tasks = tasksMd === null ? null : parseTasksMd(tasksMd)
+
+  // The breakdown's review: its reviewers as skills/map runs them (security when a task is HIGH).
+  const round = latestRun((await $.fs.list(`${dir}/tasks-review`).catch(() => [])).filter(e => e.kind === 'dir').map(e => e.name), 'round')
+  const files = round > 0 ? await readFiles($, `${dir}/tasks-review/round-${round}`, BREAKDOWN_FILES) : {}
+  const risk = (tasks ?? []).some(t => t.tier === 'HIGH') ? 'HIGH' : 'MEDIUM'
+  const review: MapReview = {
+    round,
+    exists: round > 0,
+    reviewers: round > 0 ? roundReviewers('breakdown', risk, files) : [],
+    voter: reviewer('voter', files['votes.md']),
+    survivors: files['survivors.md'] === undefined ? null : countFindings(files['survivors.md']),
+  }
+
+  // The tasks started from the map: a folder, or a link to one in a task's worktree, as othersSnapshot reads them.
+  const tasksDir = `${root}/.tasks`
+  const runs: MapTaskRun[] = []
+  for (const e of (await $.fs.list(tasksDir).catch(() => [])).filter(e => (e.kind === 'dir' || e.isLink) && !isReviewId(e.name))) {
+    const text = await readOr($, `${tasksDir}/${e.name}/state.md`)
+    if (text === null) continue
+    const fm = parseFrontmatter(text)
+    const n = count(fm, 'map_task')
+    if (scalar(fm, 'map') !== slug || n <= 0) continue
+    const at = `${tasksDir}/${e.name}`
+    const history = await roundHistory($, `${at}/review`, count(fm, 'round'))
+    runs.push({
+      n,
+      slug: e.name,
+      status: scalar(fm, 'status'),
+      risk: scalar(fm, 'risk'),
+      stage: stageFor(fm),
+      isFast: scalar(fm, 'fast') === 'true',
+      pr: prFromUrl(e.name, scalar(fm, 'pr'))?.number ?? null,
+      files: parseFileList((await readOr($, `${at}/files.tsv`)) ?? ''),
+      rounds: history.map(roundOf),
+      // The run's own roots, as snapshot() builds a task's, so a path under its worktree reads repo-relative.
+      codeView: treeOf(history, [sessionRoot, root, scalar(fm, 'worktree')]),
+      hasPlan: countPlanSteps((await readOr($, `${at}/plan.md`)) ?? '') > 0,
+    })
+  }
+  return { slug, title, destination, decisions, outOfScope, tickets: joinGists(parsed, decisions, outOfScope), tasks, review, runs, isSession }
+}
+
+// The map to show: the one this session's map-session marker names, if it reads, else the task's, if it has one
+// (both `map` and `map_task`) and it reads; null otherwise.
+async function mapToShow($: EngineInterface, root: string, session: string, sessionRoot: string, t: Snapshot | null): Promise<MapView | null> {
+  if (isSessionId(session)) {
+    const marker = ((await readOr($, `${root}/.tasks/.map-sessions/${session}`)) ?? '').split('\n')[0]?.trim() ?? ''
+    const ours = isMapSlug(marker) ? await readMap($, root, marker, sessionRoot, true) : null
+    if (ours) return ours
+  }
+  return t && t.mapSlug !== '' && t.mapTask > 0 ? readMap($, root, t.mapSlug, sessionRoot, false) : null
 }
 
 // How many other tasks the pane lists.
@@ -393,6 +479,39 @@ async function lookupPr($: EngineInterface, t: Snapshot, force: boolean) {
   await update($, pr, () => found)
 }
 
+// Run `bin/quorum-map --map <slug> tasks` for the map's task states, at most every MAP_TTL_MS unless `force`d, one run
+// at a time: while one is in flight, a forced call or one for another map waits for it to end, then runs, forced, if
+// that map is still on show. It runs after the hook that started it. A failed, non-zero or timed-out run keeps the
+// last states and stamps the attempt. A task newly ready reopens the task lists (their `:maptasks` choices go).
+async function lookupMapStates($: EngineInterface, slug: string, root: string, tasks: MapTask[], force: boolean) {
+  const run = mapRun
+  if (run.inFlight !== '') {
+    if (force || slug !== run.inFlight) run.queued = slug
+    return
+  }
+  const startedAt = await $.clock.now()
+  const known = await read($, mapStates)
+  if (!force && known?.slug === slug && startedAt - known.triedAt < MAP_TTL_MS) return
+  run.inFlight = slug
+  try {
+    const ran = await $.process.run([`${$.plugin.root}/bin/quorum-map`, '--map', slug, 'tasks'], { cwd: root, env: { CLAUDE_PROJECT_DIR: root }, timeoutMs: 15_000 }).catch(() => null)
+    const parsed = ran && ran.exitCode === 0 ? parseTaskStates(ran.stdout, tasks.map(t => t.n)) : null
+    let isReadyChange = false
+    await update($, mapStates, prev => {
+      const next = nextStates(prev, slug, parsed, startedAt, tasks)
+      isReadyChange = next.isReadyChange
+      return next.value
+    })
+    if (isReadyChange) await update($, sections, all => Object.fromEntries(Object.entries(all).filter(([k]) => !k.endsWith(':maptasks'))))
+  } finally {
+    run.inFlight = ''
+    const queued = run.queued
+    run.queued = ''
+    const shown = queued ? await read($, map).catch(() => null) : null
+    if (shown && shown.slug === queued && run === mapRun) void lookupMapStates($, queued, root, shown.tasks ?? [], true).catch(() => undefined)
+  }
+}
+
 // What the stepper can't say: a requirement a current proof leaves unmet, the fast path, the mockup sign-off, the plan's
 // rounds and approval, the blind-test runs, and a drafted PR before one is open. One line under the stepper.
 function stageDetails(t: Snapshot, known: PullRequest | null): string {
@@ -474,8 +593,13 @@ async function refresh($: EngineInterface, maxRounds: number, forcePr = false): 
   await update($, reviews, () => found)
   const elsewhere = await othersSnapshot($, tasksRoot, after?.slug ?? '')
   await update($, otherTasks, () => elsewhere)
+  const shown = await mapToShow($, tasksRoot, session, sessionRoot, after)
+  await update($, map, () => shown)
   // In the background, so a slow GitHub never holds up the turn; a failed lookup just leaves the last answer.
   if (after) void lookupPr($, after, forcePr).catch(() => undefined)
+  // The same for quorum-map, run again at once when the task on show changes status.
+  const isStatusChange = before !== null && after !== null && before.slug === after.slug && before.status !== after.status
+  if (shown) void lookupMapStates($, shown.slug, tasksRoot, shown.tasks ?? [], isStatusChange).catch(() => undefined)
   const message = after && TOASTS[after.status]
   if (message && before?.slug === after.slug && before.status !== after.status) {
     // Claude Code draws toasts under the plugin's name ("quorum"), so the text doesn't repeat it.
@@ -541,6 +665,10 @@ export const register: Register = (on, options) => {
     await settleAgents($)
     selected = null
     clearEdit()
+    // A run from before settles only its own record. The first result after a reload only records the ready set;
+    // the attempt's time stays, so the 2-minute wait still holds.
+    mapRun = { inFlight: '', queued: '' }
+    if ((await read($, mapStates)) !== null) await update($, mapStates, s => (s === null ? s : { ...s, ready: null, isHandoff: false }))
     // The band above the prompt says it all, so Quorum keeps no status line; clear one an earlier version set.
     $.ui.status(undefined)
     if ((await refresh($, maxRounds)) || liveReview(await read($, reviews))) void open($)
@@ -719,6 +847,8 @@ export const register: Register = (on, options) => {
     const past = all.filter(r => r !== rv)
     const crew = await read($, agents)
     const folds = await read($, sections)
+    const m = await read($, map)
+    const ms = await read($, mapStates)
     await read($, clock) // redraw on each tick
     const clockNow = await $.clock.now()
 
@@ -1226,103 +1356,149 @@ export const register: Register = (on, options) => {
     const roundsName = `Review rounds, ${roundGroups.map(([g, rs]) => `${g} ${rs.map(roundWords).join(', ')}`).join('; ')}`
     const running = others.filter(a => a.endedAt === null).length
 
+    // The Map card, above the Task card, when the task was started from a map whose files read (the map on show is
+    // that map, not this session's own). Each line is its own keyed Box: the title cut by cells before the slug, the
+    // phase stepper wrapping between phases, and `task k of n · <request>` with the next ready task and, before any
+    // result, `task states unknown`, each item cut to the card and wrapping between items, as the footprint does.
+    const shownMap = t.mapSlug !== '' && t.mapTask > 0 && m?.slug === t.mapSlug && !m.isSession ? m : null
+    const mapCard = shownMap && (() => {
+      const k = t.mapTask
+      const all = shownMap.tasks ?? []
+      const own = k <= all.length ? all.find(x => x.n === k) ?? null : null
+      const ready = own ? readyTasks(shownMap, ms).find(x => x.n !== k) : undefined
+      const head = `task ${k} of ${all.length} · `
+      const items: TreePart[][] = own ? [
+        [{ text: head }, { text: cutEnd(own.request, treeWidth - cellWidth(head)) }],
+        ...(ready ? [[{ text: ' · ', dim: true }, { text: cutEnd(`next: ${ready.n} ${ready.request}`, treeWidth - 3) }]] : []),
+        ...(statesOf(shownMap, ms) === null ? [[{ text: ' · ', dim: true }, { text: 'task states unknown', dim: true }]] : []),
+      ] : [[{ text: `task ${k}` }]]
+      return (
+        <Box key="map-card" borderStyle="round" borderColor="subtle" flexDirection="column" paddingX={1}>
+          <Box key="map-card:title" flexDirection="row" justifyContent="space-between" gap={1}>
+            <Box flexShrink={1}>
+              <Text wrap="truncate-end">
+                <Text dimColor>Map · </Text>
+                <Text bold>{cutEnd(shownMap.title, treeWidth - cellWidth('Map · ') - cellWidth(shownMap.slug) - 1)}</Text>
+              </Text>
+            </Box>
+            <Text dimColor>{shownMap.slug}</Text>
+          </Box>
+          <Box key="map-card:stepper" flexDirection="row" flexWrap="wrap">
+            {mapStepper(shownMap, ms).map((parts, i) => (
+              <Box key={`map-card:phase-${i}`}><Text>{i > 0 ? ' ' : ''}{partsOf(`map-card:phase-${i}`, parts)}</Text></Box>
+            ))}
+          </Box>
+          <Box key="map-task-line" flexDirection="row" flexWrap="wrap">
+            {items.map((parts, i) => <Box key={`map-task-line:${i}`}><Text>{partsOf(`map-task-line:${i}`, parts)}</Text></Box>)}
+          </Box>
+        </Box>
+      )
+    })()
+    const header = (
+      <Box key="header" borderStyle="round" borderColor="subtle" hover={{ borderColor: 'claude' }} flexDirection="column" paddingX={1}>
+        <Box flexDirection="row" justifyContent="space-between" gap={1}>
+          <Box flexShrink={1}><Text bold wrap="truncate-end">{title}</Text></Box>
+          {ticket ? <Text dimColor>{ticket}</Text> : null}
+        </Box>
+        <Text wrap="truncate-end">
+          <Text dimColor>{t.slug} · </Text>
+          <Text color={whoseMove(t.status)} bold>{t.status || 'no status'}</Text>
+          <Text dimColor> · {t.risk || 'no risk tier'}{spec?.isUi ? ' · UI change' : ''}</Text>
+        </Text>
+        {spec?.goal ? <Text dimColor wrap="truncate-end">{spec.goal}</Text> : null}
+        <Text>
+          {rail.map((s, i) => {
+            // From CONVERGED on, a requirement a current proof leaves unmet turns Review's tick into a `!`.
+            const [glyph, color] = s.name === 'Review' && unmet.length > 0 ? ['!', 'warning'] : GLYPH[s.state]
+            const sliced = t.planSteps >= SLICE_AT && !t.isFast && s.state === 'active'
+            const label = s.name === 'Review' && t.round > 0 ? `${s.name} ${t.round}/${t.maxRounds}`
+              : s.name === 'Build' && sliced ? `${s.name} ${t.builtSteps}/${t.planSteps}` : s.name
+            return (
+              <Text key={s.name} color={color} bold={s.state === 'active' || s.state === 'stuck'} dimColor={s.state === 'todo' || s.state === 'skipped'}>
+                {i > 0 ? <Text dimColor> ─ </Text> : null}{glyph}{label}
+              </Text>
+            )
+          })}
+        </Text>
+        {stageDetails(t, known) ? <Text dimColor wrap="truncate-end">{stageDetails(t, known)}</Text> : null}
+        {fp ? <Box key="footprint" flexDirection="row" flexWrap="wrap">{fpItems('footprint')}</Box> : null}
+        {known && known.number > 0 && known.url ? (
+          <Box flexDirection="row" gap={1}>
+            {/* The PR's number is the link; its state follows, as GitHub last reported it (none when unknown). */}
+            <Link href={known.url} label={`PR #${known.number}`} />
+            {prState(known) ? <Text color={known.state === 'MERGED' ? 'success' : known.state === 'CLOSED' ? 'error' : 'warning'}>{prState(known)}</Text> : null}
+            {copy('copy-pr', known.url)}
+          </Box>
+        ) : null}
+      </Box>
+    )
+    const now = (
+      <Box key="now" borderStyle="round" borderColor={nowColor} flexDirection="column" paddingX={1}>
+        <Text wrap="truncate-end">
+          <Text bold>Now · </Text>
+          <Text bold color={nowColor}>{nowTitle(n, t.maxRounds)}</Text>
+          {unmet.length > 0 ? <Text color="warning"> · {unmetWords(unmet).short}</Text> : null}
+        </Text>
+        {/* Before the first round, and in Plan throughout, the steps sit under the title, so the reviewer and voter
+            rows run straight into the tree's header. */}
+        {(n.kind === 'plan' || n.kind === 'review') && (n.round === 0 || isPlanning) && stepsPart({ isPressable: n.round > 0 && t.files !== null })}
+        {n.kind === 'spec' && <Text dimColor>{plural(n.requirements, 'requirement')} in rd.md · {plural(taskChecks, 'check')} in eval.md</Text>}
+        {n.kind === 'spec' && n.reviewers.map(r => reviewerLine(r))}
+        {(n.kind === 'plan' || n.kind === 'review') && n.round > 0 && (
+          <Box flexDirection="column">
+            <Text dimColor>{reviewerProgress(n)} replied</Text>
+            {/* During round N's fix, a reviewer whose IMPORTANT finding is now awaiting re-review says so; once
+                round N+1 starts, the rows are its own. */}
+            {n.reviewers.map(r => reviewerLine(r, n.tree?.round === n.round ? n.rereviewBy[r.role] ?? 0 : 0))}
+            {/* While round N+1 reviews, the tree shows round N, whose drops aren't this round's. */}
+            {roundVoter(n)}
+            {isPlanning ? null : stepsPart({ isPressable: t.files !== null, filesKey: n.kind === 'review' && filesRow ? filesKey : undefined })}
+            {n.kind === 'plan'
+              ? findingsTree(t.slug, n.tree, t.risk === 'HIGH', treeWidth, planChange, planChange ? changeHeader('plan', planChange, t.planSteps) : undefined, selectedStep)
+              : filesRow ?? codeTree(n.tree)}
+          </Box>
+        )}
+        {n.kind === 'build' && (
+          <Box flexDirection="column">
+            {(['builder', 'prover'] as const).map(role => {
+              const agent = crew.findLast(a => a.role === role)
+              const label = role === 'builder' ? 'Builder' : 'Prover'
+              if (!agent) return line(role, 'waiting', label, role === 'builder' ? 'implements plan.md' : 'runs checks, not final-only')
+              return line(role, agent.endedAt === null ? 'running' : 'done', label, `${agent.endedAt === null ? 'running' : 'took'} ${seconds(agent, clockNow)}`)
+            })}
+            {stepsPart({ isPressable: t.files !== null })}
+            {codeTree(null)}
+          </Box>
+        )}
+        {n.kind === 'blind' && (
+          <Box flexDirection="column">
+            {blindRows(n.blind, false)}
+            {/* HALTED after a blind run: the Review tree, unfolded, under the blind test's rows. */}
+            {stepsPart({ isPressable: t.files !== null, filesKey: t.status !== 'HALTED' && filesRow ? filesKey : undefined })}
+            {t.status === 'HALTED' && codeChange ? codeTree(t.codeView) : filesRow}
+          </Box>
+        )}
+        {n.kind === 'done' && !(known && known.number > 0) && (
+          <Text dimColor>{t.prDrafted ? 'Every stage is done; pr.md is drafted.' : 'Every stage is done.'}</Text>
+        )}
+        {n.kind === 'done' && n.blind ? blindRow(n.blind) : null}
+        {n.kind === 'done' && stepsPart({ isPressable: t.files !== null, filesKey })}
+        {n.kind === 'done' ? filesRow : null}
+        <Box flexDirection="row" gap={1} marginTop={1}>
+          {command
+            ? <Button key="next" variant="primary" label={`▶ Next: ${command}`} onPress={() => void fillPrompt($, command)} />
+            : <Text><Text dimColor>Next: </Text><Text>{next}</Text></Text>}
+          {command ? <Text dimColor wrap="truncate-end">{next === command ? 'fills the prompt' : next}</Text> : null}
+        </Box>
+      </Box>
+    )
+    // Docked, the Map card sits above the Task card; above the prompt, the Now card comes first and the Map card
+    // last. Without a Map card the order is the Task card, then the Now card.
+    const cards = mapCard ? (e.props.placement === 'inline' ? [now, header, mapCard] : [mapCard, header, now]) : [header, now]
+
     return (
       <Box flexDirection="column" gap={1}>
-        <Box key="header" borderStyle="round" borderColor="subtle" hover={{ borderColor: 'claude' }} flexDirection="column" paddingX={1}>
-          <Box flexDirection="row" justifyContent="space-between" gap={1}>
-            <Box flexShrink={1}><Text bold wrap="truncate-end">{title}</Text></Box>
-            {ticket ? <Text dimColor>{ticket}</Text> : null}
-          </Box>
-          <Text wrap="truncate-end">
-            <Text dimColor>{t.slug} · </Text>
-            <Text color={whoseMove(t.status)} bold>{t.status || 'no status'}</Text>
-            <Text dimColor> · {t.risk || 'no risk tier'}{spec?.isUi ? ' · UI change' : ''}</Text>
-          </Text>
-          {spec?.goal ? <Text dimColor wrap="truncate-end">{spec.goal}</Text> : null}
-          <Text>
-            {rail.map((s, i) => {
-              // From CONVERGED on, a requirement a current proof leaves unmet turns Review's tick into a `!`.
-              const [glyph, color] = s.name === 'Review' && unmet.length > 0 ? ['!', 'warning'] : GLYPH[s.state]
-              const sliced = t.planSteps >= SLICE_AT && !t.isFast && s.state === 'active'
-              const label = s.name === 'Review' && t.round > 0 ? `${s.name} ${t.round}/${t.maxRounds}`
-                : s.name === 'Build' && sliced ? `${s.name} ${t.builtSteps}/${t.planSteps}` : s.name
-              return (
-                <Text key={s.name} color={color} bold={s.state === 'active' || s.state === 'stuck'} dimColor={s.state === 'todo' || s.state === 'skipped'}>
-                  {i > 0 ? <Text dimColor> ─ </Text> : null}{glyph}{label}
-                </Text>
-              )
-            })}
-          </Text>
-          {stageDetails(t, known) ? <Text dimColor wrap="truncate-end">{stageDetails(t, known)}</Text> : null}
-          {fp ? <Box key="footprint" flexDirection="row" flexWrap="wrap">{fpItems('footprint')}</Box> : null}
-          {known && known.number > 0 && known.url ? (
-            <Box flexDirection="row" gap={1}>
-              {/* The PR's number is the link; its state follows, as GitHub last reported it (none when unknown). */}
-              <Link href={known.url} label={`PR #${known.number}`} />
-              {prState(known) ? <Text color={known.state === 'MERGED' ? 'success' : known.state === 'CLOSED' ? 'error' : 'warning'}>{prState(known)}</Text> : null}
-              {copy('copy-pr', known.url)}
-            </Box>
-          ) : null}
-        </Box>
-
-        <Box key="now" borderStyle="round" borderColor={nowColor} flexDirection="column" paddingX={1}>
-          <Text wrap="truncate-end">
-            <Text bold>Now · </Text>
-            <Text bold color={nowColor}>{nowTitle(n, t.maxRounds)}</Text>
-            {unmet.length > 0 ? <Text color="warning"> · {unmetWords(unmet).short}</Text> : null}
-          </Text>
-          {/* Before the first round, and in Plan throughout, the steps sit under the title, so the reviewer and voter
-              rows run straight into the tree's header. */}
-          {(n.kind === 'plan' || n.kind === 'review') && (n.round === 0 || isPlanning) && stepsPart({ isPressable: n.round > 0 && t.files !== null })}
-          {n.kind === 'spec' && <Text dimColor>{plural(n.requirements, 'requirement')} in rd.md · {plural(taskChecks, 'check')} in eval.md</Text>}
-          {n.kind === 'spec' && n.reviewers.map(r => reviewerLine(r))}
-          {(n.kind === 'plan' || n.kind === 'review') && n.round > 0 && (
-            <Box flexDirection="column">
-              <Text dimColor>{reviewerProgress(n)} replied</Text>
-              {/* During round N's fix, a reviewer whose IMPORTANT finding is now awaiting re-review says so; once
-                  round N+1 starts, the rows are its own. */}
-              {n.reviewers.map(r => reviewerLine(r, n.tree?.round === n.round ? n.rereviewBy[r.role] ?? 0 : 0))}
-              {/* While round N+1 reviews, the tree shows round N, whose drops aren't this round's. */}
-              {roundVoter(n)}
-              {isPlanning ? null : stepsPart({ isPressable: t.files !== null, filesKey: n.kind === 'review' && filesRow ? filesKey : undefined })}
-              {n.kind === 'plan'
-                ? findingsTree(t.slug, n.tree, t.risk === 'HIGH', treeWidth, planChange, planChange ? changeHeader('plan', planChange, t.planSteps) : undefined, selectedStep)
-                : filesRow ?? codeTree(n.tree)}
-            </Box>
-          )}
-          {n.kind === 'build' && (
-            <Box flexDirection="column">
-              {(['builder', 'prover'] as const).map(role => {
-                const agent = crew.findLast(a => a.role === role)
-                const label = role === 'builder' ? 'Builder' : 'Prover'
-                if (!agent) return line(role, 'waiting', label, role === 'builder' ? 'implements plan.md' : 'runs checks, not final-only')
-                return line(role, agent.endedAt === null ? 'running' : 'done', label, `${agent.endedAt === null ? 'running' : 'took'} ${seconds(agent, clockNow)}`)
-              })}
-              {stepsPart({ isPressable: t.files !== null })}
-              {codeTree(null)}
-            </Box>
-          )}
-          {n.kind === 'blind' && (
-            <Box flexDirection="column">
-              {blindRows(n.blind, false)}
-              {/* HALTED after a blind run: the Review tree, unfolded, under the blind test's rows. */}
-              {stepsPart({ isPressable: t.files !== null, filesKey: t.status !== 'HALTED' && filesRow ? filesKey : undefined })}
-              {t.status === 'HALTED' && codeChange ? codeTree(t.codeView) : filesRow}
-            </Box>
-          )}
-          {n.kind === 'done' && !(known && known.number > 0) && (
-            <Text dimColor>{t.prDrafted ? 'Every stage is done; pr.md is drafted.' : 'Every stage is done.'}</Text>
-          )}
-          {n.kind === 'done' && n.blind ? blindRow(n.blind) : null}
-          {n.kind === 'done' && stepsPart({ isPressable: t.files !== null, filesKey })}
-          {n.kind === 'done' ? filesRow : null}
-          <Box flexDirection="row" gap={1} marginTop={1}>
-            {command
-              ? <Button key="next" variant="primary" label={`▶ Next: ${command}`} onPress={() => void fillPrompt($, command)} />
-              : <Text><Text dimColor>Next: </Text><Text>{next}</Text></Text>}
-            {command ? <Text dimColor wrap="truncate-end">{next === command ? 'fills the prompt' : next}</Text> : null}
-          </Box>
-        </Box>
+        {cards}
 
         {reviewCard}
 

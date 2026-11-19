@@ -155,6 +155,10 @@ export type Snapshot = {
   files: FileList | null
   codeView: FindingsView | null
   rereview: string[]
+  // state.md's `map` ('' when missing or not a valid map slug) and `map_task` (0 when missing): the task was started
+  // from that map as its task `mapTask`. It has a map only when both are set.
+  mapSlug: string
+  mapTask: number
 }
 
 // A standalone review (/quorum:review), from .tasks/review-<id>/: its latest run's reviewers and voter, as for a
@@ -270,9 +274,15 @@ declare module 'claude-code' {
       // Other unfinished tasks, newest first, a few at most.
       others: Shaped<OtherTask[]>
       now: number
-      // Sections and findings-tree rows the person opened or closed, by `<slug>:<section>` or
-      // `<scope>:tree:<path>`; absent, the default.
+      // Sections and rows the person opened or closed, by `<slug>:<section>`, `<scope>:tree:<path>`,
+      // `<scope>:maptasks` or `<scope>:maptask:<n>` (`<scope>` is the task's slug, the review's id, or
+      // `map-<map slug>` in a map session), `map-<map slug>:tickets`, `map-<map slug>:ticket:<NN>`,
+      // `map-<map slug>:decisions`, `map-<map slug>:finished` or `map-<map slug>:merged`; absent, the default.
       sections: Shaped<Record<string, boolean>>
+      // The map on show: the session's map, else the task's, null for none.
+      map: Shaped<MapView | null>
+      // The last quorum-map tasks result, for the map its slug names, and when it was tried.
+      mapstates: Shaped<MapStates | null>
     }
   }
 }

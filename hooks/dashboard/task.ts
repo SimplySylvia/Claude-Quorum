@@ -106,6 +106,17 @@ export function stageOf(status: string, previous: number | undefined): number {
   return STAGE_OF[status] ?? previous ?? STAGE_OF.IN_REVIEW ?? 3
 }
 
+// A state.md's stage. ESCALATED records the status it interrupted; HALTED comes from the review loop, or from blind
+// test after 2 runs. `previous`: the stage the same task was last at, kept for a status the rail doesn't place.
+export function stageFor(fm: Frontmatter, previous?: number): number {
+  const status = scalar(fm, 'status')
+  return status === 'ESCALATED' && scalar(fm, 'escalated_from')
+    ? stageOf(scalar(fm, 'escalated_from'), undefined)
+    : status === 'HALTED' && count(fm, 'blind_runs') > 0
+      ? STAGES.indexOf('Blind test')
+      : stageOf(status, previous)
+}
+
 // A fast-path task (`fast: true`) has no plan round, so its Plan stage is skipped too.
 export function stages(status: string, risk: string, current: number, isFast = false): Stage[] {
   return STAGES.map((name, i) => {
@@ -305,10 +316,15 @@ export const ROLE_LABEL: Record<string, string> = {
   feasibility: 'Feasibility critic', improver: 'Spec improver', blind: 'Blind user', triage: 'Friction triage',
 }
 
-// The reviewers a round runs, per skills/plan, skills/review-loop, and skills/review (`standalone`): the ones the
-// tier always gets, plus any conditional one (tests, a11y, security) that left a reply. `files` maps a reviewer's
-// file to its text.
-export function roundReviewers(kind: 'plan' | 'review' | 'standalone', risk: string, files: Record<string, string>): Reviewer[] {
+// The reviewers a round runs, per skills/plan, skills/review-loop, skills/review (`standalone`) and skills/map's
+// review of a task breakdown (`breakdown`): the ones the tier always gets, plus any conditional one (tests, a11y,
+// security) that left a reply. The breakdown always gets architecture and patterns, and adds only security, for a
+// HIGH task or once it replied. `files` maps a reviewer's file to its text.
+export function roundReviewers(kind: 'plan' | 'review' | 'standalone' | 'breakdown', risk: string, files: Record<string, string>): Reviewer[] {
+  if (kind === 'breakdown') {
+    return ['architecture', 'patterns', ...(risk === 'HIGH' || files['security.md'] !== undefined ? ['security'] : [])]
+      .map(role => reviewer(role, files[`${role}.md`]))
+  }
   const isWide = risk === 'MEDIUM' || risk === 'HIGH'
   const always = ['logic', ...(isWide ? ['architecture', 'patterns', 'docs'] : []), ...(kind !== 'review' && risk === 'HIGH' ? ['security'] : [])]
   const roles = [...always, ...['docs', 'tests', 'a11y', 'security'].filter(r => !always.includes(r) && files[`${r}.md`] !== undefined)]
@@ -601,9 +617,10 @@ export const isReviewId = (name: string) => /^review-[A-Za-z0-9._-]+$/.test(name
 // The statuses where a standalone review is running: its reviewers and voter, or its builder fixing.
 export const isReviewRunning = (status: string) => status === 'REVIEWING' || status === 'FIXING'
 
-// The current run of a review: the highest `run-<N>` folder, 0 before the first is made.
-export function latestRun(names: string[]): number {
-  return Math.max(0, ...names.map(n => Number(/^run-(\d+)$/.exec(n)?.[1] ?? 0)))
+// The current run of a review: the highest `run-<N>` folder (`<prefix>-<N>`, as `round` for a map's
+// tasks-review/), 0 before the first is made.
+export function latestRun(names: string[], prefix = 'run'): number {
+  return Math.max(0, ...names.map(n => (m => (m && m[1] === prefix ? Number(m[2]) : 0))(/^([a-z]+)-(\d+)$/.exec(n))))
 }
 
 // The review this session is running, if any: the live card. Another session's running review may be live in
