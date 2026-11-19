@@ -66,7 +66,7 @@ no_temp() {
   printf '1\n2\n3\n4\n' > four.txt; printf '\0\1\2' > blob.bin; echo ignored > x.log
   echo note > .tasks/demo/note.md
   # An untracked nested repo and a FIFO are neither regular files nor symlinks.
-  mkdir sub; echo s > sub/s.txt; git -C sub init -q; git -C sub add s.txt; git -C sub commit -q -m s
+  mkdir sub; echo s > sub/s.txt; git -C sub init -q; git -C sub add s.txt; git -C sub -c user.name=t -c user.email=t@example.com commit -q -m s
   mkfifo pipe
 
   run --separate-stderr record

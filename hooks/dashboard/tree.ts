@@ -820,7 +820,7 @@ export function treeHeader(view: FindingsView | null, width: number, change?: Tr
   if (!view && !change) return null
   const header = view ? `the verifier kept ${view.kept > 0 ? 'these' : 'nothing'} in ${view.unit} ${view.round}` : ''
   const total = countOf(view?.findings ?? [], change?.rereview ?? [])
-  const marks = (view ? MARKS : []).filter(m => total[m.field] > 0).map(m => ({ glyph: markPart(m.glyph, m.color), word: m.word }))
+  const marks: { glyph: TreePart; word: string }[] = (view ? MARKS : []).filter(m => total[m.field] > 0).map(m => ({ glyph: markPart(m.glyph, m.color), word: m.word }))
   if (view && hasSecurity(total)) marks.push({ glyph: { text: '!', color: 'error' }, word: 'security' })
   const shown = new Set<Progress>((change?.files ?? []).map(f => (edit && f.path === edit.path ? '●' : progressOf(f, change ?? null))))
   if (edit && change) shown.add('●')

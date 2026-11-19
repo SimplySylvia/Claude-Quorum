@@ -176,7 +176,7 @@ function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Re
   on('session.root', () => ({ value: root }))
   on('session.cwd', () => ({ value: o.cwd ?? root }))
   on('session.id', () => ({ value: 'sess-a' }))
-  on('agent.list', () => ({ value: seen.live.map(id => ({ id, description: '', type: 'quorum:code-reviewer', status: 'running' as const })) }))
+  on('agent.list', () => ({ value: seen.live.map(id => ({ id, description: '', type: 'quorum:code-reviewer', status: 'running' as const, kind: 'local_agent', taskStatus: 'running' as const, label: '', startTime: 0, cwd: o.cwd ?? root, tokenCount: 0, tokenSamples: [0], hasRow: true })) }))
   // Each period of $.clock.every is one dispatch; refusing the first ends that interval, so this counts intervals.
   if (o.clock !== false) on('clock.every', () => { seen.ticks++; return { deny: 'test' } })
   // A $.clock.after timer fires at once on the fixed clock.
@@ -1515,7 +1515,7 @@ test('a stale proof reads as stale in the summary, the badges and the band, and 
     const texts = await pane.findAll({ type: 'Text' })
     const summary = texts.find(t => /^\d+\/\d+ pass/.test(t.text))
     const row = await pane.find({ type: 'Button', key: CHECKS })
-    if (row?.props.label?.endsWith(', folded')) await pane.press({ key: CHECKS })
+    if ((row?.props.label as string | undefined)?.endsWith(', folded')) await pane.press({ key: CHECKS })
     const pass = (await pane.findAll({ type: 'Text' })).filter(t => t.text === ' PASS ').map(t => t.props.backgroundColor)
     const fail = (await pane.findAll({ type: 'Text' })).filter(t => t.text === ' FAIL ').map(t => t.props.backgroundColor)
     const warning = (await pane.findAll({ type: 'Text' })).find(t => / ran at .*: these results may be out of date$/.test(t.text))?.text
@@ -2425,11 +2425,11 @@ test('with file_icons set to nerd, the terminal shows file type icons, and other
   expect((await allRows(pane)).some(r => r.includes(''))).toBe(false)
   await pane.unmount()
   // Another surface draws no icon, even with nerd set.
-  pane = await $.ui.mount({ ...PANE, surface: 'vscode' })
-  expect(await rowOf(pane, `${TREE}src/a.ts`)).toBeDefined()
-  for (const t of await pane.findAll({ type: 'Text' })) expect(t.text).not.toMatch(PUA)
-  for (const r of await allRows(pane)) expect(r).not.toMatch(PUA)
-  await pane.unmount()
+  const other = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await rowOf(other, `${TREE}src/a.ts`)).toBeDefined()
+  for (const t of await other.findAll({ type: 'Text' })) expect(t.text).not.toMatch(PUA)
+  for (const r of await allRows(other)) expect(r).not.toMatch(PUA)
+  await other.unmount()
   expect(iconsOn('off', 'terminal')).toBe(false)
   expect(iconsOn('yes', 'terminal')).toBe(false)
 })
@@ -2741,7 +2741,7 @@ test("the voter row's next step follows the pipeline: fix round, halts, converge
 
   // A standalone review: fix while FIXING, else done.
   const id = 'review-abc1234'
-  for (const [status, next] of [['FIXING', 'fix'], ['REVIEWING', 'done']]) {
+  for (const [status, next] of [['FIXING', 'fix'], ['REVIEWING', 'done']] as const) {
     for (const k of Object.keys(files)) delete files[k]
     Object.assign(files, inRuns(id, status, [{ end: 'b2b2b2b', survivors: imp }]))
     await $.tool.call({ tool: 'Write', file_path: `/repo/.tasks/${id}/state.md`, content: '' })
@@ -3308,10 +3308,10 @@ test('a kept important finding whose file changed since the round shows as await
 // A kept IMPORTANT with a `Security: <kind>` line under its header.
 const secAt = (loc: string, title: string, kind = 'injection') => `${impAt(loc, title)}\nSecurity: ${kind}`
 // A tree row's drawn parts, each a Text inside its Button's Text: its text and its props.
-type Part = { children?: unknown[]; props?: Record<string, unknown> }
+type RowPart = { children?: unknown[]; props?: Record<string, unknown> }
 const partsAt = async (pane: Drawn, key: string) =>
-  (((await pane.find({ type: 'Button', key }))?.children[0] as Part | undefined)?.children ?? [] as unknown[])
-    .map(c => ({ text: ((c as Part).children ?? []).join(''), props: (c as Part).props ?? {} }))
+  (((await pane.find({ type: 'Button', key }))?.children[0] as RowPart | undefined)?.children ?? [] as unknown[])
+    .map(c => ({ text: ((c as RowPart).children ?? []).join(''), props: (c as RowPart).props ?? {} }))
 const labelAt = async (pane: Drawn, key: string) => (await pane.find({ type: 'Button', key }))?.props.label as string | undefined
 const treeKeyLine = async (pane: Drawn, id = 'export-csv') => (await pane.find({ type: 'Box', key: `${id}:tree-key-0` }))?.text
 
@@ -3903,14 +3903,14 @@ test('from review on the steps fold to one row that a press opens', async ($, on
   await pane.unmount()
 
   // A fast-path task, and a task with no plan.md, show neither the row nor the list.
-  const fast = task('IN_REVIEW')
+  const fast: Record<string, string> = task('IN_REVIEW')
   fast['.tasks/export-csv/state.md'] = (fast['.tasks/export-csv/state.md'] ?? '').replace('risk: MEDIUM', 'risk: LOW\nfast: true')
   await reload($, files, fast)
   pane = await $.ui.mount(ON_TERMINAL)
   expect(await pane.find({ type: 'Button', key: STEPS_FOLD })).toBeUndefined()
   expect(await stepRow(pane, 1)).toBeUndefined()
   await pane.unmount()
-  const noPlan = task('IN_REVIEW')
+  const noPlan: Record<string, string> = task('IN_REVIEW')
   delete noPlan[PLAN]
   await reload($, files, noPlan)
   pane = await $.ui.mount(ON_TERMINAL)
@@ -4369,7 +4369,7 @@ test('in Build a file whose steps are all built and not being built shows its pr
   // app/a.ts is step 1's only; app/b.ts is step 2's.
   const plan = '# Plan\n\n## Steps\n1. **One** — `a`\n2. **Two** — `b`\n'
   const rows = [fileRow('M', '1', '0', 'app/a.ts', '1'), fileRow('M', '1', '0', 'app/b.ts', '2')]
-  const at = (extra: string) => ({ ...inRounds([], { status: 'BUILDING', extra }), [PLAN]: plan, [LIST]: filesTsv(rows) })
+  const at = (extra: string): Record<string, string> => ({ ...inRounds([], { status: 'BUILDING', extra }), [PLAN]: plan, [LIST]: filesTsv(rows) })
   const files: Record<string, string> = at('')
   world(on, files)
   on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.description }))
@@ -4735,14 +4735,17 @@ test('the demo handoff shows the blind run row, the stamped checks and the fixed
 })
 
 // Every drawn element, in findAll order: each Text with its look, each Button with its key and label, and each keyed
-// Box. Text keys aren't included, because the engine doesn't report them.
-async function drawnRows(d: Drawn) {
-  return (await d.findAll({})).flatMap(e => {
+// Box. Text keys aren't included, because the engine doesn't report them, and neither is a prop the element leaves
+// unset, as the no-map baseline recorded them.
+type DrawnRow = { type: string; text: string; key?: string; label?: unknown; color?: unknown; bold?: unknown; dimColor?: unknown; backgroundColor?: unknown }
+async function drawnRows(d: Drawn): Promise<DrawnRow[]> {
+  const set = (row: DrawnRow) => Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined)) as DrawnRow
+  return (await d.findAll({})).flatMap((e): DrawnRow[] => {
     if (e.type === 'Text') return [{ type: e.type, text: e.text, color: e.props.color, bold: e.props.bold, dimColor: e.props.dimColor, backgroundColor: e.props.backgroundColor }]
     if (e.type === 'Button') return [{ type: e.type, key: e.key, text: e.text, label: e.props.label }]
     if (e.type === 'Box' && e.key !== undefined) return [{ type: e.type, key: e.key, text: e.text }]
     return []
-  })
+  }).map(set)
 }
 
 test('a task with no map and a session with no map session draw as they did', async ($, on) => {
@@ -4751,16 +4754,20 @@ test('a task with no map and a session with no map session draw as they did', as
   const files: Record<string, string> = repo('IN_REVIEW')
   world(on, files)
   on('process.run', () => { throw new Error('gh: command not found') })
-  // With no task the band leaves the row to the engine, which draws this.
-  on('ui.render', ($, e) => {
+  // With no task the band leaves the row to the engine, which draws this. Claude Code 2.1.328 hands quorum's row on
+  // to a hook matched to quorum, and asks this test for a band of its own (as plugin `test`), left empty so nothing is
+  // drawn beside quorum's; 2.1.311 hands it to the unmatched hook, with no plugin.
+  const engine: Parameters<typeof on<'ui.render'>>[1] = ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>engine</Text>
-  })
+  }
+  on('ui.render', { plugin: 'quorum' }, engine)
+  on('ui.render', ($, e, next) => (e.plugin === undefined ? engine($, e, next) : next(e)))
   const start = async () => {
     await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
     await settle()
   }
-  const draw = async (at: typeof ON_TERMINAL | typeof ON_BAND) => {
+  const draw = async (at: typeof ON_TERMINAL | typeof INLINE | typeof ON_BAND) => {
     const d = await $.ui.mount(at)
     const rows = await drawnRows(d)
     await d.unmount()
@@ -5527,7 +5534,7 @@ test("the map's task list folds during a task, opens at a hand-off, and shows ea
   // value, keeping the engine's version so a write still lands.
   // `stored`: the value the engine holds.
   let old: unknown
-  let stored: MapStates | null = null
+  let stored = null as MapStates | null
   const register = on as unknown as (event: string, matcher: unknown, hook: unknown) => void
   register('state.get', { plugin: 'quorum', key: 'mapstates' }, async (_: unknown, e: unknown, next: (e: unknown) => Promise<{ value: { value: unknown; version: number } }>) => {
     const r = await next(e)
@@ -5857,7 +5864,7 @@ test("this session's map session marker makes the map take the pane, and another
   await d.unmount()
 
   // The marker goes: the task's pane returns.
-  const withTask = { ...inSession(), ...csvExport }
+  const withTask: Record<string, string> = { ...inSession(), ...csvExport }
   delete withTask['.tasks/.map-sessions/sess-a']
   await reload($, files, withTask)
   d = await $.ui.mount(ON_TERMINAL)
@@ -5866,7 +5873,7 @@ test("this session's map session marker makes the map take the pane, and another
   await d.unmount()
 
   // Another session's marker (one a crashed session left), or this session's naming a missing map: nothing here.
-  for (const marker of [{ '.tasks/.map-sessions/sess-b': 'csv-everywhere\n' }, { '.tasks/.map-sessions/sess-a': 'no-such-map\n' }]) {
+  for (const marker of [{ '.tasks/.map-sessions/sess-b': 'csv-everywhere\n' }, { '.tasks/.map-sessions/sess-a': 'no-such-map\n' }] as Record<string, string>[]) {
     await reload($, files, { '.git/HEAD': 'ref: refs/heads/main\n', ...mapFiles(), ...marker })
     d = await $.ui.mount(ON_TERMINAL)
     expect(await d.find({ type: 'Box', key: 'empty' })).toBeDefined()
@@ -6357,7 +6364,7 @@ test('one mark per state: ◆ for your turn, ● while an agent works', async ($
     const parts = (((row?.children[0] as Part | undefined)?.children ?? []) as Part[]).map(p => ({ text: p.children.join(''), color: p.props?.color }))
     return { mark: parts[1], dot: parts.slice(5, 11).find(p => !['✓', '○', '–'].includes(p.text)) }
   }
-  const openList = async (d: Drawn, key: string) => {
+  const openList = async (d: Drawn & { press: (q: { key: string }) => Promise<unknown> }, key: string) => {
     if (!(await d.find({ type: 'Button', key }))?.text.startsWith('▾')) await d.press({ key })
   }
 
@@ -6371,7 +6378,7 @@ test('one mark per state: ◆ for your turn, ● while an agent works', async ($
   await reload($, files, onMap('BUILDING'))
   await settle()
   seen.live.push('b1')
-  await $.agent.spawn(BUILDER)
+  await $.agent.spawn({ tool_use_id: 'b1', ...BUILDER })
   d = await $.ui.mount(AT_100)
   await openList(d, MAP_TASKS)
   expect(await marks(d, 'export-csv:maptask:1')).toEqual({ mark: { text: '●', color: 'claude' }, dot: { text: '●', color: 'claude' } })
