@@ -19,7 +19,7 @@ import {
 import { awaitingFrom, awaitingOf, cellWidth, changeHeader, cutEnd, confidenceRow, footprint, glue, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows, wrap } from './tree'
 import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
 import { isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskRow, taskState, ticketOrder, ticketRow, ticketSummary, wrapWhole } from './map'
-import { BUTTON_FRAME, endedText, fitRun, parseRunMarker, runCardRows, runCommand, runForms, runToast, runView, stoppedText, stripControls, withSlug } from './run'
+import { BUTTON_FRAME, endedText, fitRun, gateNow, parseRunMarker, runCardRows, runCommand, runForms, runToast, runView, stoppedText, stripControls, waitingText, withSlug } from './run'
 import type { RunTurn } from './run'
 
 const PANE = 'quorum-dashboard'
@@ -91,7 +91,8 @@ function inOrder<T>(work: () => Promise<T>): Promise<T> {
 // only if it's unchanged: what an earlier turn left to write must not land on a later turn's state.
 let turnNo = 0
 // How long after a main-session turn ends, in a run, the task is read once more: only then does a turn that ended
-// with an answer read as waiting on the person, and a status the Stop hook wrote late is still seen. From the trial
+// with an answer read as waiting on the person, which is announced there (no second timer), and a status the Stop
+// hook wrote late is still seen. From the trial
 // in .tasks/map-release-0-13/trials/11-result.md (main working tree), on Claude Code 2.1.330, headless, Windows 11:
 // (a) the Stop hook's write lands before `turn.complete`: the last hook's write came 47 to 63 ms before it, and
 //     `turn.complete` fired only after the last Stop hook had finished. So the delay (a) needs is the least, 500 ms.
@@ -806,6 +807,25 @@ function announce($: EngineInterface, text: string): void {
   }
 }
 
+// A question dialog of the main session, in a run and after its quiet start: announce that the run waits on the
+// person, with the gate of the task on show (a run's task that is off show has none). Nothing is announced before
+// the first read under this session id: after a `/clear`, which fires no `session.start`, the `run` atom may still
+// hold another session's marker. Never awaited by its caller, and never throws.
+async function announceWaiting($: EngineInterface): Promise<void> {
+  try {
+    if (isQuiet) return
+    if ((await $.session.id().catch(() => '')) !== runSession) return
+    if ((await read($, run)) === null) return
+    const t = await read($, task)
+    // A refresh may have entered the run while those were read.
+    if (isQuiet) return
+    const mine = runTaskOf(t)
+    announce($, waitingText(mine?.slug ?? '', t ? gateNow(t.status) : ''))
+  } catch {
+    // The dashboard only watches: the band says the run waits for as long as the dialog is open.
+  }
+}
+
 // The main session's turn `turn` ended: note how, unless a later turn has started. Awaits nothing, so no turn can
 // start between the check and the write. Never throws.
 function noteTurnEnd($: EngineInterface, reason: RunTurn['ended'], turn: number) {
@@ -816,8 +836,10 @@ function noteTurnEnd($: EngineInterface, reason: RunTurn['ended'], turn: number)
 
 // After the main session's turn `turn` ended: in a run set the one re-read of the task, RUN_REREAD_MS on, without
 // waiting for it. Only at that re-read does an answered turn start to read as waiting, and only if no turn started
-// since and the run is still there. A turn's end that gets here after a later turn's end set its re-read, or after a
-// session start dropped it, sets none: nothing is awaited between that check and the write. Never throws.
+// since and the run is still there. The wait is announced there, once, after the quiet start and unless the run's
+// task is HALTED or ESCALATED (that was announced, or is at this read): nothing is awaited between the turn check
+// and the write and the announcement. A turn's end that gets here after a later turn's end set its re-read, or after
+// a session start dropped it, sets none: nothing is awaited between that check and the write. Never throws.
 async function setReread($: EngineInterface, turn: number, maxRounds: number) {
   try {
     if ((await read($, run)) === null) return
@@ -832,7 +854,12 @@ async function setReread($: EngineInterface, turn: number, maxRounds: number) {
         try {
           await refresh($, maxRounds)
           const isInRun = (await read($, run)) !== null
-          if (turn === turnNo && runTurn.ended === 'answer' && isInRun) runTurn = { ...runTurn, isIdle: true }
+          const t = await read($, task)
+          if (turn === turnNo && runTurn.ended === 'answer' && isInRun) {
+            runTurn = { ...runTurn, isIdle: true }
+            const mine = runTaskOf(t)
+            if (!isQuiet && !(mine && isStuck(mine.status))) announce($, waitingText(mine?.slug ?? '', t ? gateNow(t.status) : ''))
+          }
           redraw($)
         } catch {
           // A failed re-read leaves the run as it read; the next refresh reads the task again.
@@ -1008,6 +1035,8 @@ export const register: Register = (on, options) => {
     const turn = turnNo
     runTurn = { ...runTurn, asking: runTurn.asking + 1 }
     redraw($)
+    // Not awaited: the dialog opens without waiting for the announcement.
+    void announceWaiting($)
     try {
       return await next(e)
     } finally {

@@ -6915,12 +6915,12 @@ function runWorld(on: On, files: Record<string, string>) {
   on('turn.complete', (_, e) => ({ text: e.answer }))
   return { seen, clock }
 }
-// AskUserQuestion calls stay open until the test answers them, oldest first. Registered before world(), so it sits
-// above the world's own tool.call hook.
+// AskUserQuestion calls stay open until the test answers them, oldest first; `count` is how many are open now.
+// Registered before world(), so it sits above the world's own tool.call hook.
 function heldQuestions(on: On) {
   const open: (() => void)[] = []
   on('tool.call', { tool: 'AskUserQuestion' }, () => new Promise<{ result: Record<string, never> }>(resolve => { open.push(() => resolve({ result: {} })) }))
-  return { answer: () => open.shift()?.() }
+  return { answer: () => open.shift()?.(), count: () => open.length }
 }
 const ask = ($: Engine, agentId?: string) => $.tool.call({
   tool: 'AskUserQuestion',
@@ -7794,6 +7794,305 @@ test("an announcement is a notification, or a toast when it wasn't sent", async 
   expect(seen.notified).toEqual([HALTED_TEXT])
   expect(seen.toasts).toEqual([HALTED_TEXT])
   expect(seen.toastMs).toEqual([15000])
+})
+
+const WAITING_PLAN = 'export-csv: waiting for you · plan approval'
+const WAITING_NO_GATE = 'export-csv: the run is waiting for you'
+// What one question dialog announces: read while the dialog is still open, and unchanged once it is answered.
+async function dialog($: Engine, seen: Seen, clock: { settle: () => Promise<void> }, held: ReturnType<typeof heldQuestions>, agentId?: string) {
+  forget(seen)
+  const asked = ask($, agentId)
+  await clock.settle()
+  const announced = [...seen.notified]
+  expect(held.count()).toBe(1)
+  held.answer()
+  await asked
+  await clock.settle()
+  expect(seen.notified).toEqual(announced)
+  return announced
+}
+
+test('no hook waits for a notification to settle', async ($, on) => {
+  const held = heldQuestions(on)
+  const files = inRun('PLANNING')
+  const { seen, clock } = runWorld(on, files)
+  let redraws = 0
+  on('ui.invalidate', (_, e, next) => { redraws++; return next(e) })
+  await $.session.start(START)
+  const words = async () => (await bandRow($, 140)).words
+  // The three paths that announce, each reached to its end: a question's call, a turn's end, and the re-read.
+  const paths = async () => {
+    files[STATE_MD] = calm('PLANNING')
+    await readAgain($)
+    await startTurn($)
+    await clock.settle()
+    forget(seen)
+    // The dialog: announced, and the call went on to the dialog, which is answered and returns.
+    const asked = ask($)
+    await clock.settle()
+    expect(seen.notified).toEqual([WAITING_PLAN])
+    expect(held.count()).toBe(1)
+    held.answer()
+    await asked
+    // The turn's end, whose refresh finds the escalation: it returns.
+    files[STATE_MD] = calm('ESCALATED')
+    let isEnded = false
+    const ended = endTurn($).then(() => { isEnded = true })
+    await clock.settle()
+    expect(isEnded).toBe(true)
+    await ended
+    expect(seen.notified).toEqual([WAITING_PLAN, ESCALATED_TEXT])
+    expect(await words()).toBe('run stopped')
+    // The re-read's timer, in a turn of its own: the wait is announced, and the redraw after it is made.
+    files[STATE_MD] = calm('PLANNING')
+    await readAgain($)
+    await startTurn($)
+    await endTurn($)
+    await clock.settle()
+    const before = redraws
+    await clock.advance(REREAD_MS)
+    expect(seen.notified).toEqual([WAITING_PLAN, ESCALATED_TEXT, WAITING_PLAN])
+    expect(redraws).toBe(before + 1)
+    expect(await words()).toBe('autopilot · waiting for you: plan approval')
+  }
+  // A notification that never settles.
+  seen.notify = 'held'
+  await paths()
+  expect(seen.held.length).toBe(3)
+  expect(seen.toasts).toEqual([])
+  // One that rejects (the hook's `{ deny }`), and one whose hook throws: each text is a toast.
+  for (const mode of ['reject', 'throw'] as const) {
+    seen.notify = mode
+    await paths()
+    await clock.settle()
+    expect({ mode, toasts: seen.toasts }).toEqual({ mode, toasts: [WAITING_PLAN, ESCALATED_TEXT, WAITING_PLAN] })
+    expect({ mode, toastMs: seen.toastMs }).toEqual({ mode, toastMs: [15000, 15000, 15000] })
+  }
+  // A toast that fails, by a hook that throws and by one that denies: each was tried, and nothing came of it.
+  seen.notify = 'unsent'
+  for (const fails of ['throw', 'deny'] as const) {
+    seen.toastFails = fails
+    await paths()
+    await clock.settle()
+    expect({ fails, toasts: seen.toasts }).toEqual({ fails, toasts: [WAITING_PLAN, ESCALATED_TEXT, WAITING_PLAN] })
+  }
+})
+
+test('a question dialog in a run is announced once, with its gate', async ($, on) => {
+  const held = heldQuestions(on)
+  const files = inRun('PLANNING')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  await startTurn($)
+  const to = async (status: string) => {
+    files[STATE_MD] = calm(status)
+    await readAgain($)
+    await clock.settle()
+  }
+  // The gate of the task on show, or the words with no gate; each before the dialog is answered.
+  expect(await dialog($, seen, clock, held)).toEqual([WAITING_PLAN])
+  await to('DRAFT-AWAITING-VISUAL-SIGNOFF')
+  expect(await dialog($, seen, clock, held)).toEqual(['export-csv: waiting for you · mockup sign-off'])
+  await to('BUILDING')
+  expect(await dialog($, seen, clock, held)).toEqual([WAITING_NO_GATE])
+  expect(seen.toasts).toEqual([])
+  // Two calls open at once: one announcement each.
+  forget(seen)
+  const first = ask($)
+  const second = ask($)
+  await clock.settle()
+  expect(seen.notified).toEqual([WAITING_NO_GATE, WAITING_NO_GATE])
+  expect(held.count()).toBe(2)
+  held.answer()
+  held.answer()
+  await first
+  await second
+  // A sub-agent's call announces nothing.
+  expect(await dialog($, seen, clock, held, 'b1')).toEqual([])
+
+  // The run's task no longer on show: its slug, and no gate (a task off show has none).
+  await to('PLANNING')
+  await $.session.start(START)
+  await startTurn($)
+  files['.git/HEAD'] = ON_MAIN
+  await readAgain($)
+  expect(await dialog($, seen, clock, held)).toEqual([WAITING_NO_GATE])
+  // No task on show and none shown before: no prefix.
+  await $.session.start(START)
+  await startTurn($)
+  expect(await dialog($, seen, clock, held)).toEqual(['the run is waiting for you'])
+  // Under another session id with no read since (a /clear): the marker last read is another session's.
+  seen.session = 'sess-b'
+  expect(await dialog($, seen, clock, held)).toEqual([])
+})
+
+test('a turn that ends on a question is announced when the run starts to wait', async ($, on) => {
+  const files = inRun('PLANNING')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  // Nothing at the turn's end, and one announcement at the re-read.
+  await startTurn($)
+  await endTurn($)
+  await clock.settle()
+  expect(seen.notified).toEqual([])
+  await clock.advance(REREAD_MS - 1)
+  expect(seen.notified).toEqual([])
+  await clock.advance(1)
+  await clock.settle()
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  await clock.advance(10 * REREAD_MS)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  expect(seen.toasts).toEqual([])
+
+  // The run's task no longer on show: its slug, and no gate.
+  forget(seen)
+  await $.session.start(START)
+  files['.git/HEAD'] = ON_MAIN
+  await readAgain($)
+  await startTurn($)
+  await endTurn($)
+  await clock.advance(REREAD_MS)
+  await clock.settle()
+  expect(seen.notified).toEqual([WAITING_NO_GATE])
+
+  // A turn that started before the re-read: the run goes on, and nothing is announced.
+  forget(seen)
+  files['.git/HEAD'] = ON_TASK
+  await readAgain($)
+  await startTurn($)
+  await endTurn($)
+  await clock.advance(REREAD_MS - 1)
+  await startTurn($)
+  await clock.advance(10 * REREAD_MS)
+  await clock.settle()
+  expect(seen.notified).toEqual([])
+
+  // The marker gone before the re-read: the run's end alone.
+  await endTurn($)
+  delete files[RUN_MARKER]
+  await clock.advance(REREAD_MS)
+  await clock.settle()
+  expect(seen.notified).toEqual(['export-csv: run ended · PLANNING'])
+})
+
+test('the opening questions of a run are not announced', async ($, on) => {
+  const held = heldQuestions(on)
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.tool_use_id }))
+  const spawn = (id: string, subagentType: string) =>
+    $.agent.spawn({ tool_use_id: id, prompt: 'Build step 1', description: id, subagentType, parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
+  const files = inRun('PLANNING')
+  delete files[RUN_MARKER]
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  const asked = () => dialog($, seen, clock, held)
+  // A run entered from none, in a turn of its own: the marker comes, and `by` is the Bash call that finds it.
+  const enter = async (by = enterRun) => {
+    delete files[RUN_MARKER]
+    await readAgain($)
+    await startTurn($)
+    files[RUN_MARKER] = RUN_SINCE
+    await by($)
+    await clock.settle()
+  }
+  // A turn that ends on a plain-text question, and its re-read.
+  const endOnQuestion = async () => {
+    forget(seen)
+    await endTurn($)
+    await clock.advance(REREAD_MS)
+    await clock.settle()
+    return [...seen.notified]
+  }
+
+  // The quiet start: a dialog and a plain-text end announce nothing, whether `quorum-run enter` or another read
+  // found the marker. A dialog in the next main-session turn is announced, and so is that turn's end.
+  for (const by of [enterRun, readAgain]) {
+    await enter(by)
+    expect(await asked()).toEqual([])
+    expect(await endOnQuestion()).toEqual([])
+    await startTurn($)
+    expect(await asked()).toEqual([WAITING_PLAN])
+    expect(await endOnQuestion()).toEqual([WAITING_PLAN])
+  }
+
+  // An agent that isn't Quorum's and a sub-agent's turn leave it quiet; a Quorum agent's start ends it, in the
+  // same turn.
+  await enter()
+  await spawn('a1', 'general-purpose')
+  expect(await asked()).toEqual([])
+  await startTurn($, 'b1')
+  expect(await asked()).toEqual([])
+  await spawn('a2', 'quorum:builder')
+  expect(await asked()).toEqual([WAITING_PLAN])
+  await endTurn($, 'answer', 'a2')
+  // The task on show changing status ends it.
+  await enter()
+  expect(await asked()).toEqual([])
+  files[STATE_MD] = calm('BUILDING')
+  await readAgain($)
+  expect(await asked()).toEqual([WAITING_NO_GATE])
+  files[STATE_MD] = calm('PLANNING')
+  // A new task coming on show ends it.
+  files['.git/HEAD'] = ON_MAIN
+  await enter()
+  expect(await asked()).toEqual([])
+  files['.git/HEAD'] = ON_TASK
+  await readAgain($)
+  expect(await asked()).toEqual([WAITING_PLAN])
+  // The task going off show with none in its place doesn't.
+  await enter()
+  files['.git/HEAD'] = ON_MAIN
+  await readAgain($)
+  expect(await asked()).toEqual([])
+  files['.git/HEAD'] = ON_TASK
+  await readAgain($)
+  expect(await asked()).toEqual([WAITING_PLAN])
+
+  // `quorum-run enter` over a marker that never went (a run continued) quiets again.
+  await startTurn($)
+  expect(await asked()).toEqual([WAITING_PLAN])
+  await enterRun($)
+  expect(await asked()).toEqual([])
+  // A session that starts with the marker there has entered no run: its first dialog is announced.
+  await $.session.start(START)
+  expect(await asked()).toEqual([WAITING_PLAN])
+  // And so is the first one after a read under a new session id, its marker there (a resume): the quiet start
+  // of the id before is forgotten.
+  await startTurn($)
+  await enterRun($)
+  expect(await asked()).toEqual([])
+  files['.tasks/.run-sessions/sess-b'] = RUN_SINCE
+  seen.session = 'sess-b'
+  await readAgain($)
+  expect(await asked()).toEqual([WAITING_PLAN])
+})
+
+test('an escalation wins over a waiting message', async ($, on) => {
+  const files = inRun('BUILDING')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  // ESCALATED written before the turn's end: the end's refresh announces it, and the re-read adds no wait.
+  await startTurn($)
+  files[STATE_MD] = calm('ESCALATED')
+  await endTurn($)
+  await clock.settle()
+  expect(seen.notified).toEqual([ESCALATED_TEXT])
+  await clock.advance(REREAD_MS)
+  await clock.settle()
+  expect(seen.notified).toEqual([ESCALATED_TEXT])
+  // Written between the end and the re-read: the re-read's refresh announces it, alone.
+  files[STATE_MD] = calm('BUILDING')
+  await readAgain($)
+  await clock.settle()
+  forget(seen)
+  await startTurn($)
+  await endTurn($)
+  await clock.settle()
+  expect(seen.notified).toEqual([])
+  files[STATE_MD] = calm('ESCALATED')
+  await clock.advance(REREAD_MS)
+  await clock.settle()
+  expect(seen.notified).toEqual([ESCALATED_TEXT])
+  expect(seen.toasts).toEqual([])
 })
 
 test('a halt or an escalation in a run is announced once, with no status toast', async ($, on) => {
