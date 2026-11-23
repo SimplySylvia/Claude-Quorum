@@ -91,18 +91,27 @@ in one of three states:
 
 **An escalated run stays on show.** A run that escalates stops without ending itself, so when you come back after
 its turn has ended the band still reads `run stopped` and the Run card is still there. They go when you run
-`/quorum:run` again and that run ends, when the session ends, or when you run `quorum-run leave <session id>`. If
-you fix the checks by hand and the status leaves `ESCALATED` before any of those, the band reads the run as waiting
-on you until one of them happens. A halted run ends itself: once its turn is over, nothing of the run shows.
+`/quorum:run` again and that run ends on anything but an escalation, when the session ends, or when you run
+`quorum-run leave <session id>`. If you fix the checks by hand and the status leaves `ESCALATED` before any of
+those, the band reads the run as waiting on you until one of them happens. A halted run ends itself: once its turn is over, nothing of the run shows.
 
 The run guard, which keeps a run's session from editing the code or committing before the build, doesn't hold a
 session whose run stopped on an escalation: the run marks its marker (`quorum-run escalated <session id>`), and the
 guard ignores a marked one, so you can fix the checks by hand there whichever task is active. Running `/quorum:run`
 again starts the guard again. There is one case the run can't mark: when the Stop hook itself escalates the task as
 the run's own turn ends (the checks failed three times in a row), the run has no turn left to mark its marker in.
-You can still fix the escalated task by hand while it is the active one, since its build has started. But with
-another task active that hasn't started its build, or with none, the guard still holds, until you run
-`quorum-run leave <session id>` or run `/quorum:run` again, which stops on the escalated task and marks the marker.
+The guard then holds as it does for any run. You can still fix the escalated task by hand while it is the active one
+and its build has started. It blocks you while the active task hasn't started its build, whether that is the
+escalated task (one that escalated between the plan's approval and the build's start) or another one, and while no
+task is active. Two things end that:
+
+- `quorum-run leave <session id>` ends it in every one of those cases. It also takes the stopped run off the band
+  and the Run card.
+- `/quorum:run` again ends it only when that run continues the escalated task: the run stops on it and marks the
+  marker. It continues the escalated task when that task is the active one and you give no request (or answer that
+  you want to continue it), or when no task is active, you give no request, and you pick it when the run asks which
+  unfinished task to continue. With another task active, `/quorum:run` continues that task or starts a new one, and
+  the guard holds for that run as for any other.
 
 ### The band
 

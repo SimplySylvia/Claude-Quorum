@@ -138,10 +138,13 @@ so the dashboard keeps reading `run stopped` for someone who comes back later. R
 `hooks/run-guard.sh` ignores a marker with that line, so the user can edit and commit by hand to fix the checks,
 whichever task is active. `quorum-run enter` writes the marker afresh, so the next `/quorum:run` in this session is
 guarded again. When the Stop hook itself escalates the task as the run's own turn ends, the run gets no turn to run
-this in: the marker has no line, and the guard still holds with another task active before its build, or with none,
-until the user runs `quorum-run leave` by hand or `/quorum:run` again, which stops here and marks it. The marker
-goes when `/quorum:run` is run again and that run ends, when the session ends, or when the user runs
-`quorum-run leave` by hand.
+this in: the marker has no line, and the guard still holds while the active task hasn't started its build (the
+escalated one, when it escalated before `quorum-branch start`, or another) and while none is active. It holds until
+the user runs `quorum-run leave` by hand, or runs `/quorum:run` again and that run continues the escalated task
+(the active one, or the one the user picks in section 1 with none active), which stops here and marks it. A run
+that continues another task or starts a new one never reaches this row: its marker is written afresh and it is
+guarded as any run. The marker goes when `/quorum:run` is run again and that run ends on anything but an
+escalation, when the session ends, or when the user runs `quorum-run leave` by hand.
 
 Say where the task is (status, round, risk), why it stopped (a gate's question, `--until`, the end, a halt, an
 escalation, or a precondition), and the next step. At the end of a task (`pr.md` drafted):

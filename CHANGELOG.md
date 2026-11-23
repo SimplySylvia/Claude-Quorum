@@ -28,13 +28,15 @@ copy with `/plugin marketplace update`.
   task keeps its own Next and reads `HALTED · see the post-mortem`.
 - **An escalated run keeps its marker.** `/quorum:run` no longer runs `quorum-run leave` when the task is
   `ESCALATED`, so the band still reads `run stopped` and the Run card still shows when you come back after the
-  run's turn has ended. The marker goes when `/quorum:run` is run again and that run ends, when the session ends,
-  or with `quorum-run leave`. A halted run still leaves. So that the kept marker doesn't keep the run guard on,
+  run's turn has ended. The marker goes when `/quorum:run` is run again and that run ends on anything but an
+  escalation, when the session ends, or with `quorum-run leave`. A halted run still leaves. So that the kept marker doesn't keep the run guard on,
   the run marks it with the new `quorum-run escalated <session id>`, and `hooks/run-guard.sh` ignores a marked one:
   you can edit and commit by hand to fix the checks, whichever task is active, until `/quorum:run` is run again
   (`quorum-run enter` writes the marker afresh). Not when the Stop hook itself escalated the task as the run's own
-  turn ended: the run couldn't mark its marker, so with another task active before its build, or with none, the
-  guard still holds until `quorum-run leave <session id>` or `/quorum:run` is run again.
+  turn ended: the run couldn't mark its marker, so while the active task hasn't started its build (the escalated
+  one or another), or with none active, the guard still holds until `quorum-run leave <session id>`, or until
+  `/quorum:run` is run again and continues the escalated task, where it stops and marks the marker. With another
+  task active, `/quorum:run` continues that one or starts a new one, and stays guarded.
 - **`quorum-run enter` takes `--until <stage>` and `--yes`.** `/quorum:run` passes the flags you gave it, and they're
   written to the run's marker (`.tasks/.run-sessions/<session id>`) under its start time, so the dashboard knows
   where the run stops next. An unknown flag or stage is refused and leaves an existing marker unchanged.
