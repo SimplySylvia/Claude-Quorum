@@ -146,6 +146,9 @@ function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Re
   const seen = { status: [] as (string | undefined)[], toasts: [] as string[], opened: 0, ticks: 0, live: [] as string[], copied: [] as string[], filled: [] as string[], draft: '', reads: [] as string[], writes: [] as string[] }
   // Paths are relative to `root`, or absolute (a worktree's session reads the main working tree's .tasks/).
   const abs = (path: string) => (path.startsWith('/') ? path : `${root}/${path}`)
+  // The path the engine asked for, in the POSIX form `files` is keyed by: on Windows it resolves `/repo/x` to
+  // `C:\repo\x` before a hook sees it.
+  const posix = (path: string) => path.replace(/^[A-Za-z]:(?=[\\/])/, '').replace(/\\/g, '/')
   const file = (path: string) => Object.entries(files).find(([k]) => abs(k) === path)?.[1]
   const mtime = (path: string) => Object.entries(mtimes).find(([k]) => abs(k) === path)?.[1] ?? 1
   // The entries directly under `dir`, from the paths beneath it.
@@ -163,15 +166,17 @@ function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Re
   }
   // `seen.reads`: every path the dashboard read, listed, statted, or checked for.
   on('fs.list', (_, e) => {
-    seen.reads.push(e.path)
-    const found = entries(e.path)
+    const path = posix(e.path)
+    seen.reads.push(path)
+    const found = entries(path)
     if (found.length === 0) throw new Error(`ENOENT: ${e.path}`)
     return { value: found }
   })
   on('fs.stat', (_, e) => {
-    seen.reads.push(e.path)
-    if (file(e.path) === undefined) throw new Error(`ENOENT: ${e.path}`)
-    return { value: { kind: 'file' as const, size: 0, mtimeMs: mtime(e.path), isLink: false } }
+    const path = posix(e.path)
+    seen.reads.push(path)
+    if (file(path) === undefined) throw new Error(`ENOENT: ${e.path}`)
+    return { value: { kind: 'file' as const, size: 0, mtimeMs: mtime(path), isLink: false } }
   })
   on('session.root', () => ({ value: root }))
   on('session.cwd', () => ({ value: o.cwd ?? root }))
@@ -182,14 +187,15 @@ function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Re
   // A $.clock.after timer fires at once on the fixed clock.
   if (o.clock !== false) on('clock.after', () => ({ value: undefined }))
   on('fs.read', (_, e) => {
-    seen.reads.push(e.path)
-    const text = file(e.path)
+    const path = posix(e.path)
+    seen.reads.push(path)
+    const text = file(path)
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: text }
   })
-  on('fs.exists', (_, e) => { seen.reads.push(e.path); return { value: file(e.path) !== undefined } })
+  on('fs.exists', (_, e) => { const path = posix(e.path); seen.reads.push(path); return { value: file(path) !== undefined } })
   // `seen.writes`: every path the dashboard wrote; the write lands in `files`.
-  on('fs.write', (_, e) => { seen.writes.push(e.path); files[e.path] = e.text; return { value: undefined } })
+  on('fs.write', (_, e) => { const path = posix(e.path); seen.writes.push(path); files[path] = e.text; return { value: undefined } })
   if (o.clock !== false) on('clock.now', () => ({ value: 1_000 }))
   on('ui.status', (_, e) => { seen.status.push(e.text); return { value: undefined } })
   on('ui.toast', (_, e) => { seen.toasts.push(e.text); return { value: undefined } })
@@ -211,6 +217,30 @@ const repo = (status: string) => ({
   '.tasks/export-csv/review/round-1/candidates.md': CANDIDATES,
   '.tasks/export-csv/review/round-1/survivors.md': SURVIVORS,
   '.tasks/export-csv/review/round-2/candidates.md': SURVIVORS,
+})
+
+// The engine hands a hook the path as its platform spells it: `/repo/x` on Linux and macOS, `C:\repo\x` on Windows.
+test('the test world reads Windows and POSIX paths alike', () => {
+  type Hook = (ctx: unknown, e: { path: string; text: string }) => { value: unknown }
+  const hooks: Record<string, Hook> = {}
+  const on = ((name: string, hook: Hook) => { hooks[name] = hook }) as unknown as On
+  const files: Record<string, string> = { '.tasks/.active': 'export-csv\n', '/repo/.claude/worktrees/a/.git': 'gitdir: /repo/.git/worktrees/a\n' }
+  const seen = world(on, files, '/repo', { '.tasks/.active': 7 })
+  const call = (name: string, path: string, text = '') => hooks[name]!(undefined, { path, text }).value
+  for (const path of ['/repo/.tasks/.active', 'C:\\repo\\.tasks\\.active', 'c:\\repo\\.tasks\\.active', 'C:/repo/.tasks/.active']) {
+    expect(call('fs.read', path)).toBe('export-csv\n')
+    expect(call('fs.exists', path)).toBe(true)
+    expect(call('fs.stat', path)).toMatchObject({ kind: 'file', mtimeMs: 7 })
+    expect(call('fs.list', path.slice(0, -'/.active'.length))).toMatchObject([{ name: '.active', kind: 'file', mtimeMs: 7 }])
+  }
+  expect(call('fs.read', 'C:\\repo\\.claude\\worktrees\\a\\.git')).toBe('gitdir: /repo/.git/worktrees/a\n')
+  expect(call('fs.exists', 'C:\\repo\\.tasks\\missing')).toBe(false)
+  expect(() => call('fs.read', 'C:\\repo\\.tasks\\missing')).toThrow('ENOENT')
+  // What it records is the POSIX form, whichever form it was asked in.
+  expect(new Set(seen.reads)).toEqual(new Set(['/repo/.tasks/.active', '/repo/.tasks', '/repo/.claude/worktrees/a/.git', '/repo/.tasks/missing']))
+  call('fs.write', 'C:\\repo\\.tasks\\export-csv\\files.tsv', 'M\tapp/report.py\n')
+  expect(seen.writes).toEqual(['/repo/.tasks/export-csv/files.tsv'])
+  expect(call('fs.read', '/repo/.tasks/export-csv/files.tsv')).toBe('M\tapp/report.py\n')
 })
 
 describe('task helpers', () => {
