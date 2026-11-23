@@ -129,12 +129,16 @@ A `HALTED` task keeps its own Next, since `/quorum:run` doesn't continue a halte
 **On a band that doesn't fit,** these give way in order:
 
 1. the run's words step down to the next shorter form;
-2. the shortest form is cut at the end (`▸▸ plan…`), down to its `▸▸` or `◆`;
-3. the words go;
-4. the slug and risk;
-5. the stage dots and the stage's name;
+2. the slug and risk go, and the forms are tried again, longest first;
+3. the stage dots and the stage's name go, and the forms are tried again;
+4. the shortest form is cut at the end (`▸▸ plan…`), down to its `▸▸` or `◆`;
+5. the words go;
 6. the problem's words are cut at the end, then go;
 7. last, the progress, the file count, and a review's text.
+
+The run's words outrank the slug and the stage dots, which go only when that lets a form fit whole, or when the row
+is too wide for them even with no words. So on a crowded band you may see `◆ waiting` with no slug beside it: the
+pane's Task card still names the task.
 
 For a stopped run the problem's words give way first, then the slug and risk, the stage dots, and the progress, file
 count and review text; `run stopped` and Next stay whole. The badge and the buttons always stay. The run's words and

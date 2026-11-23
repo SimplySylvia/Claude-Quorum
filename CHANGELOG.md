@@ -11,8 +11,8 @@ copy with `/plugin marketplace update`.
   run's words: `autopilot · next stop: plan approval` while it goes, and `autopilot · waiting for you: plan approval`
   in amber and bold while it waits on you, with shorter forms under 110 and under 90 columns (`auto · next: …`,
   `▸▸ …`; `waiting: …`, `◆ …`). A problem still comes first: beside one the words drop a size, to the short form
-  (`▸▸ …`, `◆ …`) under 110 columns. On a band that doesn't fit the words step down, then are cut, before anything
-  else gives way, and they never wrap onto a second row. Nothing of the run shows with no task on show or in a map session.
+  (`▸▸ …`, `◆ …`) under 110 columns. On a band that doesn't fit the words step down, then the slug and the stage
+  dots give way for a form that fits whole, and only then are the words cut; they never wrap onto a second row. Nothing of the run shows with no task on show or in a map session.
 - **The Run card.** During a run it's the first card of the task's pane: `Run · autopilot · since 14:02`, how the run
   was started (`started with --until review --yes`, or `stops only where you must decide`), and the next stop, what
   the run waits on, or why it stopped. The Now card draws no Next while the run goes or waits, and says

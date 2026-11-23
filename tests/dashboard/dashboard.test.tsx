@@ -7447,18 +7447,27 @@ test("the band never overflows during a run: the run's words are cut at the end"
   const room = (columns: number, row: { width: number; words: string }) => columns - row.width + cellWidth(row.words)
   const DOTS = /^[✓●◆✗○–]{6}/
 
-  // Waiting at 70 with the longest badge: the shortest form is cut at the end, and the rest is whole.
+  // Waiting at 70 with the longest badge: beside the stage dots and the stage's name (11) the shortest form (17)
+  // has 9 columns, so the dots give way and it is drawn whole.
   await to(inRun('DRAFT-AWAITING-VISUAL-SIGNOFF'), 'waiting')
   let row = await bandRow($, 70)
-  expect(room(70, row)).toBeLessThan(cellWidth('◆ mockup sign-off'))
+  expect(cellWidth('◆ mockup sign-off')).toBe(17)
+  expect(row.width + 2 + 11).toBeGreaterThan(70)
   expect(row.width).toBeLessThanOrEqual(70)
-  expect(row.words).toMatch(/^◆ .+…$/)
-  expect('◆ mockup sign-off'.startsWith(row.words.slice(0, -1))).toBe(true)
+  expect(row.texts).toEqual([' DRAFT-AWAITING-VISUAL-SIGNOFF ', '◆ mockup sign-off'])
+  expect(row.buttons).toEqual(['Dashboard'])
+  expect(await wordsHeld($, 70, row.words)).toBe(true)
+  // At 64 the form doesn't fit whole even without the dots (65), so they stay, and it is cut at the end to the 3
+  // columns left: the rest is whole.
+  row = await bandRow($, 64)
+  expect(room(64, row)).toBe(3)
+  expect(row.width).toBeLessThanOrEqual(64)
+  expect(row.words).toMatch(/^◆.*…$/)
   expect(row.texts[0]).toBe(' DRAFT-AWAITING-VISUAL-SIGNOFF ')
   expect(row.texts[1]).toMatch(DOTS)
   expect(row.texts.length).toBe(3)
   expect(row.buttons).toEqual(['Dashboard'])
-  expect(await wordsHeld($, 70, row.words)).toBe(true)
+  expect(await wordsHeld($, 64, row.words)).toBe(true)
 
   // ESCALATED at 70 with a problem: the problem is cut, and `run stopped` and Next are whole.
   await to(checksTask('ESCALATED', '1a2b3c4', STALE, { fail: [1, 2], pending: true }))
@@ -7483,21 +7492,42 @@ test("the band never overflows during a run: the run's words are cut at the end"
   expect(row.texts).toEqual([' BUILDING ', 'export-csv · MEDIUM', expect.stringMatching(/ Build$/), '12 files', row.words])
   expect(row.buttons).toEqual(['Dashboard'])
 
-  // Going at 120 with the long slug, progress and a file count: 11 columns, under the shortest form's 31, so it is
-  // cut at the end, and the rest of the row is whole.
+  // Going at 120 with the long slug, progress and a file count: beside the slug (37) the words have 11 columns,
+  // under the shortest form's 31, so the slug and risk give way and the forms are tried again: 50 columns, where
+  // the 90-to-109 form (41) is drawn whole. The dots stay.
   const reviewing = { ...long(noPending(inRounds([NOTHING_KEPT, null]))), [`.tasks/${LONG}/files.tsv`]: one }
   await to(reviewing)
   row = await bandRow($, 120)
-  expect(row.texts.slice(0, -1).map(cellWidth)).toEqual([11, 37, 17, 13, 6])
-  expect(room(120, row)).toBe(11)
+  expect(row.texts.slice(0, -1).map(cellWidth)).toEqual([11, 17, 13, 6])
+  expect(room(120, row)).toBe(50)
   expect(cellWidth('▸▸ PR drafted, then your review')).toBe(31)
   expect(row.width).toBeLessThanOrEqual(120)
-  expect(row.words).toBe('▸▸ PR draf…')
-  expect(row.texts.slice(0, -1)).toEqual([' IN_REVIEW ', `${LONG} · MEDIUM`, expect.stringMatching(/ Review 2\/3$/), expect.stringMatching(/^reviewers \d\/\d$/), '1 file'])
+  expect(row.words).toBe('auto · next: PR drafted, then your review')
+  expect(row.texts.slice(0, -1)).toEqual([' IN_REVIEW ', expect.stringMatching(/ Review 2\/3$/), expect.stringMatching(/^reviewers \d\/\d$/), '1 file'])
+  expect(row.buttons).toEqual(['Dashboard'])
+  // At 160 there is room for the slug beside the long form.
+  row = await bandRow($, 160)
+  expect(row.texts).toContain(`${LONG} · MEDIUM`)
+  expect(row.words).toBe('autopilot · next stop: PR drafted, then your review')
+
+  // Going at 120 with the long slug, check progress, a file count and a review beside the task: the row is wider
+  // than the band without any words, and no form fits whole even with the slug and the dots gone (25 columns, under
+  // the shortest form's 31). So the slug goes, since the row is too wide with it, the dots stay, and the shortest
+  // form is cut at the end to the 6 columns left; the rest of the row is whole.
+  const crowded = { ...long(noPending(checksTask('IN_REVIEW', '1a2b3c4', AT_HEAD))), [`.tasks/${LONG}/files.tsv`]: one, '.tasks/review-pr-12/state.md': reviewState('REVIEWING', 'HIGH') }
+  await to(crowded)
+  row = await bandRow($, 120)
+  expect(row.texts.slice(0, -1).map(cellWidth)).toEqual([11, 17, 28, 6, 27])
+  expect(room(120, row)).toBe(6)
+  expect(room(120, row) + 2 + 17).toBeLessThan(31)
+  expect(row.width).toBeLessThanOrEqual(120)
+  expect(row.words).toBe('▸▸ PR…')
+  expect(row.texts.slice(0, -1)).toEqual([' IN_REVIEW ', expect.stringMatching(/ Review 2\/3$/), expect.stringMatching(/^reviewers \d\/\d · checks 24\/24$/), '1 file', expect.stringMatching(/^review-pr-12: reviewers \d\/\d$/)])
   expect(row.buttons).toEqual(['Dashboard'])
 
-  // The same task at 100, where the progress and the file count aren't drawn: 14 columns, under the 90-to-109
-  // form's 24, and the under-90 form (14) is drawn whole.
+  // The first task at 100, where the progress and the file count aren't drawn: 14 columns, under the 90-to-109
+  // form's 24, and the under-90 form (14) is drawn whole, beside the slug.
+  await to(reviewing)
   row = await bandRow($, 100)
   expect(row.texts.slice(0, -1).map(cellWidth)).toEqual([11, 37, 17])
   expect(room(100, row)).toBe(14)
@@ -7505,7 +7535,8 @@ test("the band never overflows during a run: the run's words are cut at the end"
   expect(row.words).toBe('▸▸ your review')
   expect(row.width).toBeLessThanOrEqual(100)
 
-  // Going at 110 with three problems: the words, the slug and the dots have gone, then the problems are cut; the
+  // Going at 110 with three problems: no form fits whole even without the slug and the dots, and the row is too
+  // wide without any words, so the slug and the dots go, no words are drawn, and then the problems are cut; the
   // progress and the file count are whole.
   const three = { ...long(checksTask('IN_REVIEW', '1a2b3c4', STALE, { fail: [1], pending: true })), [`.tasks/${LONG}/files.tsv`]: one }
   await to(three)
@@ -7601,7 +7632,7 @@ test("the band never overflows during a run: the run's words are cut at the end"
   // No forms (a going run with no next stop): no words, and nothing thrown, at any width.
   for (const columns of [0, 1, 20, 120]) expect(fitRun(columns, base, [], false).words).toBe('')
   expect(fitRun(120, base, [], true).words).toBe('')
-  // The extras go last: on a band too small for them once the words, the slug, the dots and the problem have gone.
+  // The extras go last: on a band too small for them once the slug, the dots, the words and the problem have gone.
   const full = { badge: ' IN_REVIEW ', id: 'export-csv · MEDIUM', rail: '✓✓✓●○○ Review 2/3', extras: ['reviewers 1/3', '1 file'], problem: '1 pending', buttons: ['Dashboard'] }
   expect(fitRun(30, full, ['▸▸ your review'], false)).toEqual({ words: '', problem: '', hasId: false, hasRail: false, hasExtras: false })
   // With the columns the badge, the extras and Dashboard need, they stay.
@@ -7618,8 +7649,28 @@ test("the band never overflows during a run: the run's words are cut at the end"
   expect(11 + 2 + 17 + 2 + 11 + 2 + (6 + 4) + 1 + (9 + 4)).toBe(69)
   // Three columns more and the problem is back, cut, on a row of exactly 75.
   expect(fitRun(75, seenRow, ['run stopped'], true).problem).toBe('✗ 1…')
-  // The same band while the run goes, beside the problem: the under-90 form, cut to the 6 columns left.
-  expect(fitRun(72, { ...seenRow, badge: ' IN_REVIEW ', buttons: ['Dashboard'] }, ['▸▸ your review'], false)).toEqual({ words: '▸▸ yo…', problem: '✗ 1 check failing', hasId: true, hasRail: true, hasExtras: true })
+  // The same band while the run goes, beside the problem: the under-90 form has 6 columns beside the dots, so the
+  // dots give way and it is drawn whole.
+  const goingRow = { ...seenRow, badge: ' IN_REVIEW ', buttons: ['Dashboard'] }
+  expect(fitRun(72, goingRow, ['▸▸ your review'], false)).toEqual({ words: '▸▸ your review', problem: '✗ 1 check failing', hasId: true, hasRail: false, hasExtras: true })
+  // At 80 the form fits beside the dots, and they stay.
+  expect(fitRun(80, goingRow, ['▸▸ your review'], false)).toEqual({ words: '▸▸ your review', problem: '✗ 1 check failing', hasId: true, hasRail: true, hasExtras: true })
+  expect(fitRun(79, goingRow, ['▸▸ your review'], false).hasRail).toBe(false)
+  // The row the blind test saw with no words on a 140-column band: 148 columns with the slug and no words. No form
+  // fits whole beside the slug, so the slug and risk give way and the forms are tried again: 11 columns for the
+  // words. Waiting, the under-90 form fits whole. Going, none does even without the dots (30 columns for 31), so
+  // the dots stay and the shortest form is cut at the end.
+  const blindRow = { badge: ' IN_REVIEW ', id: 'csv-export · MEDIUM', rail: '✓✓✓●○○ Review 2/3', extras: ['reviewers 2/4 · checks stale', '3 files'], problem: '✗ 1 check failing · proof older than HEAD', buttons: ['Dashboard'] }
+  expect([blindRow.badge, blindRow.id, blindRow.rail, ...blindRow.extras, blindRow.problem].map(cellWidth)).toEqual([11, 19, 17, 28, 7, 41])
+  expect(11 + 19 + 17 + 28 + 7 + 41 + (9 + 4) + 6 * 2).toBe(148)
+  const blindWaits = runForms(runView(marker, 'IN_REVIEW', 'MEDIUM', { asking: 0, ended: 'answer', isIdle: true }), 140, true)?.forms ?? []
+  const blindGoes = runForms(runView(marker, 'IN_REVIEW', 'MEDIUM', { asking: 0, ended: null, isIdle: false }), 140, true)?.forms ?? []
+  expect(blindWaits).toEqual(['waiting for you', '◆ waiting'])
+  expect(blindGoes).toEqual(['auto · next: PR drafted, then your review', '▸▸ PR drafted, then your review'])
+  expect(fitRun(140, blindRow, blindWaits, false)).toEqual({ words: '◆ waiting', problem: blindRow.problem, hasId: false, hasRail: true, hasExtras: true })
+  expect(fitRun(140, blindRow, blindGoes, false)).toEqual({ words: '▸▸ PR draf…', problem: blindRow.problem, hasId: false, hasRail: true, hasExtras: true })
+  // With room for a form beside the slug, the slug stays.
+  expect(fitRun(159, blindRow, blindWaits, false)).toEqual({ words: '◆ waiting', problem: blindRow.problem, hasId: true, hasRail: true, hasExtras: true })
 })
 
 test('a run changes no toast and raises no notification', async ($, on) => {

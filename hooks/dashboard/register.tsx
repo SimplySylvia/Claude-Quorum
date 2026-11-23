@@ -922,9 +922,10 @@ export const register: Register = (on, options) => {
 
   // The band: one row, most important first. A status badge colored by whose move it is, the task, a dot per stage
   // and the current one by name, the round's progress, then Next (it fills the prompt) and Dashboard. During a
-  // /quorum:run the run's words take Next's place; on a row that doesn't fit, the words, the slug, the stage dots, the
-  // problem and the progress give way in that order. For a stopped run the problem gives way first, and `run stopped`
-  // and Next stay whole.
+  // /quorum:run the run's words take Next's place; on a row that doesn't fit, the words step down a form, then the
+  // slug and the stage dots give way for a form that fits whole, then the words are cut or go, and the problem and
+  // the progress give way in that order. For a stopped run the problem gives way first, and `run stopped` and Next
+  // stay whole.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const t = await read($, task)
     const r = liveReview(await read($, reviews))

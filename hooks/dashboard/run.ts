@@ -143,10 +143,12 @@ export type RunRow = { badge: string; id: string; rail: string; extras: string[]
 // Fit the row and the run's words (`forms`, longest first; [] for none) to `columns`: what is drawn of the words and
 // of the problem, and whether the slug, the stage dots and the extras stay. A text counts as its cells, a button as
 // its label plus BUTTON_FRAME, with 1 between buttons and 2 between items (the buttons are one item). Each step is
-// taken only while the row is still too wide. Going or waiting: the first form that fits whole, else the last form
-// cut at the end down to its first word, else no words; then the slug goes, then the dots, then the problem is cut,
-// and last the extras go. Stopped: the words stay whole, and the problem is cut first. The badge and the buttons
-// always stay, and words that were dropped aren't tried again.
+// taken only while the row is still too wide. Going or waiting, the words outrank the slug and the dots: the first
+// form that fits whole, tried beside the whole row, then without the slug, then without the dots too. When none
+// fits even so, the slug and then the dots go only while the row is too wide without any words, and the last form
+// is cut at the end down to its first word, else no words; then the problem is cut, and last the extras go.
+// Stopped: the words stay whole, the problem is cut first, then the slug goes, the dots, and the extras. The badge
+// and the buttons always stay.
 export function fitRun(columns: number, row: RunRow, forms: string[], isStopped: boolean): { words: string; problem: string; hasId: boolean; hasRail: boolean; hasExtras: boolean } {
   const buttons = row.buttons.reduce((n, label) => n + cellWidth(label) + BUTTON_FRAME, 0) + Math.max(0, row.buttons.length - 1)
   const fit = { words: '', problem: row.problem, hasId: true, hasRail: true, hasExtras: true }
@@ -167,10 +169,26 @@ export function fitRun(columns: number, row: RunRow, forms: string[], isStopped:
     fit.words = forms[0] ?? ''
     cutProblem()
   } else if (forms.length > 0) {
-    const last = forms[forms.length - 1] ?? ''
-    const left = room('', fit.problem) - 2
-    fit.words = forms.find(form => room(form, fit.problem) >= 0)
-      ?? (left >= cellWidth(last.split(' ')[0] ?? '') + 1 ? cutEnd(last, left) : '')
+    const whole = () => forms.find(form => room(form, fit.problem) >= 0) ?? ''
+    fit.words = whole()
+    if (!fit.words && row.id) {
+      fit.hasId = false
+      fit.words = whole()
+    }
+    if (!fit.words && row.rail) {
+      fit.hasRail = false
+      fit.words = whole()
+    }
+    if (!fit.words) {
+      // No form fits whole, so the slug and the dots go only for a row too wide without the words.
+      fit.hasId = true
+      fit.hasRail = true
+      if (isWide()) fit.hasId = false
+      if (isWide()) fit.hasRail = false
+      const last = forms[forms.length - 1] ?? ''
+      const left = room('', fit.problem) - 2
+      if (left >= cellWidth(last.split(' ')[0] ?? '') + 1) fit.words = cutEnd(last, left)
+    }
   }
   if (isWide()) fit.hasId = false
   if (isWide()) fit.hasRail = false
