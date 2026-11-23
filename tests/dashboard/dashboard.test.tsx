@@ -8221,6 +8221,87 @@ test('the marker going after a halt or an escalation is silent', async ($, on) =
   expect(seen.toasts).toEqual([])
 })
 
+test('a turn that dies in a run is announced, an interrupt is not', async ($, on) => {
+  const ERROR = 'export-csv: run stopped · API error · /quorum:run continues it'
+  const REFUSED = 'export-csv: run stopped · refused · /quorum:run continues it'
+  const files = inRun('BUILDING')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  // What a turn's end announces, its re-read included: a dead turn's end is told once.
+  const ends = async (reason: 'answer' | 'error' | 'refusal' | 'aborted', agentId?: string) => {
+    forget(seen)
+    await endTurn($, reason, agentId)
+    await clock.settle()
+    await clock.advance(REREAD_MS)
+    await clock.settle()
+    return [...seen.notified]
+  }
+  const again = async () => {
+    await readAgain($)
+    await clock.settle()
+  }
+
+  // An API error and a refusal, each with the run's task's slug.
+  await startTurn($)
+  expect(await ends('error')).toEqual([ERROR])
+  await startTurn($)
+  expect(await ends('refusal')).toEqual([REFUSED])
+  // An interrupt, and a sub-agent's turn that dies: nothing.
+  await startTurn($)
+  expect(await ends('aborted')).toEqual([])
+  await startTurn($)
+  await startTurn($, 'b1')
+  expect(await ends('error', 'b1')).toEqual([])
+  expect(await ends('refusal', 'b1')).toEqual([])
+
+  // During the quiet start too: right after the run was entered, and entered again over a marker that never went.
+  delete files[RUN_MARKER]
+  await again()
+  files[RUN_MARKER] = RUN_SINCE
+  await enterRun($)
+  expect(await ends('error')).toEqual([ERROR])
+  await enterRun($)
+  expect(await ends('refusal')).toEqual([REFUSED])
+
+  // The run's task no longer on show: its slug still.
+  files[STATE_MD] = calm('PLANNING')
+  await $.session.start(START)
+  files['.git/HEAD'] = ON_MAIN
+  await again()
+  await startTurn($)
+  expect(await ends('error')).toEqual([ERROR])
+  // No task on show and none shown before: no prefix.
+  await $.session.start(START)
+  await startTurn($)
+  expect(await ends('error')).toEqual(['run stopped · API error · /quorum:run continues it'])
+  expect(await ends('refusal')).toEqual(['run stopped · refused · /quorum:run continues it'])
+
+  // A task that is HALTED or ESCALATED: its own message was the announcement, and the dead turn adds none.
+  files['.git/HEAD'] = ON_TASK
+  for (const [status, text] of [['HALTED', HALTED_TEXT], ['ESCALATED', ESCALATED_TEXT]] as const) {
+    files[STATE_MD] = calm('BUILDING')
+    await $.session.start(START)
+    await startTurn($)
+    forget(seen)
+    files[STATE_MD] = calm(status)
+    await again()
+    expect(seen.notified).toEqual([text])
+    expect(await ends('error')).toEqual([])
+    expect(await ends('refusal')).toEqual([])
+    // Found at the dying turn's own refresh: the halt or the escalation alone.
+    files[STATE_MD] = calm('BUILDING')
+    await again()
+    await startTurn($)
+    files[STATE_MD] = calm(status)
+    expect(await ends('error')).toEqual([text])
+    // A session that starts with the task already stuck: no edge, and still nothing for the dead turn.
+    await $.session.start(START)
+    await startTurn($)
+    expect(await ends('error')).toEqual([])
+  }
+  expect(seen.toasts).toEqual([])
+})
+
 test("the run's end is announced with the task's status", async ($, on) => {
   const ENDED = 'export-csv: run ended · AWAITING-HUMAN'
   const files = inRun('AWAITING-HUMAN')
@@ -8323,6 +8404,73 @@ test("the run's end is announced with the task's status", async ($, on) => {
   await $.session.start(START)
   await leave()
   expect(seen.notified).toEqual(['run ended'])
+  expect(seen.toasts).toEqual([])
+})
+
+test('one moment gets one message', async ($, on) => {
+  const files = inRun('BUILDING')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  const reread = async () => {
+    await clock.settle()
+    await clock.advance(REREAD_MS)
+    await clock.settle()
+  }
+  const back = async (status: string) => {
+    files[STATE_MD] = calm(status)
+    files[RUN_MARKER] = RUN_SINCE
+    await $.session.start(START)
+    await clock.settle()
+    forget(seen)
+    await startTurn($)
+  }
+
+  // A turn that dies at the refresh that finds the marker gone: the run's end only, and the re-read adds nothing.
+  await startTurn($)
+  delete files[RUN_MARKER]
+  await endTurn($, 'error')
+  await clock.settle()
+  expect(seen.notified).toEqual(['export-csv: run ended · BUILDING'])
+  await reread()
+  expect(seen.notified).toEqual(['export-csv: run ended · BUILDING'])
+
+  // The same for a refusal.
+  await back('BUILDING')
+  delete files[RUN_MARKER]
+  await endTurn($, 'refusal')
+  await reread()
+  expect(seen.notified).toEqual(['export-csv: run ended · BUILDING'])
+
+  // A turn that ends on a question as its run ends: no waiting message at the re-read, whether the turn's end or
+  // the re-read finds the marker gone.
+  await back('PLANNING')
+  delete files[RUN_MARKER]
+  await endTurn($)
+  await reread()
+  expect(seen.notified).toEqual(['export-csv: run ended · PLANNING'])
+  await back('PLANNING')
+  await endTurn($)
+  await clock.settle()
+  expect(seen.notified).toEqual([])
+  delete files[RUN_MARKER]
+  await reread()
+  expect(seen.notified).toEqual(['export-csv: run ended · PLANNING'])
+
+  // One refresh that finds both the status changed to HALTED and the marker gone: the halt only.
+  await back('IN_REVIEW')
+  files[STATE_MD] = calm('HALTED')
+  delete files[RUN_MARKER]
+  await readAgain($)
+  await clock.settle()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+
+  // The same found by a dying turn's refresh: still the halt only.
+  await back('IN_REVIEW')
+  files[STATE_MD] = calm('HALTED')
+  delete files[RUN_MARKER]
+  await endTurn($, 'error')
+  await reread()
+  expect(seen.notified).toEqual([HALTED_TEXT])
   expect(seen.toasts).toEqual([])
 })
 

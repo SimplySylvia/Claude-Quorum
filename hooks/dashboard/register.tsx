@@ -662,8 +662,9 @@ const seconds = (a: QuorumAgent, now: number) => `${Math.max(0, Math.round(((a.e
 // Re-read the task, the reviews, and the other tasks, and redraw. Announce a run's halt, escalation and end, and
 // toast the other status changes worth interrupting for. The task's and the marker's writes and that decision run
 // one refresh at a time (inOrder): each refresh decides from what the one before left in both atoms, so one change
-// is one refresh's to tell. `o.isStart`: the read at a session start; `o.isEnter`: the read after `quorum-run enter`.
-async function refresh($: EngineInterface, maxRounds: number, forcePr = false, o: { isStart?: true; isEnter?: true } = {}): Promise<Snapshot | null> {
+// is one refresh's to tell. `o.isStart`: the read at a session start; `o.isEnter`: the read after `quorum-run enter`;
+// `o.died`: the read after a main-session turn that ended on an API error or a refusal, announced here in a run.
+async function refresh($: EngineInterface, maxRounds: number, forcePr = false, o: { isStart?: true; isEnter?: true; died?: 'error' | 'refusal' } = {}): Promise<Snapshot | null> {
   const before = await read($, task)
   const after = await snapshot($, maxRounds, before)
   if (edit && (!after || after.slug !== edit.slug || !EDIT_STATUSES.includes(after.status))) clearEdit()
@@ -714,6 +715,9 @@ async function refresh($: EngineInterface, maxRounds: number, forcePr = false, o
         $.ui.toast(`${after.slug}: ${TOASTS[after.status]}`)
       }
     }
+    // A turn that died in a run, the quiet start included. A marker found gone at this read gives the run's end
+    // alone, and a halt or an escalation its own message alone.
+    if (o.died && marker && !(mine && isStuck(mine.status))) announce($, stoppedText(mine?.slug ?? '', o.died))
     // The run's end. A halt or an escalation was announced already: the status says so, and nothing is remembered.
     if (ran && !marker) {
       if (!(mine && isStuck(mine.status))) announce($, endedText(mine?.slug ?? '', mine?.status ?? ''))
@@ -1011,7 +1015,7 @@ export const register: Register = (on, options) => {
     } else {
       // Before the refresh, which awaits: a turn that starts while the task is read resets what this wrote.
       noteTurnEnd($, e.reason, turn)
-      await refresh($, maxRounds)
+      await refresh($, maxRounds, false, e.reason === 'error' || e.reason === 'refusal' ? { died: e.reason } : {})
       await setReread($, turn, maxRounds)
     }
     return done
