@@ -213,8 +213,8 @@ is announced once, with the task's slug in front:
 
 | The stop | The message |
 |---|---|
-| The run asks you a question at a named gate | `csv-export: waiting for you · plan approval`, or `… · mockup sign-off` |
-| The run asks you anything else, or its turn ends and it's your move | `csv-export: the run is waiting for you` |
+| The run asks you a question, or its turn ends and it's your move, while a named gate is open | `csv-export: waiting for you · plan approval`, or `… · mockup sign-off` |
+| The same with no gate open | `csv-export: the run is waiting for you` |
 | The task halts | `csv-export: run stopped · HALTED · see the post-mortem` |
 | The task escalates | `csv-export: run stopped · ESCALATED · fix the checks, then /quorum:run` |
 | The run's turn dies on an API error | `csv-export: run stopped · API error · /quorum:run continues it` |
@@ -222,9 +222,9 @@ is announced once, with the task's slug in front:
 | The run ends | `csv-export: run ended · AWAITING-HUMAN`, with the task's status |
 
 - **A question** is announced when its dialog opens, once for each dialog, and names the gate of the task on show.
-  A turn that ends with the run still there, as on a question in plain text, is announced when the run starts to
-  read as waiting, about half a second after the turn's end, unless a new turn has started or the run has ended by
-  then.
+  A turn that ends with the run still there, as on a question in plain text, is announced with the same words when
+  the run starts to read as waiting, about half a second after the turn's end, unless a new turn has started or the
+  run has ended by then.
 - **A halt or an escalation** is announced when the status of the task on show changes to `HALTED` or `ESCALATED`,
   each time it does, in place of the status toast. It's the only message for that moment: no waiting message
   follows it at the turn's end, and none for the dead turn or the run's end while the task is still `HALTED` or

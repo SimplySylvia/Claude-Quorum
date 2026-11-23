@@ -7921,6 +7921,23 @@ test('a question dialog in a run is announced once, with its gate', async ($, on
   await $.session.start(START)
   await startTurn($)
   expect(await dialog($, seen, clock, held)).toEqual(['the run is waiting for you'])
+  // A task that went off show during the quiet start is not the run's task once the quiet start has ended either,
+  // whether it was the run's task before the run was entered again or is first read at the entering read: the run
+  // has none until one comes on show.
+  files['.git/HEAD'] = ON_TASK
+  await readAgain($)
+  expect(await dialog($, seen, clock, held)).toEqual([WAITING_PLAN])
+  await enterRun($)
+  files['.git/HEAD'] = ON_MAIN
+  await readAgain($)
+  await startTurn($)
+  expect(await dialog($, seen, clock, held)).toEqual(['the run is waiting for you'])
+  files['.git/HEAD'] = ON_TASK
+  await readAgain($)
+  expect(await dialog($, seen, clock, held)).toEqual([WAITING_PLAN])
+  files['.git/HEAD'] = ON_MAIN
+  await $.session.start(START)
+  await startTurn($)
   // Under another session id with no read since (a /clear): the marker last read is another session's.
   seen.session = 'sess-b'
   expect(await dialog($, seen, clock, held)).toEqual([])
@@ -8047,6 +8064,24 @@ test('the opening questions of a run are not announced', async ($, on) => {
   await readAgain($)
   expect(await asked()).toEqual([WAITING_PLAN])
 
+  // Another task replacing the one on show ends it, in the same status.
+  files['.tasks/quote-cells/state.md'] = calm('PLANNING').replace('slug: export-csv', 'slug: quote-cells')
+  await enter()
+  expect(await asked()).toEqual([])
+  files['.git/HEAD'] = 'ref: refs/heads/feat/quote-cells\n'
+  await readAgain($)
+  expect(await asked()).toEqual(['quote-cells: waiting for you · plan approval'])
+  files['.git/HEAD'] = ON_TASK
+  delete files['.tasks/quote-cells/state.md']
+  // A change that the read entering the run finds was made before the run: it doesn't end the quiet start.
+  await enter(async engine => {
+    files[STATE_MD] = calm('BUILDING')
+    return enterRun(engine)
+  })
+  expect(await asked()).toEqual([])
+  files[STATE_MD] = calm('PLANNING')
+  await readAgain($)
+
   // `quorum-run enter` over a marker that never went (a run continued) quiets again.
   await startTurn($)
   expect(await asked()).toEqual([WAITING_PLAN])
@@ -8102,6 +8137,17 @@ test('a halt or an escalation in a run is announced once, with no status toast',
   const md = { text: calm('IN_REVIEW') }
   const files = inRun('IN_REVIEW')
   Object.defineProperty(files, STATE_MD, { enumerable: true, get: () => { const act = atRead.next; atRead.next = null; act?.(); return md.text } })
+  // Once armed, the next write of the `run` atom waits for `hold.release`: the test's way to let a second refresh
+  // reach its own writes while the first is between its two.
+  const hold: { isArmed: boolean; release: (() => void) | null } = { isArmed: false, release: null }
+  const register = on as unknown as (event: string, matcher: unknown, hook: unknown) => void
+  register('state.set', { plugin: 'quorum', key: 'run' }, async (_: unknown, e: unknown, next: (e: unknown) => Promise<unknown>) => {
+    if (hold.isArmed) {
+      hold.isArmed = false
+      await new Promise<void>(resolve => { hold.release = resolve })
+    }
+    return next(e)
+  })
   const { seen, clock } = runWorld(on, files)
   await $.session.start(START)
   const to = async (status: string) => {
@@ -8166,6 +8212,45 @@ test('a halt or an escalation in a run is announced once, with no status toast',
   await $.session.start(START)
   await clock.settle()
   expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+
+  // A halt found at the read that first finds the marker: in a run at this read, though not at the one before.
+  await to('IN_REVIEW')
+  forget(seen)
+  md.text = calm('HALTED')
+  files[RUN_MARKER] = RUN_SINCE
+  await readAgain($)
+  await clock.settle()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+
+  // Two overlapping refreshes that find the halt and the marker gone, the first held between its write of the
+  // task and its write of the marker until the second has gone as far as it can: the second waits its turn, so
+  // the first still reads the marker of the read before, and the halt is announced, with no status toast.
+  await to('IN_REVIEW')
+  forget(seen)
+  md.text = calm('HALTED')
+  delete files[RUN_MARKER]
+  hold.isArmed = true
+  const both = Promise.all([readAgain($), readAgain($)])
+  await clock.settle()
+  expect(hold.release).not.toBeNull()
+  hold.release?.()
+  await both
+  await clock.settle()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+
+  // Another task that comes on show already HALTED, in place of this one: another slug is no edge, so nothing is
+  // announced and no toast is raised.
+  files[RUN_MARKER] = RUN_SINCE
+  await to('IN_REVIEW')
+  forget(seen)
+  files['.tasks/quote-cells/state.md'] = calm('HALTED').replace('slug: export-csv', 'slug: quote-cells')
+  files['.git/HEAD'] = 'ref: refs/heads/feat/quote-cells\n'
+  await readAgain($)
+  await clock.settle()
+  expect(seen.notified).toEqual([])
   expect(seen.toasts).toEqual([])
 })
 
@@ -8349,6 +8434,35 @@ test("the run's end is announced with the task's status", async ($, on) => {
   await again()
   await leave()
   expect(seen.notified).toEqual(['run ended'])
+
+  // The same once the quiet start has ended (the next turn started): still no run's task, though the task was the
+  // run's before the run was entered again over its marker.
+  forget(seen)
+  files['.git/HEAD'] = ON_TASK
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  await enterRun($)
+  files['.git/HEAD'] = ON_MAIN
+  await again()
+  await startTurn($)
+  await leave()
+  expect(seen.notified).toEqual(['run ended'])
+
+  // A task read on show only during the quiet start and taken off show after it ended (a turn started, with no
+  // read between) is the run's task, with the status it was last read with: found off show at a read of its own,
+  // and at the read that finds the marker gone.
+  for (const isOneRead of [false, true]) {
+    forget(seen)
+    files['.git/HEAD'] = ON_TASK
+    await again()
+    files[RUN_MARKER] = RUN_SINCE
+    await enterRun($)
+    await startTurn($)
+    files['.git/HEAD'] = ON_MAIN
+    if (!isOneRead) await again()
+    await leave()
+    expect({ isOneRead, notified: seen.notified }).toEqual({ isOneRead, notified: [ENDED] })
+  }
 
   // A run that begins and ends inside its quiet start.
   forget(seen)
