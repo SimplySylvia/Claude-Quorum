@@ -6861,6 +6861,7 @@ test('nothing of the run is drawn with no task or in a map session', async ($, o
   expect((await runWords(band)).map(x => x.text)).toEqual(['auto · next: end of review'])
   await expectNoNext(band)
   await band.unmount()
+  expect((await runCard($, PANE.props.bodyColumns)).isDrawn).toBe(true)
 })
 
 // ---- A run's turn: waiting, stopped by a dead turn, and the re-read
@@ -7473,4 +7474,304 @@ test('a run changes no toast and raises no notification', async ($, on) => {
   expect(await changes()).toEqual(outside)
   expect((await bandRow($, 140)).words).toBe('run stopped')
   expect(notified).toBe(0)
+})
+
+// ---- The Run card, and the Now card during a run
+
+// The pane at `columns`, docked or above the prompt.
+const paneAt = (columns: number, placement: 'dock' | 'inline' = 'dock') => ({ ...ON_TERMINAL, props: { ...PANE.props, bodyColumns: columns, placement } }) as const
+// The pane's cards in drawn order, the Run card among them: the keyed Boxes `run`, `map-card`, `header` and `now`.
+const cardsWithRun = async (d: Drawn) => (await d.findAll({ type: 'Box' })).map(b => b.key ?? '').filter(k => ['run', 'map-card', 'header', 'now'].includes(k))
+// The Run card as the pane draws it: its border, every drawn line (`run:<row>-<line>`), its rows (a wrapped row's
+// lines joined by a space), the cards' order, and the look of the first Text that reads exactly `text`.
+async function runCard($: Engine, columns = 44, placement: 'dock' | 'inline' = 'dock') {
+  const d = await $.ui.mount(paneAt(columns, placement))
+  const card = await d.find({ type: 'Box', key: 'run' })
+  const lines = (await d.findAll({ type: 'Box' })).filter(b => /^run:\d-\d+$/.test(b.key ?? ''))
+  const rows: string[] = []
+  for (const l of lines) {
+    const n = Number((l.key ?? '')[4])
+    rows[n] = rows[n] === undefined ? l.text : `${rows[n]} ${l.text}`
+  }
+  const texts = await d.findAll({ type: 'Text' })
+  const order = await cardsWithRun(d)
+  await d.unmount()
+  const look = (text: string) => {
+    const props = texts.find(x => x.text === text)?.props
+    return { color: props?.color, bold: props?.bold === true, dim: props?.dimColor === true }
+  }
+  return { isDrawn: card !== undefined, border: card?.props.borderColor, lines: lines.map(l => l.text), rows, order, look }
+}
+const CONTINUES = '/quorum:run continues it'
+
+test('the Run card sits on top of the pane and says how the run was started', async ($, on) => {
+  const held = heldQuestions(on)
+  const files = inRun('BUILDING', `${RUN_SINCE}until review\nyes\n`)
+  const { clock } = runWorld(on, files)
+  on('process.run', () => { throw new Error('quorum-map: command not found') })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  // The card at a 44-column pane (40 cells inside the border and padding), each drawn line measured.
+  let measured = 0
+  const card = async (columns = 44, placement: 'dock' | 'inline' = 'dock') => {
+    const c = await runCard($, columns, placement)
+    for (const line of c.lines) {
+      measured++
+      expect(cellWidth(line)).toBeLessThanOrEqual(columns - 4)
+    }
+    return c
+  }
+  const SINCE = 'Run · autopilot · since 09:41'
+  const STOPPED = 'Run · stopped · since 09:41'
+  const NO_FLAGS = 'stops only where you must decide'
+
+  // Going, with both flags: the three rows, the default border, and first in both placements.
+  let c = await card()
+  expect(c.rows).toEqual([SINCE, 'started with --until review --yes', 'next stop: end of review'])
+  expect(c.border).toBe('subtle')
+  expect(c.order).toEqual(['run', 'header', 'now'])
+  expect((await card(44, 'inline')).order).toEqual(['run', 'header', 'now'])
+  // `Run · ` is bold, the second row dim, and the third in the going band's color.
+  expect(c.look('Run · ')).toMatchObject({ bold: true })
+  expect(c.look('started with --until review --yes')).toMatchObject({ dim: true })
+  expect(c.look('next stop: end of review')).toEqual({ color: 'claude', bold: false, dim: false })
+
+  // One flag, then none: only the flags given.
+  await reload($, files, inRun('PLANNING', `${RUN_SINCE}until plan\n`))
+  expect((await card()).rows).toEqual([SINCE, 'started with --until plan', 'next stop: plan approval'])
+  await reload($, files, inRun('BUILDING', `${RUN_SINCE}yes\n`))
+  // The last stop's long name, at any pane width.
+  expect((await card()).rows).toEqual([SINCE, 'started with --yes', 'next stop: PR drafted, then your review'])
+  await reload($, files, inRun('BUILDING'))
+  expect((await card()).rows).toEqual([SINCE, NO_FLAGS, 'next stop: PR drafted, then your review'])
+  // A start time that doesn't read, and an empty marker: no `· since`.
+  await reload($, files, inRun('BUILDING', 'yesterday\nyes\n'))
+  expect((await card()).rows).toEqual(['Run · autopilot', 'started with --yes', 'next stop: PR drafted, then your review'])
+  await reload($, files, inRun('BUILDING', ''))
+  expect((await card()).rows).toEqual(['Run · autopilot', NO_FLAGS, 'next stop: PR drafted, then your review'])
+  // A going run with no next stop (a status outside the table): two rows.
+  await reload($, files, inRun('DRAFT'))
+  c = await card()
+  expect(c.rows).toEqual([SINCE, NO_FLAGS])
+  expect(c.border).toBe('subtle')
+
+  // Waiting: the gate open now, or the generic words; amber and bold, with an amber border.
+  for (const [status, words] of [['PLANNING', 'waiting for you: plan approval'], ['DRAFT-AWAITING-VISUAL-SIGNOFF', 'waiting for you: mockup sign-off'], ['BUILDING', 'waiting for you']] as const) {
+    await reload($, files, inRun(status))
+    const asked = ask($)
+    await clock.settle()
+    c = await card()
+    expect(c.rows).toEqual([SINCE, NO_FLAGS, words])
+    expect(c.border).toBe('warning')
+    expect(c.look(words)).toEqual({ color: 'warning', bold: true, dim: false })
+    held.answer()
+    await asked
+  }
+
+  // Stopped by a dead turn: why, and what continues it. Red, and amber for an interrupt.
+  for (const [reason, why, color] of [['error', 'API error', 'error'], ['refusal', 'refused', 'error'], ['aborted', 'interrupted', 'warning']] as const) {
+    await endTurn($, reason)
+    c = await card()
+    expect(c.rows).toEqual([STOPPED, NO_FLAGS, `${why} · ${CONTINUES}`])
+    expect(c.border).toBe(color)
+    expect(c.look(`${why} · ${CONTINUES}`)).toEqual({ color, bold: false, dim: false })
+    expect(c.look('Run · ')).toMatchObject({ bold: true })
+    await startTurn($)
+  }
+  // Stopped on the status: ESCALATED is continued by /quorum:run, HALTED points at the post-mortem.
+  await reload($, files, inRun('ESCALATED', `${RUN_SINCE}until blind\nyes\n`))
+  c = await card()
+  expect(c.rows).toEqual([STOPPED, 'started with --until blind --yes', `ESCALATED · ${CONTINUES}`])
+  expect(c.border).toBe('error')
+  await reload($, files, inRun('HALTED', ''))
+  c = await card()
+  expect(c.rows).toEqual(['Run · stopped', NO_FLAGS, 'HALTED · see the post-mortem'])
+  expect(c.border).toBe('error')
+  expect(c.look('HALTED · see the post-mortem')).toEqual({ color: 'error', bold: false, dim: false })
+
+  // A narrower pane wraps the rows, each line within the card, and the words are the same.
+  await reload($, files, inRun('BUILDING', `${RUN_SINCE}until review\nyes\n`))
+  await endTurn($, 'aborted')
+  c = await card(30)
+  expect(c.rows).toEqual([STOPPED, 'started with --until review --yes', `interrupted · ${CONTINUES}`])
+  expect(c.lines.length).toBeGreaterThan(3)
+  await startTurn($)
+
+  // On a map's task the Run card is still first: above the Map card docked, above the Now card over the prompt.
+  await reload($, files, { ...onMap('BUILDING'), [RUN_MARKER]: RUN_SINCE })
+  expect((await card()).order).toEqual(['run', 'map-card', 'header', 'now'])
+  expect((await card(44, 'inline')).order).toEqual(['run', 'now', 'header', 'map-card'])
+  expect(measured).toBeGreaterThan(40)
+
+  // With the marker gone there is no card.
+  delete files[RUN_MARKER]
+  await $.tool.call({ tool: 'Bash', command: 'bin/quorum-run leave sess-a' })
+  c = await card()
+  expect(c.isDrawn).toBe(false)
+  expect(c.lines).toEqual([])
+  expect(c.order).toEqual(['map-card', 'header', 'now'])
+})
+
+test('during a run the Now card draws no Next, and says the run goes on by itself', async ($, on) => {
+  const held = heldQuestions(on)
+  const files = inRun('BUILDING')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const GOES = 'the run goes on by itself'
+  // The Now card at a 44-column pane: its Next button's label, the run's lines (`now-run:<line>`), its whole text,
+  // the Task card's text, the looks of every Text that reads exactly `text`, and what a press of Next filled.
+  const nowCard = async (press = false) => {
+    const d = await $.ui.mount(paneAt(44))
+    const next = await d.find({ type: 'Button', key: 'next' })
+    const lines = (await d.findAll({ type: 'Box' })).filter(b => /^now-run:\d+$/.test(b.key ?? '')).map(b => b.text)
+    for (const line of lines) expect(cellWidth(line)).toBeLessThanOrEqual(40)
+    const texts = await d.findAll({ type: 'Text' })
+    const looks = (text: string) => texts.filter(x => x.text === text).map(x => ({ color: x.props.color, bold: x.props.bold === true, dim: x.props.dimColor === true }))
+    const out = { label: next?.props.label, lines, now: await boxText(d, 'now') ?? '', task: await boxText(d, 'header'), looks }
+    if (press) {
+      await d.press({ key: 'next' })
+      await settle()
+    }
+    await d.unmount()
+    return { ...out, filled: seen.filled[seen.filled.length - 1] }
+  }
+  const DIM = { color: undefined, bold: false, dim: true }
+  const AMBER = { color: 'warning', bold: true, dim: false }
+
+  // Going: no Next, and two dim lines, inside the Now card.
+  let n = await nowCard()
+  expect(n.label).toBeUndefined()
+  expect(n.lines).toEqual([GOES, 'next stop: PR drafted, then your review'])
+  expect(n.looks(GOES)).toEqual([DIM])
+  expect(n.now).toContain(GOES)
+  expect(n.now).toContain('next stop: PR drafted, then your review')
+  expect(n.now).not.toContain('fills the prompt')
+  const taskInRun = n.task
+  // Going with no next stop: the first line alone.
+  await reload($, files, inRun('DRAFT'))
+  n = await nowCard()
+  expect(n.label).toBeUndefined()
+  expect(n.lines).toEqual([GOES])
+
+  // Waiting on a question: the Run card's words, amber and bold, in both cards; no Next, and not `goes on by itself`.
+  await reload($, files, inRun('PLANNING'))
+  const asked = ask($)
+  await clock.settle()
+  n = await nowCard()
+  expect(n.label).toBeUndefined()
+  expect(n.lines).toEqual(['waiting for you: plan approval'])
+  expect(n.looks('waiting for you: plan approval')).toEqual([AMBER, AMBER])
+  expect(n.now).not.toContain(GOES)
+  held.answer()
+  await asked
+  // Waiting after a turn's end, at a status with no gate to name.
+  await reload($, files, inRun('BUILDING'))
+  await endTurn($)
+  await clock.advance(REREAD_MS)
+  n = await nowCard()
+  expect(n.label).toBeUndefined()
+  expect(n.lines).toEqual(['waiting for you'])
+  expect(n.looks('waiting for you')).toEqual([AMBER, AMBER])
+  expect(n.now).not.toContain(GOES)
+  await startTurn($)
+  expect((await nowCard()).lines).toEqual([GOES, 'next stop: PR drafted, then your review'])
+
+  // Stopped by a dead turn: neither line, and a Next that fills /quorum:run.
+  for (const reason of ['error', 'refusal', 'aborted'] as const) {
+    await endTurn($, reason)
+    n = await nowCard(true)
+    expect(n.label).toBe('▶ Next: /quorum:run')
+    expect(n.filled).toBe('/quorum:run ')
+    expect(n.lines).toEqual([])
+    expect(n.now).toContain('fills the prompt')
+    expect(n.looks('fills the prompt')).toEqual([DIM])
+    expect(n.now).not.toContain(GOES)
+    expect(n.now).not.toContain('waiting for you')
+    await startTurn($)
+  }
+  // Stopped on ESCALATED, which outside a run has no Next button.
+  await reload($, files, { ...repo('ESCALATED'), [STATE_MD]: calm('ESCALATED') })
+  expect((await nowCard()).label).toBeUndefined()
+  await reload($, files, inRun('ESCALATED'))
+  n = await nowCard(true)
+  expect(n.label).toBe('▶ Next: /quorum:run')
+  expect(n.filled).toBe('/quorum:run ')
+  expect(n.lines).toEqual([])
+  // HALTED keeps the status's own row, as outside a run.
+  await reload($, files, { ...repo('HALTED'), [STATE_MD]: calm('HALTED') })
+  const halted = await nowCard(true)
+  expect(halted.label).toMatch(/^▶ Next: \/quorum:(?!run$)/)
+  await reload($, files, inRun('HALTED'))
+  n = await nowCard(true)
+  expect(n.label).toBe(halted.label)
+  expect(n.filled).toBe(halted.filled)
+  expect(n.now).toBe(halted.now)
+  expect(n.lines).toEqual([])
+
+  // With no run the row is today's, and the Task card is the same in and out of a run.
+  await reload($, files, { ...repo('BUILDING'), [STATE_MD]: calm('BUILDING') })
+  n = await nowCard(true)
+  expect(n.label).toBe('▶ Next: /quorum:build')
+  expect(n.filled).toBe('/quorum:build ')
+  expect(n.lines).toEqual([])
+  expect(n.task).toBe(taskInRun)
+})
+
+test('no state of the run is told by color alone', async ($, on) => {
+  const held = heldQuestions(on)
+  const files = inRun('PLANNING')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const WIDTHS = [120, 100, 80]
+  // A state as text alone: the band's words at each width, and the Run card's rows.
+  const told = async () => {
+    const band: string[] = []
+    for (const columns of WIDTHS) {
+      const words = (await bandRow($, columns)).words
+      expect(words).not.toBe('')
+      // The words' color is one the band already draws text in.
+      expect(['claude', 'warning', 'error']).toContain((await wordsLook($, columns, words)).color)
+      band.push(words)
+    }
+    const card = await runCard($)
+    expect(card.isDrawn).toBe(true)
+    return { band, card: card.rows.join('\n'), third: card.rows[2] ?? '' }
+  }
+  for (const status of ['PLANNING', 'BUILDING']) {
+    await reload($, files, inRun(status))
+    const going = await told()
+    const asked = ask($)
+    await clock.settle()
+    const waiting = await told()
+    held.answer()
+    await asked
+    // An interrupt is amber as waiting is, and an API error red: both read `stopped` in words.
+    const stopped: Awaited<ReturnType<typeof told>>[] = []
+    for (const reason of ['aborted', 'error'] as const) {
+      await endTurn($, reason)
+      stopped.push(await told())
+      // The stopped Next is the band's own Next button, before Dashboard, and a press fills the prompt.
+      for (const columns of WIDTHS) {
+        const band = await $.ui.mount(bandAt(columns))
+        expect((await drawnRows(band)).slice(-2)).toMatchObject([{ type: 'Button', key: 'next' }, { type: 'Button', key: 'open' }])
+        await band.press({ key: 'next' })
+        await settle()
+        expect(seen.filled[seen.filled.length - 1]).toBe('/quorum:run ')
+        await band.unmount()
+      }
+      await startTurn($)
+    }
+    for (const [a, b] of [[going, waiting], ...stopped.flatMap(s => [[going, s], [waiting, s]])] as const) {
+      WIDTHS.forEach((_, i) => expect(a.band[i]).not.toBe(b.band[i]))
+      expect(a.card).not.toBe(b.card)
+      expect(a.third).not.toBe(b.third)
+    }
+    // Each state has its own words: waiting says so or shows ◆, and stopped reads `run stopped` and `Run · stopped`.
+    for (const words of waiting.band) expect(words).toMatch(/waiting|◆/)
+    expect(waiting.card).toContain('waiting for you')
+    expect(going.band.some(words => /waiting|◆|stopped/.test(words))).toBe(false)
+    for (const s of stopped) {
+      expect(s.band).toEqual(['run stopped', 'run stopped', 'run stopped'])
+      expect(s.card).toContain('Run · stopped')
+    }
+  }
 })

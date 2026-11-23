@@ -18,7 +18,7 @@ import {
 import { awaitingFrom, awaitingOf, cellWidth, changeHeader, cutEnd, confidenceRow, footprint, glue, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows, wrap } from './tree'
 import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
 import { isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskRow, taskState, ticketOrder, ticketRow, ticketSummary, wrapWhole } from './map'
-import { fitRun, parseRunMarker, runForms, runView } from './run'
+import { fitRun, parseRunMarker, runCardRows, runForms, runView } from './run'
 import type { RunTurn } from './run'
 
 const PANE = 'quorum-dashboard'
@@ -1724,6 +1724,18 @@ export const register: Register = (on, options) => {
     const nowColor = whoseMove(t.status)
     const next = nextFor(t, known)
     const command = nextCommand(next)
+    // During a run: the Run card's rows, and the color its state has on the band.
+    const marker = await read($, run)
+    const view = marker ? runView(marker, t.status, t.risk, runTurn) : null
+    const runRows = marker && view ? runCardRows(marker, view) : []
+    const runColor = view?.state === 'waiting' || view?.reason === 'aborted' ? 'warning' : view?.state === 'stopped' ? 'error' : 'claude'
+    // The Now card's last row. A run that goes or waits has no Next: lines say so in its place. A stopped run's Next
+    // fills /quorum:run, but HALTED keeps the status's own, since /quorum:run doesn't continue a halted task.
+    const runLines = !view || view.state === 'stopped' ? null
+      : view.state === 'waiting' ? runRows.slice(2)
+        : ['the run goes on by itself', ...(view.stop ? [`next stop: ${view.stop.long}`] : [])]
+    const nowCommand = view?.state === 'stopped' && view.reason !== 'HALTED' ? '/quorum:run' : command
+    const nowNext = nowCommand === command ? next : nowCommand
 
 
     const failedRequirements = requirements.filter(r => r.state === 'fail')
@@ -1880,21 +1892,45 @@ export const register: Register = (on, options) => {
         {n.kind === 'done' && n.blind ? blindRow(n.blind) : null}
         {n.kind === 'done' && stepsPart({ isPressable: t.files !== null, filesKey })}
         {n.kind === 'done' ? filesRow : null}
-        <Box flexDirection="row" gap={1} marginTop={1}>
-          {command
-            ? <Button key="next" variant="primary" label={`▶ Next: ${command}`} onPress={() => void fillPrompt($, command)} />
-            : <Text><Text dimColor>Next: </Text><Text>{next}</Text></Text>}
-          {command ? <Text dimColor wrap="truncate-end">{next === command ? 'fills the prompt' : next}</Text> : null}
-        </Box>
+        {runLines ? (
+          <Box key="now-run" flexDirection="column" marginTop={1}>
+            {runLines.flatMap(row => wrap(row, treeWidth, treeWidth)).map((l, i) => (
+              <Box key={`now-run:${i}`}>
+                {view?.state === 'waiting' ? <Text color="warning" bold>{l}</Text> : <Text dimColor>{l}</Text>}
+              </Box>
+            ))}
+          </Box>
+        ) : (
+          <Box flexDirection="row" gap={1} marginTop={1}>
+            {nowCommand
+              ? <Button key="next" variant="primary" label={`▶ Next: ${nowCommand}`} onPress={() => void fillPrompt($, nowCommand)} />
+              : <Text><Text dimColor>Next: </Text><Text>{nowNext}</Text></Text>}
+            {nowCommand ? <Text dimColor wrap="truncate-end">{nowNext === nowCommand ? 'fills the prompt' : nowNext}</Text> : null}
+          </Box>
+        )}
       </Box>
     )
-    // Docked, the Map card sits above the Task card; above the prompt, the Now card comes first and the Map card
-    // last. Without a Map card the order is the Task card, then the Now card.
+    // The Run card: `Run · ` in bold with the run's state and start time, how it was started, dim, and what the state
+    // says, in the color the band draws it in (bold while waiting). Each wrapped line is its own Box.
+    const runCard = view ? (
+      <Box key="run" borderStyle="round" borderColor={view.state === 'going' ? 'subtle' : runColor} flexDirection="column" paddingX={1}>
+        {runRows.flatMap((row, n) => wrap(row, treeWidth, treeWidth).map((l, i) => (
+          <Box key={`run:${n}-${i}`}>
+            {n === 0 ? <Text>{i === 0 ? <Text bold>Run · </Text> : null}{i === 0 ? l.slice('Run · '.length) : l}</Text>
+              : n === 1 ? <Text dimColor>{l}</Text>
+                : <Text color={runColor} bold={view.state === 'waiting'}>{l}</Text>}
+          </Box>
+        )))}
+      </Box>
+    ) : null
+    // During a run the Run card comes first, docked and above the prompt. Then: docked, the Map card sits above the
+    // Task card; above the prompt, the Now card comes first and the Map card last. Without a Map card the order is
+    // the Task card, then the Now card.
     const cards = mapCard ? (e.props.placement === 'inline' ? [now, header, mapCard] : [mapCard, header, now]) : [header, now]
 
     return (
       <Box flexDirection="column" gap={1}>
-        {cards}
+        {runCard ? [runCard, ...cards] : cards}
 
         {reviewCard}
 
