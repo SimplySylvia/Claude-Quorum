@@ -16,6 +16,18 @@ claude plugin test .                          # the dashboard's tests in tests/d
 
 CI runs all four on every push and pull request: bats and shellcheck on Linux and on macOS (system bash 3.2).
 
+**Windows note.** Run the checks under Git Bash, with `shellcheck` and `jq` installed and on its `PATH`. CI doesn't
+run on Windows, and the bats suites aren't run there. `.gitattributes` keeps every text file LF on every platform,
+whatever `core.autocrlf` says, because `shellcheck` and `claude plugin validate` reject CRLF. A clone made before
+`.gitattributes` existed still has CRLF files, so check its files out again once. Commit or stash your work first,
+since the second command discards uncommitted changes to tracked files:
+
+```bash
+git rm --cached -r -q .
+git reset --hard
+git ls-files --eol | awk '$2 == "w/crlf"' | wc -l   # 0 when every file is LF
+```
+
 The dashboard (`hooks/dashboard/`) is a hooks module: TypeScript that runs inside Claude Code, with no Node or DOM.
 `task.ts` holds the pure parsing and stage logic, `tree.ts` the file tree's pure model and layout, and `map.ts` the
 map's pure parsing, phase and ticket logic; `register.tsx` hooks the events and draws. The values it keeps in
