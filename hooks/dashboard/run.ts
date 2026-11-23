@@ -87,13 +87,13 @@ export function runView(marker: RunMarker, status: string, risk: string, turn: R
 }
 
 // The run's words for a band of `columns`, longest first, with their look; null when there are none to draw (a
-// going run with no next stop, or a going or waiting run beside a problem under 110 columns). The first form is the
-// width's own: the long one from 110 columns, the middle one from 90, else the short one. A problem comes first,
-// so beside one the words start a size down. A stopped run reads the same at every width.
+// going run with no next stop). The first form is the width's own: the long one from 110 columns, the middle one
+// from 90, else the short one. A problem comes first, so beside one the words start a size down: the middle form
+// from 110 columns, the short one under. A stopped run reads the same at every width.
 export function runForms(view: RunView, columns: number, hasProblem: boolean): { forms: string[]; color: 'claude' | 'warning' | 'error'; isBold: boolean } | null {
   if (view.state === 'stopped') return { forms: ['run stopped'], color: view.reason === 'aborted' ? 'warning' : 'error', isBold: false }
-  if (hasProblem && columns < 110) return null
-  const first = hasProblem ? 1 : columns >= 110 ? 0 : columns >= 90 ? 1 : 2
+  const size = columns >= 110 ? 0 : columns >= 90 ? 1 : 2
+  const first = hasProblem ? Math.min(2, size + 1) : size
   if (view.state === 'waiting') {
     const all = view.gate
       ? [`autopilot · waiting for you: ${view.gate}`, `waiting: ${view.gate}`, `◆ ${view.gate}`]
@@ -108,12 +108,21 @@ export function runForms(view: RunView, columns: number, hasProblem: boolean): {
 // Why a run stopped, in the Run card's words. HALTED has a row of its own, since /quorum:run doesn't continue it.
 const WHY = { ESCALATED: 'ESCALATED', error: 'API error', refusal: 'refused', aborted: 'interrupted' }
 
+// The run's own flags as the marker recorded them, `--until <stage>` then `--yes`.
+const runFlags = (marker: RunMarker) => [marker.until ? `--until ${marker.until}` : '', marker.isYes ? '--yes' : ''].filter(Boolean)
+
+// The command that continues a stopped run: /quorum:run with the flags it was started with, so the run stops where
+// it would have.
+export function runCommand(marker: RunMarker): string {
+  return ['/quorum:run', ...runFlags(marker)].join(' ')
+}
+
 // The Run card's rows: `Run · autopilot` or `Run · stopped` with the start time when the marker has one, how the
 // run was started (only the flags given), and what the state says: where the run stops next, what it waits on, or
 // why it stopped and what continues it. A going run with no next stop has two rows.
 export function runCardRows(marker: RunMarker, view: RunView): string[] {
   const head = `Run · ${view.state === 'stopped' ? 'stopped' : 'autopilot'}${marker.since ? ` · since ${marker.since}` : ''}`
-  const flags = [marker.until ? `--until ${marker.until}` : '', marker.isYes ? '--yes' : ''].filter(Boolean)
+  const flags = runFlags(marker)
   const started = flags.length > 0 ? `started with ${flags.join(' ')}` : 'stops only where you must decide'
   const last = view.reason === 'HALTED' ? 'HALTED · see the post-mortem'
     : view.reason ? `${WHY[view.reason]} · /quorum:run continues it`
@@ -122,6 +131,10 @@ export function runCardRows(marker: RunMarker, view: RunView): string[] {
   return [head, started, ...(last ? [last] : [])]
 }
 
+// The columns the terminal draws around a Button's label: `[ Dashboard ]`, a bracket and a space on each side, as
+// seen in a Claude Code 2.1.330 session.
+export const BUTTON_FRAME = 4
+
 // The band's row during a run, each top-level item's text as it would be drawn ('' for one not drawn): the status
 // badge, the slug and risk, the stage dots with the stage's name, the progress, file count and review texts, the
 // problem, and the buttons' labels.
@@ -129,13 +142,13 @@ export type RunRow = { badge: string; id: string; rail: string; extras: string[]
 
 // Fit the row and the run's words (`forms`, longest first; [] for none) to `columns`: what is drawn of the words and
 // of the problem, and whether the slug, the stage dots and the extras stay. A text counts as its cells, a button as
-// its label plus 2, with 1 between buttons and 2 between items (the buttons are one item). Each step is taken only
-// while the row is still too wide. Going or waiting: the first form that fits whole, else the last form cut at the
-// end down to its first word, else no words; then the slug goes, then the dots, then the problem is cut, and last
-// the extras go. Stopped: the words stay whole, and the problem is cut first. The badge and the buttons always stay,
-// and words that were dropped aren't tried again.
+// its label plus BUTTON_FRAME, with 1 between buttons and 2 between items (the buttons are one item). Each step is
+// taken only while the row is still too wide. Going or waiting: the first form that fits whole, else the last form
+// cut at the end down to its first word, else no words; then the slug goes, then the dots, then the problem is cut,
+// and last the extras go. Stopped: the words stay whole, and the problem is cut first. The badge and the buttons
+// always stay, and words that were dropped aren't tried again.
 export function fitRun(columns: number, row: RunRow, forms: string[], isStopped: boolean): { words: string; problem: string; hasId: boolean; hasRail: boolean; hasExtras: boolean } {
-  const buttons = row.buttons.reduce((n, label) => n + cellWidth(label) + 2, 0) + Math.max(0, row.buttons.length - 1)
+  const buttons = row.buttons.reduce((n, label) => n + cellWidth(label) + BUTTON_FRAME, 0) + Math.max(0, row.buttons.length - 1)
   const fit = { words: '', problem: row.problem, hasId: true, hasRail: true, hasExtras: true }
   // The columns left for `words` and `problem` beside every other item on show, each item 2 from the one before.
   const room = (words: string, problem: string) => {

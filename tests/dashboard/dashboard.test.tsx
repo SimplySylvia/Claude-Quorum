@@ -6721,14 +6721,14 @@ test('the band changes as soon as quorum-run enters and leaves', async ($, on) =
 
 test("during a run the band shows the run's words in place of Next, by width", async ($, on) => {
   // BUILDING, MEDIUM, no problem, progress or file count: at 120 the row is the badge (10), the slug and risk (19),
-  // the dots and `Build` (12), the long form (51) and Dashboard (11) with four gaps, 111 columns, so each width
-  // draws its own form.
+  // the dots and `Build` (12), the long form (51) and Dashboard (`[ Dashboard ]`, 13) with four gaps, 113 columns,
+  // so each width draws its own form.
   const files: Record<string, string> = { ...repo('BUILDING'), '.tasks/export-csv/state.md': calm('BUILDING'), [RUN_MARKER]: RUN_SINCE }
   world(on, files)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   const FORMS = [
     [120, 'autopilot · next stop: PR drafted, then your review'],
-    [111, 'autopilot · next stop: PR drafted, then your review'],
+    [113, 'autopilot · next stop: PR drafted, then your review'],
     [109, 'auto · next: your review'],
     [100, 'auto · next: your review'],
     [90, 'auto · next: your review'],
@@ -6766,7 +6766,7 @@ test("during a run the band shows the run's words in place of Next, by width", a
 
 test("a problem comes first: the run's words drop a size, and go under 110 columns", async ($, on) => {
   // The same task with a pending finding, the band's problem (`1 pending`, 9): at 120 the row with the 90-to-109
-  // form (41) is 112 columns.
+  // form (41) is 114 columns, and under 110 the row with the under-90 form (14) is 87, or 66 without the slug.
   const files: Record<string, string> = { ...repo('BUILDING'), [RUN_MARKER]: RUN_SINCE }
   world(on, files)
   on('turn.complete', (_, e) => ({ text: e.answer }))
@@ -6783,13 +6783,19 @@ test("a problem comes first: the run's words drop a size, and go under 110 colum
   await expectNoNext(band)
   await band.unmount()
 
-  // Under 110 the words give the problem the row, and Next still isn't drawn.
-  for (const columns of [109, 100, 80]) {
+  // Under 110 the words take the under-90 form, after the problem, so the band still tells a going run from a
+  // waiting one and from no run. Next still isn't drawn.
+  for (const columns of [109, 100, 90, 80]) {
     band = await $.ui.mount(bandAt(columns))
-    expect(await band.find({ type: 'Text', text: /^1 pending$/ })).toBeDefined()
-    expect(await runWords(band)).toEqual([])
+    const short = await runWords(band)
+    expect(short.map(x => x.text)).toEqual(['▸▸ your review'])
+    expect(short[0]?.props.color).toBe('claude')
+    const shortRow = (await drawnRows(band)).map(x => x.text)
+    expect(shortRow.indexOf('1 pending')).toBeGreaterThan(-1)
+    expect(shortRow.indexOf('1 pending')).toBeLessThan(shortRow.indexOf('▸▸ your review'))
     await expectNoNext(band)
     await band.unmount()
+    expect((await bandRow($, columns)).width).toBeLessThanOrEqual(columns)
   }
 
   // The same while the run waits on the person: its turn ended, and the re-read (at once, on this world's clock)
@@ -6805,13 +6811,22 @@ test("a problem comes first: the run's words drop a size, and go under 110 colum
   expect(waitingRow.indexOf('1 pending')).toBeLessThan(waitingRow.indexOf('waiting for you'))
   await expectNoNext(band)
   await band.unmount()
-  for (const columns of [109, 100, 80]) {
+  for (const columns of [109, 100, 90, 80]) {
     band = await $.ui.mount(bandAt(columns))
-    expect(await band.find({ type: 'Text', text: /^1 pending$/ })).toBeDefined()
-    expect(await runWords(band)).toEqual([])
+    const short = await runWords(band)
+    expect(short.map(x => x.text)).toEqual(['◆ waiting'])
+    expect(short[0]?.props).toMatchObject({ color: 'warning', bold: true })
+    const shortRow = (await drawnRows(band)).map(x => x.text)
+    expect(shortRow.indexOf('1 pending')).toBeGreaterThan(-1)
+    expect(shortRow.indexOf('1 pending')).toBeLessThan(shortRow.indexOf('◆ waiting'))
     await expectNoNext(band)
     await band.unmount()
+    expect((await bandRow($, columns)).width).toBeLessThanOrEqual(columns)
   }
+  // And where the status names a gate, the short form names it.
+  expect(runForms({ state: 'waiting', reason: null, stop: null, gate: 'plan approval' }, 100, true)?.forms).toEqual(['◆ plan approval'])
+  expect(runForms({ state: 'waiting', reason: null, stop: null, gate: 'plan approval' }, 120, true)?.forms).toEqual(['waiting: plan approval', '◆ plan approval'])
+  expect(runForms({ state: 'going', reason: null, stop: { long: 'PR drafted, then your review', short: 'your review' }, gate: '' }, 89, true)?.forms).toEqual(['▸▸ your review'])
 })
 
 test('nothing of the run is drawn with no task or in a map session', async ($, on) => {
@@ -6895,7 +6910,8 @@ function endTurn($: Engine, reason: 'answer' | 'error' | 'refusal' | 'aborted' =
   return reason === 'refusal' ? $.turn.complete({ ...base, reason, refusal: { category: null, explanation: null } }) : $.turn.complete({ ...base, reason })
 }
 // The band's row as drawn, from the root Box's direct children: each Text's whole text, the buttons' labels, and the
-// row's width (a Text as its cells, a Button as its label plus 2, 1 between buttons, 2 between items).
+// row's width (a Text as its cells, a Button as the terminal draws it, `[ label ]`, its label plus 4, 1 between
+// buttons, 2 between items).
 type Drawing = { props?: Record<string, unknown>; children?: unknown[] }
 const isDrawing = (c: unknown): c is Drawing => typeof c === 'object' && c !== null
 const drawingText = (c: unknown): string => (typeof c === 'string' ? c : isDrawing(c) ? (c.children ?? []).map(drawingText).join('') : '')
@@ -6910,7 +6926,7 @@ async function bandRow($: Engine, columns: number) {
     const labels = (item.children ?? []).filter(isDrawing).map(b => b.props?.label).filter((l): l is string => typeof l === 'string')
     if (labels.length > 0) {
       buttons.push(...labels)
-      width += labels.reduce((n, l) => n + cellWidth(l) + 2, 0) + labels.length - 1
+      width += labels.reduce((n, l) => n + cellWidth(l) + 4, 0) + labels.length - 1
     } else {
       texts.push(drawingText(item))
       width += cellWidth(texts[texts.length - 1] ?? '')
@@ -6926,6 +6942,15 @@ async function wordsLook($: Engine, columns: number, text: string) {
   const props = (await band.findAll({ type: 'Text' })).find(x => x.text === text)?.props
   await band.unmount()
   return { color: props?.color, bold: props?.bold === true }
+}
+// Whether the Text that reads exactly `text` on the band can't wrap onto a second row: it is cut at the end if it
+// must be, inside a Box that doesn't shrink.
+async function wordsHeld($: Engine, columns: number, text: string) {
+  const band = await $.ui.mount(bandAt(columns))
+  const isCut = (await band.findAll({ type: 'Text' })).find(x => x.text === text)?.props.wrap === 'truncate-end'
+  const isFixed = (await band.findAll({ type: 'Box' })).some(b => b.text === text && b.props.flexShrink === 0)
+  await band.unmount()
+  return isCut && isFixed
 }
 const STATE_MD = '.tasks/export-csv/state.md'
 const inRun = (status: string, marker = RUN_SINCE): Record<string, string> => ({ ...repo(status), [STATE_MD]: calm(status), [RUN_MARKER]: marker })
@@ -7300,16 +7325,17 @@ test('while the run waits on you the words are amber and name the gate open now'
       // No Next at any width: the run isn't waiting for a command.
       expect(row.buttons).toEqual(['Dashboard'])
       expect(await wordsLook($, columns, words)).toEqual({ color: 'warning', bold: true })
+      expect(await wordsHeld($, columns, words)).toBe(true)
     }
   }
-  // A gate the status names. With the plan review's progress (13) the row with the long form is 116 columns, so
+  // A gate the status names. With the plan review's progress (13) the row with the long form is 118 columns, so
   // under that it steps down (the overflow test).
   await wait(inRun('PLANNING'))
-  expect((await bandRow($, 120)).width).toBe(116)
-  await check([[120, 'autopilot · waiting for you: plan approval'], [116, 'autopilot · waiting for you: plan approval'], [109, 'waiting: plan approval'], [100, 'waiting: plan approval'], [90, 'waiting: plan approval'], [89, '◆ plan approval'], [80, '◆ plan approval']])
+  expect((await bandRow($, 120)).width).toBe(118)
+  await check([[120, 'autopilot · waiting for you: plan approval'], [118, 'autopilot · waiting for you: plan approval'], [109, 'waiting: plan approval'], [100, 'waiting: plan approval'], [90, 'waiting: plan approval'], [89, '◆ plan approval'], [80, '◆ plan approval']])
   await wait(inRun('DRAFT-AWAITING-VISUAL-SIGNOFF'))
   // (The longest badge leaves less room: each form here is the first that fits its width.)
-  await check([[140, 'autopilot · waiting for you: mockup sign-off'], [120, 'waiting: mockup sign-off'], [100, '◆ mockup sign-off']])
+  await check([[150, 'autopilot · waiting for you: mockup sign-off'], [122, 'waiting: mockup sign-off'], [120, '◆ mockup sign-off'], [100, '◆ mockup sign-off']])
   // With --yes the run's next stop at PLANNING is past plan approval, and the gate open now is still plan approval.
   await wait(inRun('PLANNING', `${RUN_SINCE}yes\n`))
   await check([[120, 'autopilot · waiting for you: plan approval'], [100, 'waiting: plan approval'], [80, '◆ plan approval']])
@@ -7324,14 +7350,17 @@ test('a stopped run reads run stopped, with a Next that fills /quorum:run', asyn
   const files = inRun('BUILDING')
   const { seen } = runWorld(on, files)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  // What one press of Next filled. One press, one fill, so the text read is this press's own and not an earlier one's.
   const press = async (columns: number) => {
+    const before = seen.filled.length
     const band = await $.ui.mount(bandAt(columns))
     await band.press({ key: 'next' })
     await settle()
     await band.unmount()
+    expect(seen.filled.length).toBe(before + 1)
     return seen.filled[seen.filled.length - 1]
   }
-  // `run stopped` whole, in its color, beside a Next and Dashboard, on a row that fits.
+  // `run stopped` whole, in its color and held to one row, beside a Next and Dashboard, on a row that fits.
   const check = async (color: string, next: string, fills: string) => {
     for (const columns of [120, 110, 109, 100, 80, 70]) {
       const row = await bandRow($, columns)
@@ -7339,6 +7368,7 @@ test('a stopped run reads run stopped, with a Next that fills /quorum:run', asyn
       expect(row.buttons).toEqual([columns >= 110 ? next : '▶ Next', 'Dashboard'])
       expect(row.width).toBeLessThanOrEqual(columns)
       expect(await wordsLook($, columns, 'run stopped')).toEqual({ color, bold: false })
+      expect(await wordsHeld($, columns, 'run stopped')).toBe(true)
     }
     expect(await press(120)).toBe(fills)
     expect(await press(80)).toBe(fills)
@@ -7363,11 +7393,34 @@ test('a stopped run reads run stopped, with a Next that fills /quorum:run', asyn
   await reload($, files, { ...repo('ESCALATED'), [RUN_MARKER]: RUN_SINCE })
   expect((await bandRow($, 120)).texts).toContain('1 pending')
   await check('error', '▶ /quorum:run', '/quorum:run ')
-  // HALTED keeps the status's own Next, as it is outside a run: /quorum:run doesn't continue a halted task.
+  // The Next continues the run as it was started: the marker's flags, --until then --yes whatever their order in
+  // the marker, in the label from 110 columns and in what a press fills at any width.
+  const BOTH = '/quorum:run --until review --yes'
+  for (const [marker, command] of [
+    [`${RUN_SINCE}until review\nyes\n`, BOTH],
+    [`${RUN_SINCE}yes\nuntil review\n`, BOTH],
+    [`${RUN_SINCE}until review\n`, '/quorum:run --until review'],
+    [`${RUN_SINCE}yes\n`, '/quorum:run --yes'],
+  ] as const) {
+    await reload($, files, inRun('ESCALATED', marker))
+    await check('error', `▶ ${command}`, `${command} `)
+  }
+  // The same for a run stopped by a dead turn, and beside a problem.
+  await reload($, files, inRun('BUILDING', `${RUN_SINCE}until review\nyes\n`))
+  await endTurn($, 'aborted')
+  await check('warning', `▶ ${BOTH}`, `${BOTH} `)
+  await startTurn($)
+  await reload($, files, { ...repo('ESCALATED'), [RUN_MARKER]: `${RUN_SINCE}until review\nyes\n` })
+  expect((await bandRow($, 140)).texts).toContain('1 pending')
+  await check('error', `▶ ${BOTH}`, `${BOTH} `)
+  // HALTED keeps the status's own Next, as it is outside a run: /quorum:run doesn't continue a halted task, with
+  // the run's flags or without.
   await reload($, files, { ...repo('HALTED'), [STATE_MD]: calm('HALTED') })
   const own = (await bandRow($, 120)).buttons[0] ?? ''
   expect(own).toMatch(/^▶ \/quorum:(?!run$)/)
   await reload($, files, inRun('HALTED'))
+  await check('error', own, `${own.slice(2)} `)
+  await reload($, files, inRun('HALTED', `${RUN_SINCE}until review\nyes\n`))
   await check('error', own, `${own.slice(2)} `)
 })
 
@@ -7405,6 +7458,7 @@ test("the band never overflows during a run: the run's words are cut at the end"
   expect(row.texts[1]).toMatch(DOTS)
   expect(row.texts.length).toBe(3)
   expect(row.buttons).toEqual(['Dashboard'])
+  expect(await wordsHeld($, 70, row.words)).toBe(true)
 
   // ESCALATED at 70 with a problem: the problem is cut, and `run stopped` and Next are whole.
   await to(checksTask('ESCALATED', '1a2b3c4', STALE, { fail: [1, 2], pending: true }))
@@ -7416,35 +7470,37 @@ test("the band never overflows during a run: the run's words are cut at the end"
   expect(whole.startsWith((row.texts[row.texts.length - 2] ?? '').slice(0, -1))).toBe(true)
   expect(row.words).toBe('run stopped')
   expect(row.buttons).toEqual(['▶ Next', 'Dashboard'])
+  // The words can't wrap onto a second row, whatever the terminal makes of the rest.
+  expect(await wordsHeld($, 70, 'run stopped')).toBe(true)
 
-  // Going at 120, the row leaving the words 50 columns: the long form (51) steps down to the 90-to-109 form, whole.
+  // Going at 120, the row leaving the words 48 columns: the long form (51) steps down to the 90-to-109 form, whole.
   await to({ ...inRun('BUILDING'), [LIST]: twelve })
   row = await bandRow($, 120)
   expect(row.texts.slice(0, -1).map(cellWidth)).toEqual([10, 19, 12, 8])
-  expect(room(120, row)).toBe(50)
+  expect(room(120, row)).toBe(48)
   expect(cellWidth('autopilot · next stop: PR drafted, then your review')).toBe(51)
   expect(row.words).toBe('auto · next: PR drafted, then your review')
   expect(row.texts).toEqual([' BUILDING ', 'export-csv · MEDIUM', expect.stringMatching(/ Build$/), '12 files', row.words])
   expect(row.buttons).toEqual(['Dashboard'])
 
-  // Going at 120 with the long slug, progress and a file count: 13 columns, under the shortest form's 31, so it is
+  // Going at 120 with the long slug, progress and a file count: 11 columns, under the shortest form's 31, so it is
   // cut at the end, and the rest of the row is whole.
   const reviewing = { ...long(noPending(inRounds([NOTHING_KEPT, null]))), [`.tasks/${LONG}/files.tsv`]: one }
   await to(reviewing)
   row = await bandRow($, 120)
   expect(row.texts.slice(0, -1).map(cellWidth)).toEqual([11, 37, 17, 13, 6])
-  expect(room(120, row)).toBe(13)
+  expect(room(120, row)).toBe(11)
   expect(cellWidth('▸▸ PR drafted, then your review')).toBe(31)
   expect(row.width).toBeLessThanOrEqual(120)
-  expect(row.words).toBe('▸▸ PR drafte…')
+  expect(row.words).toBe('▸▸ PR draf…')
   expect(row.texts.slice(0, -1)).toEqual([' IN_REVIEW ', `${LONG} · MEDIUM`, expect.stringMatching(/ Review 2\/3$/), expect.stringMatching(/^reviewers \d\/\d$/), '1 file'])
   expect(row.buttons).toEqual(['Dashboard'])
 
-  // The same task at 100, where the progress and the file count aren't drawn: 16 columns, under the 90-to-109
+  // The same task at 100, where the progress and the file count aren't drawn: 14 columns, under the 90-to-109
   // form's 24, and the under-90 form (14) is drawn whole.
   row = await bandRow($, 100)
   expect(row.texts.slice(0, -1).map(cellWidth)).toEqual([11, 37, 17])
-  expect(room(100, row)).toBe(16)
+  expect(room(100, row)).toBe(14)
   expect(cellWidth('auto · next: your review')).toBe(24)
   expect(row.words).toBe('▸▸ your review')
   expect(row.width).toBeLessThanOrEqual(100)
@@ -7517,7 +7573,7 @@ test("the band never overflows during a run: the run's words are cut at the end"
   // its own first glyph: at PLANNING the next stop and the gate are the same words.
   const marker = { since: '09:41', until: '' as const, isYes: false }
   const base = { badge: ' PLANNING ', id: '', rail: '', extras: [] as string[], problem: '', buttons: ['Dashboard'] }
-  const taken = cellWidth(base.badge) + 2 + cellWidth('Dashboard') + 2
+  const taken = cellWidth(base.badge) + 2 + cellWidth('Dashboard') + 4
   for (const status of ['PLANNING', 'DRAFT-AWAITING-VISUAL-SIGNOFF', 'BUILDING']) {
     const going = runView(marker, status, 'MEDIUM', { asking: 0, ended: null, isIdle: false })
     const waiting = runView(marker, status, 'MEDIUM', { asking: 0, ended: 'answer', isIdle: true })
@@ -7549,10 +7605,21 @@ test("the band never overflows during a run: the run's words are cut at the end"
   const full = { badge: ' IN_REVIEW ', id: 'export-csv · MEDIUM', rail: '✓✓✓●○○ Review 2/3', extras: ['reviewers 1/3', '1 file'], problem: '1 pending', buttons: ['Dashboard'] }
   expect(fitRun(30, full, ['▸▸ your review'], false)).toEqual({ words: '', problem: '', hasId: false, hasRail: false, hasExtras: false })
   // With the columns the badge, the extras and Dashboard need, they stay.
-  expect(fitRun(11 + 2 + 13 + 2 + 6 + 2 + 11, full, ['▸▸ your review'], false)).toEqual({ words: '', problem: '', hasId: false, hasRail: false, hasExtras: true })
+  expect(fitRun(11 + 2 + 13 + 2 + 6 + 2 + 13, full, ['▸▸ your review'], false)).toEqual({ words: '', problem: '', hasId: false, hasRail: false, hasExtras: true })
   const stopped = { ...full, buttons: ['▶ Next', 'Dashboard'] }
   expect(fitRun(50, stopped, ['run stopped'], true)).toEqual({ words: 'run stopped', problem: '', hasId: false, hasRail: false, hasExtras: false })
-  expect(fitRun(11 + 2 + 13 + 2 + 6 + 2 + 11 + 2 + 20, stopped, ['run stopped'], true)).toEqual({ words: 'run stopped', problem: '', hasId: false, hasRail: false, hasExtras: true })
+  expect(fitRun(11 + 2 + 13 + 2 + 6 + 2 + 11 + 2 + 24, stopped, ['run stopped'], true)).toEqual({ words: 'run stopped', problem: '', hasId: false, hasRail: false, hasExtras: true })
+  // A Button is counted as the terminal draws it, `[ ▶ Next ]` and `[ Dashboard ]`: the label plus 4. The row the
+  // blind test saw wrap on a 72-column band (a 140-column terminal with the pane docked): with the buttons at 10
+  // and 13 the problem has 1 column left and goes, and the row is 69. Counted as the label plus 2 it kept `✗ 1…`
+  // on a row the terminal drew 75 wide.
+  const seenRow = { badge: ' ESCALATED ', id: '', rail: '✓✓✓✗○○ Review 2/3', extras: [] as string[], problem: '✗ 1 check failing', buttons: ['▶ Next', 'Dashboard'] }
+  expect(fitRun(72, seenRow, ['run stopped'], true)).toEqual({ words: 'run stopped', problem: '', hasId: true, hasRail: true, hasExtras: true })
+  expect(11 + 2 + 17 + 2 + 11 + 2 + (6 + 4) + 1 + (9 + 4)).toBe(69)
+  // Three columns more and the problem is back, cut, on a row of exactly 75.
+  expect(fitRun(75, seenRow, ['run stopped'], true).problem).toBe('✗ 1…')
+  // The same band while the run goes, beside the problem: the under-90 form, cut to the 6 columns left.
+  expect(fitRun(72, { ...seenRow, badge: ' IN_REVIEW ', buttons: ['Dashboard'] }, ['▸▸ your review'], false)).toEqual({ words: '▸▸ yo…', problem: '✗ 1 check failing', hasId: true, hasRail: true, hasExtras: true })
 })
 
 test('a run changes no toast and raises no notification', async ($, on) => {
@@ -7736,17 +7803,22 @@ test('during a run the Now card draws no Next, and says the run goes on by itsel
   const GOES = 'the run goes on by itself'
   // The Now card at a 44-column pane: its Next button's label, the run's lines (`now-run:<line>`), its whole text,
   // the Task card's text, the looks of every Text that reads exactly `text`, and what a press of Next filled.
-  const nowCard = async (press = false) => {
-    const d = await $.ui.mount(paneAt(44))
+  const nowCard = async (press = false, columns = 44) => {
+    const before = seen.filled.length
+    const d = await $.ui.mount(paneAt(columns))
     const next = await d.find({ type: 'Button', key: 'next' })
     const lines = (await d.findAll({ type: 'Box' })).filter(b => /^now-run:\d+$/.test(b.key ?? '')).map(b => b.text)
     for (const line of lines) expect(cellWidth(line)).toBeLessThanOrEqual(40)
+    // The button fits the card, drawn as `[ label ]`.
+    if (typeof next?.props.label === 'string') expect(cellWidth(next.props.label) + 4).toBeLessThanOrEqual(columns - 4)
     const texts = await d.findAll({ type: 'Text' })
     const looks = (text: string) => texts.filter(x => x.text === text).map(x => ({ color: x.props.color, bold: x.props.bold === true, dim: x.props.dimColor === true }))
     const out = { label: next?.props.label, lines, now: await boxText(d, 'now') ?? '', task: await boxText(d, 'header'), looks }
     if (press) {
       await d.press({ key: 'next' })
       await settle()
+      // One press, one fill: `filled` is this press's own.
+      expect(seen.filled.length).toBe(before + 1)
     }
     await d.unmount()
     return { ...out, filled: seen.filled[seen.filled.length - 1] }
@@ -7813,16 +7885,39 @@ test('during a run the Now card draws no Next, and says the run goes on by itsel
   expect(n.label).toBe('▶ Next: /quorum:run')
   expect(n.filled).toBe('/quorum:run ')
   expect(n.lines).toEqual([])
+  // The Next continues the run as it was started: it fills the marker's flags, --until then --yes. The label names
+  // them where the button fits the card, and reads `…` for them where it doesn't.
+  await reload($, files, inRun('ESCALATED', `${RUN_SINCE}until review\n`))
+  n = await nowCard(true)
+  expect(n.label).toBe('▶ Next: /quorum:run --until review')
+  expect(n.filled).toBe('/quorum:run --until review ')
+  await reload($, files, inRun('ESCALATED', `${RUN_SINCE}yes\nuntil review\n`))
+  n = await nowCard(true)
+  expect(n.label).toBe('▶ Next: /quorum:run …')
+  expect(n.filled).toBe('/quorum:run --until review --yes ')
+  expect(n.now).toContain('fills the prompt')
+  n = await nowCard(true, 60)
+  expect(n.label).toBe('▶ Next: /quorum:run --until review --yes')
+  expect(n.filled).toBe('/quorum:run --until review --yes ')
+  // A dead turn's Next carries them too.
+  await reload($, files, inRun('BUILDING', `${RUN_SINCE}yes\n`))
+  await endTurn($, 'error')
+  n = await nowCard(true)
+  expect(n.label).toBe('▶ Next: /quorum:run --yes')
+  expect(n.filled).toBe('/quorum:run --yes ')
+  await startTurn($)
   // HALTED keeps the status's own row, as outside a run.
   await reload($, files, { ...repo('HALTED'), [STATE_MD]: calm('HALTED') })
   const halted = await nowCard(true)
   expect(halted.label).toMatch(/^▶ Next: \/quorum:(?!run$)/)
-  await reload($, files, inRun('HALTED'))
-  n = await nowCard(true)
-  expect(n.label).toBe(halted.label)
-  expect(n.filled).toBe(halted.filled)
-  expect(n.now).toBe(halted.now)
-  expect(n.lines).toEqual([])
+  for (const marker of [RUN_SINCE, `${RUN_SINCE}until review\nyes\n`]) {
+    await reload($, files, inRun('HALTED', marker))
+    n = await nowCard(true)
+    expect(n.label).toBe(halted.label)
+    expect(n.filled).toBe(halted.filled)
+    expect(n.now).toBe(halted.now)
+    expect(n.lines).toEqual([])
+  }
 
   // With no run the row is today's, and the Task card is the same in and out of a run.
   await reload($, files, { ...repo('BUILDING'), [STATE_MD]: calm('BUILDING') })
@@ -7870,8 +7965,10 @@ test('no state of the run is told by color alone', async ($, on) => {
       for (const columns of WIDTHS) {
         const band = await $.ui.mount(bandAt(columns))
         expect((await drawnRows(band)).slice(-2)).toMatchObject([{ type: 'Button', key: 'next' }, { type: 'Button', key: 'open' }])
+        const before = seen.filled.length
         await band.press({ key: 'next' })
         await settle()
+        expect(seen.filled.length).toBe(before + 1)
         expect(seen.filled[seen.filled.length - 1]).toBe('/quorum:run ')
         await band.unmount()
       }

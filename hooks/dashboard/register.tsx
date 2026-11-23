@@ -18,7 +18,7 @@ import {
 import { awaitingFrom, awaitingOf, cellWidth, changeHeader, cutEnd, confidenceRow, footprint, glue, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows, wrap } from './tree'
 import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
 import { isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskRow, taskState, ticketOrder, ticketRow, ticketSummary, wrapWhole } from './map'
-import { fitRun, parseRunMarker, runCardRows, runForms, runView } from './run'
+import { BUTTON_FRAME, fitRun, parseRunMarker, runCardRows, runCommand, runForms, runView } from './run'
 import type { RunTurn } from './run'
 
 const PANE = 'quorum-dashboard'
@@ -986,8 +986,9 @@ export const register: Register = (on, options) => {
     const view = marker ? runView(marker, t.status, t.risk, runTurn) : null
     const isStopped = view?.state === 'stopped'
     const words = view ? runForms(view, columns, problem !== '') : null
-    // /quorum:run doesn't continue a halted task, so HALTED keeps the status's own Next.
-    const nextCmd = !view ? command : !isStopped ? '' : view.reason === 'HALTED' ? command : '/quorum:run'
+    // A stopped run's Next continues it with the flags it was started with. /quorum:run doesn't continue a halted
+    // task, so HALTED keeps the status's own Next.
+    const nextCmd = !marker || !view ? command : !isStopped ? '' : view.reason === 'HALTED' ? command : runCommand(marker)
     const nextLabel = columns >= 110 ? `▶ ${nextCmd}` : '▶ Next'
     const fit = view
       ? fitRun(columns, {
@@ -1019,7 +1020,7 @@ export const register: Register = (on, options) => {
         {filesText && hasExtras ? <Text dimColor>{filesText}</Text> : null}
         {shownProblem ? <Text color="error">{shownProblem}</Text> : null}
         {reviewText && hasExtras ? <Text dimColor>{reviewText}</Text> : null}
-        {fit?.words && words ? <Text color={words.color} bold={words.isBold}>{fit.words}</Text> : null}
+        {fit?.words && words ? <Box flexShrink={0}><Text color={words.color} bold={words.isBold} wrap="truncate-end">{fit.words}</Text></Box> : null}
         <Box flexDirection="row" gap={1}>
           {nextCmd ? <Button key="next" variant="primary" label={nextLabel} onPress={() => void fillPrompt($, nextCmd)} /> : null}
           <Button key="open" label="Dashboard" onPress={() => open($, true)} />
@@ -1755,12 +1756,16 @@ export const register: Register = (on, options) => {
     const runRows = marker && view ? runCardRows(marker, view) : []
     const runColor = view?.state === 'waiting' || view?.reason === 'aborted' ? 'warning' : view?.state === 'stopped' ? 'error' : 'claude'
     // The Now card's last row. A run that goes or waits has no Next: lines say so in its place. A stopped run's Next
-    // fills /quorum:run, but HALTED keeps the status's own, since /quorum:run doesn't continue a halted task.
+    // fills /quorum:run with the run's flags, but HALTED keeps the status's own, since /quorum:run doesn't continue a
+    // halted task.
     const runLines = !view || view.state === 'stopped' ? null
       : view.state === 'waiting' ? runRows.slice(2)
         : ['the run goes on by itself', ...(view.stop ? [`next stop: ${view.stop.long}`] : [])]
-    const nowCommand = view?.state === 'stopped' && view.reason !== 'HALTED' ? '/quorum:run' : command
+    const nowCommand = marker && view?.state === 'stopped' && view.reason !== 'HALTED' ? runCommand(marker) : command
     const nowNext = nowCommand === command ? next : nowCommand
+    // The button's label names the command it fills; a run's flags that don't fit the card beside it read as `…`
+    // (the Run card's second row has them).
+    const nowLabel = nowCommand !== command && cellWidth(`▶ Next: ${nowCommand}`) + BUTTON_FRAME > treeWidth ? '▶ Next: /quorum:run …' : `▶ Next: ${nowCommand}`
 
 
     const failedRequirements = requirements.filter(r => r.state === 'fail')
@@ -1928,7 +1933,7 @@ export const register: Register = (on, options) => {
         ) : (
           <Box flexDirection="row" gap={1} marginTop={1}>
             {nowCommand
-              ? <Button key="next" variant="primary" label={`▶ Next: ${nowCommand}`} onPress={() => void fillPrompt($, nowCommand)} />
+              ? <Button key="next" variant="primary" label={nowLabel} onPress={() => void fillPrompt($, nowCommand)} />
               : <Text><Text dimColor>Next: </Text><Text>{nowNext}</Text></Text>}
             {nowCommand ? <Text dimColor wrap="truncate-end">{nowNext === nowCommand ? 'fills the prompt' : nowNext}</Text> : null}
           </Box>

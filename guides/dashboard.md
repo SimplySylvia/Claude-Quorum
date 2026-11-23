@@ -89,6 +89,12 @@ in one of three states:
 - **Stopped:** the task is `ESCALATED` or `HALTED`, or the run's last turn ended on an API error, a refusal, or an
   interrupt (Esc). A turn's stop clears when the next turn starts; a status's stop stays until the status changes.
 
+**An escalated run stays on show.** A run that escalates stops without ending itself, so when you come back after
+its turn has ended the band still reads `run stopped` and the Run card is still there. They go when you run
+`/quorum:run` again and that run ends, when the session ends, or when you run `quorum-run leave <session id>`. If
+you fix the checks by hand and the status leaves `ESCALATED` before any of those, the band reads the run as waiting
+on you until one of them happens. A halted run ends itself: once its turn is over, nothing of the run shows.
+
 ### The band
 
 While the run goes or waits, **▶ Next** isn't drawn, since the run runs the next command itself, and the run's words
@@ -110,12 +116,15 @@ band's own width:
   open now, not the next stop.
 - **Going** is in the Claude color. **Waiting** is amber and bold. No state is told by color alone: each has its own
   words or mark.
-- **A problem comes first.** When the band shows something wrong, the run's words take the 90-to-109 form on a band
-  of 110 columns or more, and aren't drawn under 110. Next still isn't drawn.
+- **A problem comes first.** When the band shows something wrong, the run's words drop a size: the 90-to-109 form
+  on a band of 110 columns or more, and the under-90 form (`▸▸ plan approval`, `◆ plan approval`, `◆ waiting`) under
+  110, so the band still tells a run that goes from one that waits, and from no run. Next still isn't drawn.
 
 **A stopped run** reads `run stopped`, in red, or in amber after an interrupt, and **▶ Next** is back: it fills the
-prompt with `/quorum:run`, which continues the run (`▶ /quorum:run` at 110 columns or more, `▶ Next` under). A
-`HALTED` task keeps its own Next, since `/quorum:run` doesn't continue a halted task.
+prompt with `/quorum:run` and the flags the run was started with, `--until <stage>` then `--yes`, so the run you
+continue stops where the first one would have (`/quorum:run --until review`; the bare `/quorum:run` for a run
+started with neither). The button reads `▶ /quorum:run --until review` at 110 columns or more, and `▶ Next` under.
+A `HALTED` task keeps its own Next, since `/quorum:run` doesn't continue a halted task.
 
 **On a band that doesn't fit,** these give way in order:
 
@@ -128,7 +137,13 @@ prompt with `/quorum:run`, which continues the run (`▶ /quorum:run` at 110 col
 7. last, the progress, the file count, and a review's text.
 
 For a stopped run the problem's words give way first, then the slug and risk, the stage dots, and the progress, file
-count and review text; `run stopped` and Next stay whole. The badge and the buttons always stay.
+count and review text; `run stopped` and Next stay whole. The badge and the buttons always stay. The run's words and
+`run stopped` are never wrapped onto a second row. A button counts as the terminal draws it, `[ Dashboard ]`: its
+label and four columns.
+
+So on a band whose row is already too wide with the slug on it, the run's words go before the slug does, and a
+going or waiting run shows only by its missing Next. The demo task in review is one: on a 140-column band its
+progress, file count and two problems leave the words no room.
 
 ### The Run card
 
@@ -154,7 +169,9 @@ During a run the Now card's last row changes too:
 
 - **Going:** no Next button. Two lines say `the run goes on by itself` and `next stop: …`.
 - **Waiting:** no Next button. The Run card's waiting line shows, in amber and bold.
-- **Stopped:** a `▶ Next: /quorum:run` button that fills the prompt. A `HALTED` task keeps its own Next.
+- **Stopped:** a `▶ Next: /quorum:run` button that fills the prompt with `/quorum:run` and the run's flags, as the
+  band's Next does. Its label names the flags (`▶ Next: /quorum:run --until review`), or reads
+  `▶ Next: /quorum:run …` where they don't fit the card. A `HALTED` task keeps its own Next.
 
 The Task card doesn't change.
 
