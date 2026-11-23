@@ -7023,6 +7023,89 @@ test('a stop the Stop hook sends back to work never reads as waiting', async ($,
   expect(drawn).toEqual([GOING, GOING, GOING, GOING, GOING, GOING])
 })
 
+test("what a turn's end left to write never lands on the turn that started since", async ($, on) => {
+  const held = heldQuestions(on)
+  // runWorld(), with an engine that answers a turn's end only when the test lets it, once `gate.isShut`.
+  const gate = { isShut: false, waiting: [] as (() => void)[], arrived: [] as (() => void)[] }
+  // The task's file calls `atRead.next` once, the next time the dashboard reads its files: the test's way into the
+  // middle of a refresh.
+  const atRead: { next: (() => void) | null } = { next: null }
+  const files = inRun('PLANNING')
+  const stateMd = files[STATE_MD]
+  Object.defineProperty(files, STATE_MD, { enumerable: true, get: () => { const act = atRead.next; atRead.next = null; act?.(); return stateMd } })
+  world(on, files, '/repo', {}, [], { clock: false })
+  const clock = mock.clock(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async (_, e) => {
+    if (gate.isShut) {
+      await new Promise<void>(resolve => {
+        gate.waiting.push(resolve)
+        for (const a of gate.arrived.splice(0)) a()
+      })
+    }
+    return { text: e.answer }
+  })
+  const reached = () => (gate.waiting.length > 0 ? Promise.resolve() : new Promise<void>(resolve => { gate.arrived.push(resolve) }))
+  const open = () => { gate.isShut = false; for (const w of gate.waiting.splice(0)) w() }
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const GOING = 'autopilot · next stop: plan approval'
+  const WAITING = 'autopilot · waiting for you: plan approval'
+  const words = async () => (await bandRow($, 140)).words
+  expect(await words()).toBe(GOING)
+
+  for (const reason of ['error', 'refusal', 'aborted', 'answer'] as const) {
+    // The next turn starts while the end of the last one still reads the task.
+    const ended = endTurn($, reason)
+    await startTurn($)
+    await ended
+    // The new turn works: no dead turn is told of it, and the re-read starts no wait in it.
+    expect(await words()).toBe(GOING)
+    await clock.advance(10 * REREAD_MS)
+    expect(await words()).toBe(GOING)
+
+    // The next turn starts before the engine has answered the end of the last one.
+    gate.isShut = true
+    const late = endTurn($, reason)
+    await reached()
+    await startTurn($)
+    open()
+    await late
+    expect(await words()).toBe(GOING)
+    await clock.advance(10 * REREAD_MS)
+    expect(await words()).toBe(GOING)
+  }
+
+  // A turn ends with an answer, and its re-read is reading the task when the next turn starts and ends as well:
+  // the wait begins at the second turn's own re-read, not at the first's.
+  await endTurn($)
+  let nextTurn: Promise<unknown> = Promise.resolve()
+  atRead.next = () => { nextTurn = startTurn($).then(() => endTurn($)) }
+  await clock.advance(REREAD_MS)
+  expect(atRead.next).toBeNull()
+  await nextTurn
+  expect(await words()).toBe(GOING)
+  await clock.advance(REREAD_MS - 1)
+  expect(await words()).toBe(GOING)
+  await clock.advance(1)
+  expect(await words()).toBe(WAITING)
+
+  // A question still open when the next turn starts isn't counted in it: its late return leaves the new turn's
+  // own question open.
+  await startTurn($)
+  const asked = ask($)
+  expect(await words()).toBe(WAITING)
+  await startTurn($)
+  expect(await words()).toBe(GOING)
+  const askedNext = ask($)
+  expect(await words()).toBe(WAITING)
+  held.answer()
+  await asked
+  expect(await words()).toBe(WAITING)
+  held.answer()
+  await askedNext
+  expect(await words()).toBe(GOING)
+})
+
 test('a run has stopped on a stuck status or a dead turn, and a status reason outlasts the next turn', async ($, on) => {
   const held = heldQuestions(on)
   const files = inRun('BUILDING')

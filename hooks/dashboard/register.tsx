@@ -63,6 +63,9 @@ const EDIT_STATUSES = ['BUILDING', 'IN_REVIEW']
 // What the main session's turn tells of the run: its open questions, how its last turn ended, and whether it now
 // waits on the person. Kept in memory only; a session start replaces it.
 let runTurn: RunTurn = { asking: 0, ended: null, isIdle: false }
+// How many main-session turns have started. A hook that awaits takes it first, and after the await writes `runTurn`
+// only if it's unchanged: what an earlier turn left to write must not land on a later turn's state.
+let turnNo = 0
 // How long after a main-session turn ends, in a run, the task is read once more: only then does a turn that ended
 // with an answer read as waiting on the person, and a status the Stop hook wrote late is still seen. From the trial
 // in .tasks/map-release-0-13/trials/11-result.md (main working tree), on Claude Code 2.1.330, headless, Windows 11:
@@ -707,13 +710,19 @@ function redraw($: EngineInterface) {
   }
 }
 
-// The main session's turn ended: note how, and in a run set the one re-read of the task, RUN_REREAD_MS on, without
+// The main session's turn `turn` ended: note how, unless a later turn has started. Awaits nothing, so no turn can
+// start between the check and the write. Never throws.
+function noteTurnEnd($: EngineInterface, reason: RunTurn['ended'], turn: number) {
+  if (turn !== turnNo) return
+  runTurn = { ...runTurn, ended: reason, isIdle: false }
+  redraw($)
+}
+
+// After the main session's turn `turn` ended: in a run set the one re-read of the task, RUN_REREAD_MS on, without
 // waiting for it. Only at that re-read does an answered turn start to read as waiting, and only if no turn started
 // since and the run is still there. Never throws.
-async function noteTurnEnd($: EngineInterface, reason: RunTurn['ended'], maxRounds: number) {
+async function setReread($: EngineInterface, turn: number, maxRounds: number) {
   try {
-    runTurn = { ...runTurn, ended: reason, isIdle: false }
-    redraw($)
     if ((await read($, run)) === null) return
     reread?.cancel()
     // A superseded timer was cancelled; the guard keeps one that still fires from doing a newer one's work.
@@ -723,7 +732,8 @@ async function noteTurnEnd($: EngineInterface, reason: RunTurn['ended'], maxRoun
       void (async () => {
         try {
           await refresh($, maxRounds)
-          if (runTurn.ended === 'answer' && (await read($, run)) !== null) runTurn = { ...runTurn, isIdle: true }
+          const isInRun = (await read($, run)) !== null
+          if (turn === turnNo && runTurn.ended === 'answer' && isInRun) runTurn = { ...runTurn, isIdle: true }
           redraw($)
         } catch {
           // A failed re-read leaves the run as it read; the next refresh reads the task again.
@@ -732,7 +742,7 @@ async function noteTurnEnd($: EngineInterface, reason: RunTurn['ended'], maxRoun
     })
     reread = mine
   } catch {
-    // The dashboard only watches: a failed note leaves the turn as it read.
+    // The dashboard only watches: with no re-read the turn reads as it ended.
   }
 }
 
@@ -749,6 +759,7 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: COMMAND, description: "Show or hide the Quorum task dashboard" })
     await settleAgents($)
     selected = null
+    turnNo++
     runTurn = { asking: 0, ended: null, isIdle: false }
     reread?.cancel()
     reread = null
@@ -855,6 +866,7 @@ export const register: Register = (on, options) => {
   })
 
   on('turn.complete', async ($, e, next) => {
+    const turn = turnNo
     const done = await next(e)
     // The agent that made the edit finished its turn: the main session's (no agentId) for its own edits.
     if (edit && edit.agentId === (e.agentId ?? null)) {
@@ -866,8 +878,10 @@ export const register: Register = (on, options) => {
       const now = await $.clock.now()
       keepTicking($, await update($, agents, all => all.map(a => (a.id === id && a.endedAt === null ? { ...a, endedAt: now } : a))))
     } else {
+      // Before the refresh, which awaits: a turn that starts while the task is read resets what this wrote.
+      noteTurnEnd($, e.reason, turn)
       await refresh($, maxRounds)
-      await noteTurnEnd($, e.reason, maxRounds)
+      await setReread($, turn, maxRounds)
     }
     return done
   })
@@ -876,6 +890,7 @@ export const register: Register = (on, options) => {
   // still sees a late ESCALATED, and can't start a wait in a turn that hasn't ended.
   on('turn.start', ($, e, next) => {
     if (e.agentId === undefined) {
+      turnNo++
       runTurn = { asking: 0, ended: null, isIdle: false }
       redraw($)
     }
@@ -885,13 +900,17 @@ export const register: Register = (on, options) => {
   // A question the main session asks: the run waits on the person from the call until it returns.
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     if (e.agentId !== undefined) return next(e)
+    const turn = turnNo
     runTurn = { ...runTurn, asking: runTurn.asking + 1 }
     redraw($)
     try {
       return await next(e)
     } finally {
-      runTurn = { ...runTurn, asking: Math.max(0, runTurn.asking - 1) }
-      redraw($)
+      // A turn that started since has dropped this question from the count already.
+      if (turn === turnNo) {
+        runTurn = { ...runTurn, asking: Math.max(0, runTurn.asking - 1) }
+        redraw($)
+      }
     }
   }).catch(($, e, next) => next(e))
 
