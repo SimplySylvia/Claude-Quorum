@@ -66,7 +66,9 @@ finished with its PR open.</sub>
       than green, and the band reads `checks stale`. In a narrow pane the note gives way first, then the commit.
 - **▶ Next** puts the next command in your prompt to send or edit. It never sends it for you.
   [During a `/quorum:run`](#during-a-quorumrun) it's drawn only once the run has stopped.
-- **Toasts** when a task converges, halts, escalates, or is ready for you.
+- **Toasts** when a task converges, halts, escalates, or is ready for you. [During a `/quorum:run`](#announcements)
+  a halt, an escalation and the run's other stops are announced as notifications instead, and the toasts that stay
+  say what the run does next.
 - **`/quorum:review`:** the one this session is running gets a card of its own, with its reviewers, the voter's
   kept findings as the same findings tree, and the builder during `--fix`. It sits under a task's cards, or takes
   the band and pane when there's no task. Finished reviews stay in a **Reviews** section, and an unfinished one is
@@ -80,8 +82,8 @@ tasks, reviews, and maps; research isn't on the dashboard.
 
 ## During a /quorum:run
 
-While this session is in a `/quorum:run`, from the run's start until it ends, the band and the pane say so. A run is
-in one of three states:
+While this session is in a `/quorum:run`, from the run's start until it ends, the band and the pane say so, and the
+run's stops are [announced](#announcements). A run is in one of three states:
 
 - **Going:** the run is working, and starts the next stage itself.
 - **Waiting:** the run asked you a question, or its turn ended and it's your move. After a turn's end the dashboard
@@ -204,12 +206,80 @@ During a run the Now card's last row changes too:
 
 The Task card doesn't change.
 
+### Announcements
+
+A run you've looked away from tells you when it needs you or has stopped. There are four kinds of stop, and each
+is announced once, with the task's slug in front:
+
+| The stop | The message |
+|---|---|
+| The run asks you a question at a named gate | `csv-export: waiting for you · plan approval`, or `… · mockup sign-off` |
+| The run asks you anything else, or its turn ends and it's your move | `csv-export: the run is waiting for you` |
+| The task halts | `csv-export: run stopped · HALTED · see the post-mortem` |
+| The task escalates | `csv-export: run stopped · ESCALATED · fix the checks, then /quorum:run` |
+| The run's turn dies on an API error | `csv-export: run stopped · API error · /quorum:run continues it` |
+| The run's turn is refused | `csv-export: run stopped · refused · /quorum:run continues it` |
+| The run ends | `csv-export: run ended · AWAITING-HUMAN`, with the task's status |
+
+- **A question** is announced when its dialog opens, once for each dialog, and names the gate of the task on show.
+  A turn that ends with the run still there, as on a question in plain text, is announced when the run starts to
+  read as waiting, about half a second after the turn's end, unless a new turn has started or the run has ended by
+  then.
+- **A halt or an escalation** is announced when the status of the task on show changes to `HALTED` or `ESCALATED`,
+  each time it does, in place of the status toast. It's the only message for that moment: no waiting message
+  follows it at the turn's end, and none for the dead turn or the run's end while the task is still `HALTED` or
+  `ESCALATED`. A task that left `ESCALATED` before its run ended gets the run's-end message.
+- **A turn that dies** is announced when it ends, while the run is still there.
+- **The run's end** is announced when the dashboard finds the run gone, whether it ended by itself or you ran
+  `quorum-run leave`. It is then the only message: a turn that dies as the run ends gets no message of its own.
+- **The slug** is the task on show's. With none on show it is the last task the run showed, with the status it had
+  then: the stages take a finished task off show before the run ends, and the run's-end message still names it.
+  A run with no task says the same without the slug: `the run is waiting for you`,
+  `run stopped · API error · /quorum:run continues it`, `run ended`.
+
+**Each is a notification, or a toast.** An announcement goes out as a notification through Claude Code's own
+notification setting (`preferredNotifChannel`); Quorum has no setting for it. When Claude Code can't send it, the
+same text is a toast that stays 15 seconds, and otherwise you never get both. One channel gets both: `terminal_bell`
+only rings and carries no text, so there you get the bell and the toast. A terminal doesn't report back, so a
+notification that your terminal or system drops raises no toast; the band and the Run card say the same for as
+long as the stop lasts.
+
+**What isn't announced:**
+
+- **The run's opening questions.** You've just typed the command, so from the run's start (and each time
+  `/quorum:run` continues it) questions aren't announced until a Quorum agent starts, the task on show changes, or
+  the run's next turn starts. A halt, an escalation, a turn that dies and the run's end are announced even then.
+  A session that starts, or is resumed, already in a run has no such quiet start.
+- **An interrupt (Esc).** You did it. The band and the Run card still read the run as stopped.
+- **A sub-agent's question, or a sub-agent's turn that dies.**
+- **A task already `HALTED` or `ESCALATED`** when it first comes on show: only a change to one of the two is told.
+- **A session that starts, is cleared or is resumed** after its run went: that isn't a run ending.
+- **Anything outside a run.**
+
+The dashboard keeps what the announcements remember (the quiet start, the last task shown) in memory only. After the
+plugin reloads there's no quiet start, and the slug is the task on show's, or none.
+
+**The quiet toasts.** Stages that finish while the run goes on by itself stay toasts, with no notification, and
+say what the run does next:
+
+| Status | The toast in a run | The status alone (`csv-export: READY`) when |
+|---|---|---|
+| `CONVERGED`, MEDIUM or HIGH | `csv-export: CONVERGED · blind test next` | the run was started with `--until review` |
+| `CONVERGED`, LOW | `csv-export: CONVERGED · final proof next` | never: a LOW review goes on to the proof and `READY` |
+| `READY` | `csv-export: READY · drafting the PR` | the run was started with `--until review` |
+| `AWAITING-HUMAN` | `csv-export: AWAITING-HUMAN · drafting the PR` | the run was started with `--until blind` |
+
+The status alone means the run stops there, and the run's-end message follows. These toasts stay as long as any
+toast of Claude Code's does. Outside a run the five status toasts read as they always have: `review converged`,
+`HALTED after the round cap; see the post-mortem`, `ESCALATED: the Stop-hook checks failed 3 times`,
+`READY for /quorum:pr-draft` and `waiting for your review`.
+
 ### When nothing of the run shows
 
 Outside a run, the band and the pane are as the rest of this guide describes. With no task on show, or in a
 [map session](#the-map-session), nothing of the run is drawn; the run's words and the Run card appear once a task is
-on show. The dashboard shows only this session's run, never another session's. A run raises no notification, and the
-toasts read as they do outside one.
+on show. The dashboard shows only this session's run, never another session's. With no task on show the
+run's stops are still [announced](#announcements).
 
 ## Maps
 

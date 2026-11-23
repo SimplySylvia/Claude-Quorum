@@ -36,8 +36,9 @@ The command itself shipped in 0.5.0. Still to do:
 The command shipped in 0.5.0, with each stage's instructions moved to `steps.md` so `run`
 and the stage commands share them. Still to do:
 
-- **The dashboard during a run:** an announcement at each stop (a notification, or a toast), so a user can work
-  elsewhere and come back when asked. The band and the Run card already show the run.
+- **A doubled notification at a question.** The dashboard announces a run's stops, a question dialog among them.
+  In the real run of map `release-0-13` (its task 11), check whether Claude Code also notifies at a question
+  dialog; if it does, the dashboard's message there drops to a toast.
 - **Context length.** A whole MEDIUM task is long for one conversation. Measure one with the Spend section and the
   transcript size, and see whether the chat rule (one line per stage) is enough. If it isn't, item 5 is the fix.
 

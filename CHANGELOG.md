@@ -26,6 +26,21 @@ copy with `/plugin marketplace update`.
   since `/quorum:run` stops again until its checks pass). Next carries the flags the run was started with
   (`/quorum:run --until review --yes`), so the run you continue stops where the first one would have. A `HALTED`
   task keeps its own Next and reads `HALTED · see the post-mortem`.
+- **The dashboard announces a run's stops.** A `/quorum:run` you've looked away from tells you when it needs you or
+  has stopped, once for each: a question (`csv-export: waiting for you · plan approval`, or
+  `csv-export: the run is waiting for you` where no gate is open), a halt or an escalation
+  (`csv-export: run stopped · HALTED · see the post-mortem`,
+  `… run stopped · ESCALATED · fix the checks, then /quorum:run`), a turn that dies
+  (`… run stopped · API error · /quorum:run continues it`, or `refused`), and the run's end
+  (`csv-export: run ended · AWAITING-HUMAN`). Each is a notification through Claude Code's own notification setting;
+  there is no Quorum setting for it. When it can't be sent the same text is a toast that stays 15 seconds, and on a
+  channel that only rings a bell you get the bell and the toast. The run's opening questions, an interrupt (Esc)
+  and a sub-agent's question aren't announced, and nothing is outside a run. See
+  [Announcements](guides/dashboard.md#announcements).
+- **In a run the quiet toasts say what the run does next.** `csv-export: CONVERGED · blind test next` (`final proof
+  next` for a LOW task), `csv-export: READY · drafting the PR` and `csv-export: AWAITING-HUMAN · drafting the PR`,
+  or the status alone (`csv-export: READY`) where `--until` stops the run there. A halt or an escalation in a run
+  is announced and raises no status toast. Outside a run the toasts read as before.
 - **An escalated run keeps its marker.** `/quorum:run` no longer runs `quorum-run leave` when the task is
   `ESCALATED`, so the band still reads `run stopped` and the Run card still shows when you come back after the
   run's turn has ended. The marker goes when `/quorum:run` is run again and that run ends on anything but an
