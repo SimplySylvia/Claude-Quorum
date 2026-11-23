@@ -36,8 +36,8 @@ The command itself shipped in 0.5.0. Still to do:
 The command shipped in 0.5.0, with each stage's instructions moved to `steps.md` so `run`
 and the stage commands share them. Still to do:
 
-- **The dashboard during a run:** "autopilot · next stop: plan approval" in the band, and a toast at each stop, so a
-  user can work elsewhere and come back when asked. The dashboard can't tell a run from single commands today.
+- **The dashboard during a run:** an announcement at each stop (a notification, or a toast), so a user can work
+  elsewhere and come back when asked. The band and the Run card already show the run.
 - **Context length.** A whole MEDIUM task is long for one conversation. Measure one with the Spend section and the
   transcript size, and see whether the chat rule (one line per stage) is enough. If it isn't, item 5 is the fix.
 

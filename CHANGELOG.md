@@ -3,6 +3,44 @@
 All notable changes to this plugin. Versions match `version` in `.claude-plugin/plugin.json`; update an installed
 copy with `/plugin marketplace update`.
 
+## Unreleased
+
+### Added
+
+- **The dashboard shows a `/quorum:run`.** While the session is in a run, the band's Next button gives way to the
+  run's words: `autopilot · next stop: plan approval` while it goes, and `autopilot · waiting for you: plan approval`
+  in amber and bold while it waits on you, with shorter forms under 110 and under 90 columns (`auto · next: …`,
+  `▸▸ …`; `waiting: …`, `◆ …`). A problem still comes first: beside one the words drop a size, to the short form
+  (`▸▸ …`, `◆ …`) under 110 columns. On a band that doesn't fit the words step down, then the slug and the stage
+  dots give way for a form that fits whole, or else for the shortest form cut at the end, and the words go only
+  when not even that can be drawn; they never wrap onto a second row. Nothing of the run shows with no task on show
+  or in a map session.
+- **The Run card.** During a run it's the first card of the task's pane: `Run · autopilot · since 14:02`, how the run
+  was started (`started with --until review --yes`, or `stops only where you must decide`), and the next stop, what
+  the run waits on, or why it stopped. A stopped run's first row reads `Run · stopped · started 14:02`, so the time
+  isn't read as when it stopped. The Now card draws no Next while the run goes or waits, and says
+  `the run goes on by itself`.
+- **A stopped run.** When the task is `ESCALATED` or `HALTED`, or the run's turn ended on an API error, a refusal,
+  or an interrupt, the band reads `run stopped` beside a Next that fills `/quorum:run`, and the Run card says why
+  (`interrupted · /quorum:run continues it`; for an escalated task `ESCALATED · fix the checks, then /quorum:run`,
+  since `/quorum:run` stops again until its checks pass). Next carries the flags the run was started with
+  (`/quorum:run --until review --yes`), so the run you continue stops where the first one would have. A `HALTED`
+  task keeps its own Next and reads `HALTED · see the post-mortem`.
+- **An escalated run keeps its marker.** `/quorum:run` no longer runs `quorum-run leave` when the task is
+  `ESCALATED`, so the band still reads `run stopped` and the Run card still shows when you come back after the
+  run's turn has ended. The marker goes when `/quorum:run` is run again and that run ends on anything but an
+  escalation, when the session ends, or with `quorum-run leave`. A halted run still leaves. So that the kept marker doesn't keep the run guard on,
+  the run marks it with the new `quorum-run escalated <session id>`, and `hooks/run-guard.sh` ignores a marked one:
+  you can edit and commit by hand to fix the checks, whichever task is active, until `/quorum:run` is run again
+  (`quorum-run enter` writes the marker afresh). Not when the Stop hook itself escalated the task as the run's own
+  turn ended: the run couldn't mark its marker, so while the active task hasn't started its build (the escalated
+  one or another), or with none active, the guard still holds until `quorum-run leave <session id>`, or until
+  `/quorum:run` is run again and continues the escalated task, where it stops and marks the marker. With another
+  task active, `/quorum:run` continues that one or starts a new one, and stays guarded.
+- **`quorum-run enter` takes `--until <stage>` and `--yes`.** `/quorum:run` passes the flags you gave it, and they're
+  written to the run's marker (`.tasks/.run-sessions/<session id>`) under its start time, so the dashboard knows
+  where the run stops next. An unknown flag or stage is refused and leaves an existing marker unchanged.
+
 ## 0.12.0 (2026-11-18)
 
 ### Added

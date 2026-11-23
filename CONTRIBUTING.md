@@ -29,8 +29,9 @@ git ls-files --eol | awk '$2 == "w/crlf"' | wc -l   # 0 when every file is LF
 ```
 
 The dashboard (`hooks/dashboard/`) is a hooks module: TypeScript that runs inside Claude Code, with no Node or DOM.
-`task.ts` holds the pure parsing and stage logic, `tree.ts` the file tree's pure model and layout, and `map.ts` the
-map's pure parsing, phase and ticket logic; `register.tsx` hooks the events and draws. The values it keeps in
+`task.ts` holds the pure parsing and stage logic, `tree.ts` the file tree's pure model and layout, `map.ts` the
+map's pure parsing, phase and ticket logic, and `run.ts` the pure model of a `/quorum:run` (its marker, next stop,
+state, and the band's words); `register.tsx` hooks the events and draws. The values it keeps in
 the session are declared in `types/index.d.ts`. To try a change live, start `claude --plugin-dir .` from this repo;
 it reloads the module when you save.
 

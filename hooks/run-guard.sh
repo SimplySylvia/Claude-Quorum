@@ -14,6 +14,16 @@
 # after the build starts the main session can edit again, as simplify-diff does. That leaves one gap: a main session
 # that has started the build could still write the code itself before it starts the builder. Not a sandbox.
 #
+# A run that stops on an ESCALATED task keeps its marker, so the dashboard still reads `run stopped`, and marks it
+# with `quorum-run escalated <session>`, which adds the line `escalated`. A marker with that line is ignored here:
+# the run is over and the person fixes the checks by hand, with the escalated task active, another one, or none.
+# `quorum-run enter` writes the marker afresh, without the line, so the session's next run is guarded again.
+# Not marked: a task the Stop hook itself escalated as the run's own turn ended, since the run had no turn left to
+# mark it in. That marker is guarded as any other (the active task before its build, be it the escalated one or
+# another, or no task active) until `quorum-run leave <session>`, or until /quorum:run is run again and continues
+# the escalated task: only that run stops on the status and marks its marker. One that continues another task or
+# starts a new one is guarded as any run.
+#
 # Without a run session, or on any failure to tell, it exits 0 at once. Bash 3.2 compatible.
 set -uo pipefail
 
@@ -37,7 +47,10 @@ if [ -n "$cwd" ] && [ -d "$cwd" ]; then cd "$cwd" 2>/dev/null || exit 0; fi
 quorum_git_probe
 task_context "$BIN"
 MAIN=$TASK_MAIN; [ -n "$MAIN" ] || exit 0
-[ -f "$MAIN/.tasks/.run-sessions/$session" ] || exit 0
+MARKER="$MAIN/.tasks/.run-sessions/$session"
+[ -f "$MARKER" ] || exit 0
+# The run stopped on an escalation (see the header): its marker stays for the dashboard, and guards nothing.
+if tr -d '\r' < "$MARKER" 2>/dev/null | grep -qx 'escalated'; then exit 0; fi
 
 # Once the build has started, this guard is done.
 task=$TASK_SLUG

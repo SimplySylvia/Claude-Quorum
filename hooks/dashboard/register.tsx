@@ -1,14 +1,15 @@
 // Quorum's dashboard: a band above the prompt, and a pane with what the current stage is doing (each reviewer of the
 // round, the blind test's reports), how the task's checks stand, its stages, review rounds and running agents, and
 // standalone reviews (/quorum:review): the one running now, and the ones before it; the Map card of the map a task was
-// started from, and, in a /quorum:map session, the map itself. It reads .tasks/, and runs two commands in the
+// started from, and, in a /quorum:map session, the map itself. During a /quorum:run the band and the pane show the
+// run: its next stop, that it waits on the person, or that it stopped. It reads .tasks/, and runs two commands in the
 // background: `gh` for the task's PR, and the plugin's `bin/quorum-map tasks` for the map's task states, which asks
 // git, or GitHub through `gh` when a task records a PR, whether a task merged. The skills and bin/ scripts stay the source of truth.
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Blind, ChangedFile, Check, FileList, Findings, FindingsView, MapReview, MapTask, MapTaskRun, MapTicket, MapView, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, RoundKept, Section, Snapshot, Stage } from '../../types'
+import type { Blind, ChangedFile, Check, FileList, Findings, FindingsView, MapReview, MapTask, MapTaskRun, MapTicket, MapView, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, RoundKept, RunMarker, Section, Snapshot, Stage } from '../../types'
 import {
   GLYPH, ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, parsePlanSteps, SLICE_AT, stageFor, stages, tokenCount,
@@ -17,6 +18,8 @@ import {
 import { awaitingFrom, awaitingOf, cellWidth, changeHeader, cutEnd, confidenceRow, footprint, glue, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows, wrap } from './tree'
 import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
 import { isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskRow, taskState, ticketOrder, ticketRow, ticketSummary, wrapWhole } from './map'
+import { BUTTON_FRAME, fitRun, parseRunMarker, runCardRows, runCommand, runForms, runView } from './run'
+import type { RunTurn } from './run'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
@@ -35,6 +38,8 @@ const sections = atom({ plugin: 'quorum', key: 'sections' } as const, {}, { shap
 const map = atom({ plugin: 'quorum', key: 'map' } as const, null, { shape: 'map-1' })
 // The last `quorum-map tasks` result, for the map its slug names.
 const mapStates = atom({ plugin: 'quorum', key: 'mapstates' } as const, null, { shape: 'mapstates-1' })
+// This session's /quorum:run, as its marker reads (`quorum-run enter` writes it, `leave` removes it); null outside a run.
+const run = atom({ plugin: 'quorum', key: 'run' } as const, null, { shape: 'run-1' })
 // How long a PR lookup stands before the next refresh asks GitHub again.
 const PR_TTL_MS = 2 * 60 * 1000
 // How long a `quorum-map tasks` attempt stands before the next refresh runs it again.
@@ -55,6 +60,27 @@ let flash: Timer | null = null
 const FLASH_MS = 2500
 // The statuses an edit is recorded and shown in: Build and the code review's fix rounds.
 const EDIT_STATUSES = ['BUILDING', 'IN_REVIEW']
+// What the main session's turn tells of the run: its open questions, how its last turn ended, and whether it now
+// waits on the person. Kept in memory only; a session start replaces it.
+let runTurn: RunTurn = { asking: 0, ended: null, isIdle: false }
+// How many main-session turns have started. A hook that awaits takes it first, and after the await writes `runTurn`
+// only if it's unchanged: what an earlier turn left to write must not land on a later turn's state.
+let turnNo = 0
+// How long after a main-session turn ends, in a run, the task is read once more: only then does a turn that ended
+// with an answer read as waiting on the person, and a status the Stop hook wrote late is still seen. From the trial
+// in .tasks/map-release-0-13/trials/11-result.md (main working tree), on Claude Code 2.1.330, headless, Windows 11:
+// (a) the Stop hook's write lands before `turn.complete`: the last hook's write came 47 to 63 ms before it, and
+//     `turn.complete` fired only after the last Stop hook had finished. So the delay (a) needs is the least, 500 ms.
+// (b) neither `turn.complete` nor `turn.start` fires for a stop the Stop hook blocks: the work the block sends
+//     back stays inside the same turn, so there is no gap between a blocked stop's `turn.complete` and the
+//     `turn.start` after it to measure (0 of 3 runs), and three times it adds nothing.
+// The delay is the larger of the two, rounded up to 500 ms. Should a blocked stop ever end a turn with `answer`,
+// the `turn.start` that follows within the delay keeps the run from reading as waiting (requirement 10).
+const RUN_REREAD_MS = 500
+// The one pending re-read; a later turn's end replaces it, and a session start drops it. Kept in memory only.
+let reread: Timer | null = null
+// The turn count (`turnNo`) at the last re-read set or dropped: the end of an earlier turn sets none.
+let rereadTurn = 0
 function clearEdit() {
   flash?.cancel()
   flash = null
@@ -385,6 +411,13 @@ async function mapToShow($: EngineInterface, root: string, session: string, sess
   return t && t.mapSlug !== '' && t.mapTask > 0 ? readMap($, root, t.mapSlug, sessionRoot, false) : null
 }
 
+// This session's run marker, from the main working tree's .tasks/; null for no run. An empty marker is still a run.
+async function readRun($: EngineInterface, tasksRoot: string, session: string): Promise<RunMarker | null> {
+  if (!isSessionId(session)) return null
+  const text = await readOr($, `${tasksRoot}/.tasks/.run-sessions/${session}`)
+  return text === null ? null : parseRunMarker(text)
+}
+
 // How many other tasks the pane lists.
 const OTHERS_SHOWN = 6
 
@@ -467,10 +500,14 @@ const prOf = (t: Snapshot, known: PullRequest | null) => (known?.slug === t.slug
 
 
 // Put a Quorum command in the prompt for the person to send, edit, or add to; never send it. A draft they already
-// typed stays, after the command, as its arguments.
+// typed stays, after the command, as its arguments. The command is never doubled: a draft that is the start of it
+// (the bare `/quorum:run`, for a stopped run's Next with flags) gives way to the command, and a draft that already
+// starts with it, or is the same slash command with arguments of the person's own after any whitespace, stays as
+// typed.
 async function fillPrompt($: EngineInterface, cmd: string) {
   const draft = ((await $.prompt.read().catch(() => null))?.text ?? '').trim()
-  const text = draft.startsWith(cmd) ? draft : draft ? `${cmd} ${draft}` : `${cmd} `
+  const isSame = draft.startsWith(cmd) || draft.split(/\s/)[0] === cmd.split(' ')[0]
+  const text = !draft || cmd.startsWith(`${draft} `) ? `${cmd} ` : isSame ? draft : `${cmd} ${draft}`
   await $.prompt.fill({ text, cursor: text.length }).catch(() => undefined)
 }
 
@@ -605,6 +642,8 @@ async function refresh($: EngineInterface, maxRounds: number, forcePr = false): 
   const session = await $.session.id().catch(() => '')
   const sessionRoot = await $.session.root()
   const { tasksRoot } = await gitPaths($, sessionRoot)
+  const marker = await readRun($, tasksRoot, session)
+  await update($, run, () => marker)
   const found = await reviewsSnapshot($, tasksRoot, session, sessionRoot)
   await update($, reviews, () => found)
   const shown = await mapToShow($, tasksRoot, session, sessionRoot, after)
@@ -668,6 +707,54 @@ async function noteEdit($: EngineInterface, rawPath: string, agentId: string | u
   }
 }
 
+// Redraw for a change of `runTurn`, which no atom holds. Never throws.
+function redraw($: EngineInterface) {
+  try {
+    $.ui.invalidate('ui.render')
+  } catch {
+    // The dashboard only watches: the next redraw shows it.
+  }
+}
+
+// The main session's turn `turn` ended: note how, unless a later turn has started. Awaits nothing, so no turn can
+// start between the check and the write. Never throws.
+function noteTurnEnd($: EngineInterface, reason: RunTurn['ended'], turn: number) {
+  if (turn !== turnNo) return
+  runTurn = { ...runTurn, ended: reason, isIdle: false }
+  redraw($)
+}
+
+// After the main session's turn `turn` ended: in a run set the one re-read of the task, RUN_REREAD_MS on, without
+// waiting for it. Only at that re-read does an answered turn start to read as waiting, and only if no turn started
+// since and the run is still there. A turn's end that gets here after a later turn's end set its re-read, or after a
+// session start dropped it, sets none: nothing is awaited between that check and the write. Never throws.
+async function setReread($: EngineInterface, turn: number, maxRounds: number) {
+  try {
+    if ((await read($, run)) === null) return
+    if (turn < rereadTurn) return
+    rereadTurn = turn
+    reread?.cancel()
+    // A superseded timer was cancelled; the guard keeps one that still fires from doing a newer one's work.
+    const mine: Timer = $.clock.after(RUN_REREAD_MS, () => {
+      if (reread !== mine) return
+      reread = null
+      void (async () => {
+        try {
+          await refresh($, maxRounds)
+          const isInRun = (await read($, run)) !== null
+          if (turn === turnNo && runTurn.ended === 'answer' && isInRun) runTurn = { ...runTurn, isIdle: true }
+          redraw($)
+        } catch {
+          // A failed re-read leaves the run as it read; the next refresh reads the task again.
+        }
+      })()
+    })
+    reread = mine
+  } catch {
+    // The dashboard only watches: with no re-read the turn reads as it ended.
+  }
+}
+
 function open($: EngineInterface, focus?: true) {
   return $.ui.open({ id: PANE, title: 'Quorum', ...(focus ? { focus } : {}) })
 }
@@ -681,6 +768,11 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: COMMAND, description: "Show or hide the Quorum task dashboard" })
     await settleAgents($)
     selected = null
+    turnNo++
+    runTurn = { asking: 0, ended: null, isIdle: false }
+    reread?.cancel()
+    reread = null
+    rereadTurn = turnNo
     clearEdit()
     // A run from before settles only its own record. The first result after a reload only records the ready set;
     // the attempt's time stays, so the 2-minute wait still holds.
@@ -715,13 +807,13 @@ export const register: Register = (on, options) => {
   })
 
   // Every status change goes through bin/quorum-state or quorum-active-task, quorum-files records the change, and
-  // quorum-map enters, claims, resolves and leaves a map, so re-read after those. The dashboard only watches: if one
-  // of its hooks fails, the call goes on as if it weren't there.
+  // quorum-map enters, claims, resolves and leaves a map, and quorum-run enters and leaves a run, so re-read after
+  // those. The dashboard only watches: if one of its hooks fails, the call goes on as if it weren't there.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
     // `gh pr create` or a push can open or change the PR: look it up again now.
     const isPrCommand = /\bgh\s+pr\b|\bgit\s+push\b/.test(e.command)
-    if (isPrCommand || /quorum-(state|active-task|branch|files|map)|\.tasks\//.test(e.command)) await refresh($, maxRounds, isPrCommand)
+    if (isPrCommand || /quorum-(state|active-task|branch|files|map|run)|\.tasks\//.test(e.command)) await refresh($, maxRounds, isPrCommand)
     return ran
   }).catch(($, e, next) => next(e))
 
@@ -784,6 +876,7 @@ export const register: Register = (on, options) => {
   })
 
   on('turn.complete', async ($, e, next) => {
+    const turn = turnNo
     const done = await next(e)
     // The agent that made the edit finished its turn: the main session's (no agentId) for its own edits.
     if (edit && edit.agentId === (e.agentId ?? null)) {
@@ -795,13 +888,48 @@ export const register: Register = (on, options) => {
       const now = await $.clock.now()
       keepTicking($, await update($, agents, all => all.map(a => (a.id === id && a.endedAt === null ? { ...a, endedAt: now } : a))))
     } else {
+      // Before the refresh, which awaits: a turn that starts while the task is read resets what this wrote.
+      noteTurnEnd($, e.reason, turn)
       await refresh($, maxRounds)
+      await setReread($, turn, maxRounds)
     }
     return done
   })
 
+  // The main session's turn begins: the run goes on, so a wait or a dead turn is over. A pending re-read stays: it
+  // still sees a late ESCALATED, and can't start a wait in a turn that hasn't ended.
+  on('turn.start', ($, e, next) => {
+    if (e.agentId === undefined) {
+      turnNo++
+      runTurn = { asking: 0, ended: null, isIdle: false }
+      redraw($)
+    }
+    return next(e)
+  })
+
+  // A question the main session asks: the run waits on the person from the call until it returns.
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e)
+    const turn = turnNo
+    runTurn = { ...runTurn, asking: runTurn.asking + 1 }
+    redraw($)
+    try {
+      return await next(e)
+    } finally {
+      // A turn that started since has dropped this question from the count already.
+      if (turn === turnNo) {
+        runTurn = { ...runTurn, asking: Math.max(0, runTurn.asking - 1) }
+        redraw($)
+      }
+    }
+  }).catch(($, e, next) => next(e))
+
   // The band: one row, most important first. A status badge colored by whose move it is, the task, a dot per stage
-  // and the current one by name, the round's progress, then Next (it fills the prompt) and Dashboard.
+  // and the current one by name, the round's progress, then Next (it fills the prompt) and Dashboard. During a
+  // /quorum:run the run's words take Next's place; on a row that doesn't fit, the words step down a form, then the
+  // slug and the stage dots give way for a form that fits whole, else for the shortest form cut at the end; when
+  // not even that can be drawn the words go, and the problem and the progress give way in that order. For a stopped
+  // run the problem gives way first, and `run stopped` and Next stay whole.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const t = await read($, task)
     const r = liveReview(await read($, reviews))
@@ -850,25 +978,56 @@ export const register: Register = (on, options) => {
     const command = nextCommand(nextFor(t, known))
     // The recorded change's file count, once the build has a base (the Task card's footprint line).
     const fp = t.files ? footprint(t.files, t.rounds, t.head, awaitingOf(t.codeView, t.rereview)) : null
+    // Each item's text as drawn, '' for one not on show at this width.
+    const badge = ` ${t.status || 'no status'} `
+    const id = columns >= 90 ? `${t.slug} · ${t.risk}` : ''
+    const progressText = columns >= 110 ? progress : ''
+    const filesText = columns >= 110 && fp ? plural(fp.files, 'file') : ''
+    const problem = (columns >= 110 ? problems.join(' · ') : problems[0]) ?? ''
+    // A review running beside the task, briefly: the pane has the rest.
+    const reviewText = r && columns >= 110 ? `${r.id}: ${reviewProgress(r)}` : ''
+    // During a run: its words in Next's place while it goes or waits, and `run stopped` beside a Next once it stopped.
+    const marker = await read($, run)
+    const view = marker ? runView(marker, t.status, t.risk, runTurn) : null
+    const isStopped = view?.state === 'stopped'
+    const words = view ? runForms(view, columns, problem !== '') : null
+    // A stopped run's Next continues it with the flags it was started with. /quorum:run doesn't continue a halted
+    // task, so HALTED keeps the status's own Next.
+    const nextCmd = !marker || !view ? command : !isStopped ? '' : view.reason === 'HALTED' ? command : runCommand(marker)
+    const nextLabel = columns >= 110 ? `▶ ${nextCmd}` : '▶ Next'
+    const fit = view
+      ? fitRun(columns, {
+        badge,
+        id,
+        rail: `${rail.map(s => GLYPH[s.state][0]).join('')}${currentLabel ? ` ${currentLabel}` : ''}`,
+        extras: [progressText, filesText, reviewText],
+        problem,
+        buttons: [...(nextCmd ? [nextLabel] : []), 'Dashboard'],
+      }, words?.forms ?? [], isStopped)
+      : null
+    const hasExtras = fit?.hasExtras ?? true
+    const shownProblem = fit ? fit.problem : problem
 
     return (
       <Box flexDirection="row" gap={2}>
-        <Text backgroundColor={whoseMove(t.status)} color="inverseText" bold> {t.status || 'no status'} </Text>
-        {columns >= 90 ? <Text dimColor>{t.slug} · {t.risk}</Text> : null}
-        <Text>
-          {rail.map(s => {
-            const [glyph, color] = GLYPH[s.state]
-            return <Text key={s.name} color={color}>{glyph}</Text>
-          })}
-          {currentLabel ? <Text bold> {currentLabel}</Text> : null}
-        </Text>
-        {columns >= 110 && progress ? <Text dimColor>{progress}</Text> : null}
-        {columns >= 110 && fp ? <Text dimColor>{plural(fp.files, 'file')}</Text> : null}
-        {problems.length > 0 ? <Text color="error">{columns >= 110 ? problems.join(' · ') : problems[0]}</Text> : null}
-        {/* A review running beside the task, briefly: the pane has the rest. */}
-        {r && columns >= 110 ? <Text dimColor>{r.id}: {reviewProgress(r)}</Text> : null}
+        <Text backgroundColor={whoseMove(t.status)} color="inverseText" bold>{badge}</Text>
+        {id && (fit?.hasId ?? true) ? <Text dimColor>{id}</Text> : null}
+        {fit?.hasRail ?? true ? (
+          <Text>
+            {rail.map(s => {
+              const [glyph, color] = GLYPH[s.state]
+              return <Text key={s.name} color={color}>{glyph}</Text>
+            })}
+            {currentLabel ? <Text bold> {currentLabel}</Text> : null}
+          </Text>
+        ) : null}
+        {progressText && hasExtras ? <Text dimColor>{progressText}</Text> : null}
+        {filesText && hasExtras ? <Text dimColor>{filesText}</Text> : null}
+        {shownProblem ? <Text color="error">{shownProblem}</Text> : null}
+        {reviewText && hasExtras ? <Text dimColor>{reviewText}</Text> : null}
+        {fit?.words && words ? <Box flexShrink={0}><Text color={words.color} bold={words.isBold} wrap="truncate-end">{fit.words}</Text></Box> : null}
         <Box flexDirection="row" gap={1}>
-          {command ? <Button key="next" variant="primary" label={columns >= 110 ? `▶ ${command}` : '▶ Next'} onPress={() => void fillPrompt($, command)} /> : null}
+          {nextCmd ? <Button key="next" variant="primary" label={nextLabel} onPress={() => void fillPrompt($, nextCmd)} /> : null}
           <Button key="open" label="Dashboard" onPress={() => open($, true)} />
         </Box>
       </Box>
@@ -1596,6 +1755,22 @@ export const register: Register = (on, options) => {
     const nowColor = whoseMove(t.status)
     const next = nextFor(t, known)
     const command = nextCommand(next)
+    // During a run: the Run card's rows, and the color its state has on the band.
+    const marker = await read($, run)
+    const view = marker ? runView(marker, t.status, t.risk, runTurn) : null
+    const runRows = marker && view ? runCardRows(marker, view) : []
+    const runColor = view?.state === 'waiting' || view?.reason === 'aborted' ? 'warning' : view?.state === 'stopped' ? 'error' : 'claude'
+    // The Now card's last row. A run that goes or waits has no Next: lines say so in its place. A stopped run's Next
+    // fills /quorum:run with the run's flags, but HALTED keeps the status's own, since /quorum:run doesn't continue a
+    // halted task.
+    const runLines = !view || view.state === 'stopped' ? null
+      : view.state === 'waiting' ? runRows.slice(2)
+        : ['the run goes on by itself', ...(view.stop ? [`next stop: ${view.stop.long}`] : [])]
+    const nowCommand = marker && view?.state === 'stopped' && view.reason !== 'HALTED' ? runCommand(marker) : command
+    const nowNext = nowCommand === command ? next : nowCommand
+    // The button's label names the command it fills; a run's flags that don't fit the card beside it read as `…`
+    // (the Run card's second row has them).
+    const nowLabel = nowCommand !== command && cellWidth(`▶ Next: ${nowCommand}`) + BUTTON_FRAME > treeWidth ? '▶ Next: /quorum:run …' : `▶ Next: ${nowCommand}`
 
 
     const failedRequirements = requirements.filter(r => r.state === 'fail')
@@ -1752,21 +1927,45 @@ export const register: Register = (on, options) => {
         {n.kind === 'done' && n.blind ? blindRow(n.blind) : null}
         {n.kind === 'done' && stepsPart({ isPressable: t.files !== null, filesKey })}
         {n.kind === 'done' ? filesRow : null}
-        <Box flexDirection="row" gap={1} marginTop={1}>
-          {command
-            ? <Button key="next" variant="primary" label={`▶ Next: ${command}`} onPress={() => void fillPrompt($, command)} />
-            : <Text><Text dimColor>Next: </Text><Text>{next}</Text></Text>}
-          {command ? <Text dimColor wrap="truncate-end">{next === command ? 'fills the prompt' : next}</Text> : null}
-        </Box>
+        {runLines ? (
+          <Box key="now-run" flexDirection="column" marginTop={1}>
+            {runLines.flatMap(row => wrap(row, treeWidth, treeWidth)).map((l, i) => (
+              <Box key={`now-run:${i}`}>
+                {view?.state === 'waiting' ? <Text color="warning" bold>{l}</Text> : <Text dimColor>{l}</Text>}
+              </Box>
+            ))}
+          </Box>
+        ) : (
+          <Box flexDirection="row" gap={1} marginTop={1}>
+            {nowCommand
+              ? <Button key="next" variant="primary" label={nowLabel} onPress={() => void fillPrompt($, nowCommand)} />
+              : <Text><Text dimColor>Next: </Text><Text>{nowNext}</Text></Text>}
+            {nowCommand ? <Text dimColor wrap="truncate-end">{nowNext === nowCommand ? 'fills the prompt' : nowNext}</Text> : null}
+          </Box>
+        )}
       </Box>
     )
-    // Docked, the Map card sits above the Task card; above the prompt, the Now card comes first and the Map card
-    // last. Without a Map card the order is the Task card, then the Now card.
+    // The Run card: `Run · ` in bold with the run's state and start time, how it was started, dim, and what the state
+    // says, in the color the band draws it in (bold while waiting). Each wrapped line is its own Box.
+    const runCard = view ? (
+      <Box key="run" borderStyle="round" borderColor={view.state === 'going' ? 'subtle' : runColor} flexDirection="column" paddingX={1}>
+        {runRows.flatMap((row, n) => wrap(row, treeWidth, treeWidth).map((l, i) => (
+          <Box key={`run:${n}-${i}`}>
+            {n === 0 ? <Text>{i === 0 ? <Text bold>Run · </Text> : null}{i === 0 ? l.slice('Run · '.length) : l}</Text>
+              : n === 1 ? <Text dimColor>{l}</Text>
+                : <Text color={runColor} bold={view.state === 'waiting'}>{l}</Text>}
+          </Box>
+        )))}
+      </Box>
+    ) : null
+    // During a run the Run card comes first, docked and above the prompt. Then: docked, the Map card sits above the
+    // Task card; above the prompt, the Now card comes first and the Map card last. Without a Map card the order is
+    // the Task card, then the Now card.
     const cards = mapCard ? (e.props.placement === 'inline' ? [now, header, mapCard] : [mapCard, header, now]) : [header, now]
 
     return (
       <Box flexDirection="column" gap={1}>
-        {cards}
+        {runCard ? [runCard, ...cards] : cards}
 
         {reviewCard}
 

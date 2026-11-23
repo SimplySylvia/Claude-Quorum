@@ -1,12 +1,27 @@
 #!/usr/bin/env bash
 # Mark a session as running /quorum:run, so hooks/run-guard.sh can hold it to the stages.
 #
-#   quorum-run enter SESSION    write .tasks/.run-sessions/SESSION in the main working tree
+#   quorum-run enter SESSION [--until STAGE] [--yes]
+#                               write .tasks/.run-sessions/SESSION in the main working tree
+#   quorum-run escalated SESSION
+#                               add the line `escalated` to SESSION's marker, if it has one: the run stopped on an
+#                               escalated task, and the run guard lets the session work by hand
 #   quorum-run leave SESSION    remove it (hooks/session-end.sh also does when the session ends)
 #   quorum-run sessions         SESSION<TAB>STARTED (YYYY-MM-DD HH:MM) for each marked session
 #
+# enter takes the run's own --until STAGE (spec, plan, build, review, blind or pr) and --yes, in either order, so
+# the dashboard can say where the run stops next. The marker's lines:
+#   1  the start time, YYYY-MM-DD HH:MM
+#   then `until STAGE`, when --until was given
+#   then `yes`, when --yes was given
+#   then `escalated`, once `quorum-run escalated` ran: /quorum:run stops on an ESCALATED task without leaving, so
+#   the dashboard still shows the stopped run, and hooks/run-guard.sh ignores a marker with this line. The
+#   dashboard reads no such line, `sessions` prints line 1 alone, and enter writes the marker afresh, without it.
+# A call enter refuses (exit 2) writes nothing.
+#
 # While a session is marked, the run guard keeps its main session from changing the repo outside .tasks/ until the
-# task's build has started: the builder writes the code. Bash 3.2 compatible.
+# task's build has started: the builder writes the code. It stops once the marker says the run stopped escalated.
+# Bash 3.2 compatible.
 set -euo pipefail
 
 die() { echo "quorum-run: $*" >&2; exit 2; }
@@ -17,7 +32,29 @@ DIR="$("$HERE/quorum-active-task" --main)/.tasks/.run-sessions"
 case "${1:-}" in
   enter)
     valid_session "${2:-}" || die "enter needs a session id"
-    mkdir -p "$DIR"; date '+%Y-%m-%d %H:%M' > "$DIR/$2" ;;
+    session=$2; stage=""; yes=""
+    shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --until)
+          case "${2:-}" in
+            spec|plan|build|review|blind|pr) stage=$2; shift 2 ;;
+            "") die "--until needs a stage: spec, plan, build, review, blind or pr" ;;
+            *) die "unknown stage '$2': --until takes spec, plan, build, review, blind or pr" ;;
+          esac ;;
+        --yes) yes=1; shift ;;
+        *) die "unknown argument '$1': enter takes --until STAGE and --yes" ;;
+      esac
+    done
+    mkdir -p "$DIR"
+    {
+      date '+%Y-%m-%d %H:%M'
+      [ -z "$stage" ] || echo "until $stage"
+      [ -z "$yes" ] || echo "yes"
+    } > "$DIR/$session" ;;
+  escalated)
+    valid_session "${2:-}" || die "escalated needs a session id"
+    if [ -f "$DIR/$2" ] && ! tr -d '\r' < "$DIR/$2" | grep -qx 'escalated'; then echo escalated >> "$DIR/$2"; fi ;;
   leave)
     valid_session "${2:-}" || die "leave needs a session id"
     rm -f "$DIR/$2" ;;
@@ -26,5 +63,5 @@ case "${1:-}" in
       [ -f "$f" ] || continue
       printf '%s\t%s\n' "$(basename "$f")" "$(head -n 1 "$f")"
     done ;;
-  *) die "usage: quorum-run enter SESSION | leave SESSION | sessions" ;;
+  *) die "usage: quorum-run enter SESSION [--until STAGE] [--yes] | escalated SESSION | leave SESSION | sessions" ;;
 esac
