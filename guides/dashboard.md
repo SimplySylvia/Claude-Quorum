@@ -19,7 +19,8 @@ finished with its PR open.</sub>
   buttons. The 110 columns are the band's own width, not the terminal's, so a docked pane narrows the band and can
   hide the count; undock or close the pane, or widen the terminal, to see it. A requirement that a current proof
   leaves unmet comes first in what's wrong (`R3 unmet`, or `2 unmet`), since a narrow band shows only the first
-  problem, and a stale proof's progress reads `checks stale` instead of `checks 24/24`.
+  problem, and a stale proof's progress reads `checks stale` instead of `checks 24/24`. Next isn't always drawn:
+  [during a `/quorum:run`](#during-a-quorumrun) the run's words take its place.
 - **The pane,** which opens by itself during a task (`/quorum-dashboard` shows or hides it):
   - **Task card:** title, goal, status, a stage stepper, and the PR once there is one. Once the build has started,
     a footprint line sums up the change: `12 files · +268 −11 · 1 important · 1 nit · 1 pre`, naming the findings
@@ -64,6 +65,7 @@ finished with its PR open.</sub>
       passing: its summary is amber (red when a check failed), the PASS badges in the opened fold are muted rather
       than green, and the band reads `checks stale`. In a narrow pane the note gives way first, then the commit.
 - **▶ Next** puts the next command in your prompt to send or edit. It never sends it for you.
+  [During a `/quorum:run`](#during-a-quorumrun) it's drawn only once the run has stopped.
 - **Toasts** when a task converges, halts, escalates, or is ready for you.
 - **`/quorum:review`:** the one this session is running gets a card of its own, with its reviewers, the voter's
   kept findings as the same findings tree, and the builder during `--fix`. It sits under a task's cards, or takes
@@ -76,6 +78,93 @@ The pane docks beside the chat in a wide fullscreen terminal, and sits above the
 it holds up a turn, and `claude -p`, cloud sessions, and the VS Code chat panel work as before, without it. It shows
 tasks, reviews, and maps; research isn't on the dashboard.
 
+## During a /quorum:run
+
+While this session is in a `/quorum:run`, from the run's start until it ends, the band and the pane say so. A run is
+in one of three states:
+
+- **Going:** the run is working, and starts the next stage itself.
+- **Waiting:** the run asked you a question, or its turn ended and it's your move. After a turn's end the dashboard
+  takes about half a second to say so, while it reads the task again.
+- **Stopped:** the task is `ESCALATED` or `HALTED`, or the run's last turn ended on an API error, a refusal, or an
+  interrupt (Esc). A turn's stop clears when the next turn starts; a status's stop stays until the status changes.
+
+### The band
+
+While the run goes or waits, **▶ Next** isn't drawn, since the run runs the next command itself, and the run's words
+take its place. The badge, the stage dots, the progress, and **Dashboard** are as before. The words depend on the
+band's own width:
+
+| Band width | Going | Waiting at a named gate | Waiting anywhere else |
+|---|---|---|---|
+| 110 columns or more | `autopilot · next stop: plan approval` | `autopilot · waiting for you: plan approval` | `autopilot · waiting for you` |
+| 90 to 109 | `auto · next: plan approval` | `waiting: plan approval` | `waiting for you` |
+| under 90 | `▸▸ plan approval` | `◆ plan approval` | `◆ waiting` |
+
+- **The next stop** is where the run next hands back to you: `mockup sign-off`, `plan approval` (skipped with `--yes`
+  unless the task is HIGH), the end of the stage `--until` names (`end of spec`, `end of plan`, `end of build`,
+  `end of review`, `end of blind test`), or the last stop: `PR drafted` for a LOW task, and
+  `PR drafted, then your review` otherwise, shortened to `your review` under 110 columns. An `--until` stage the
+  task is already past is ignored. At a status with no next stop, a run that goes draws no words.
+- **The gate** is named only for `mockup sign-off` and `plan approval`. While the run waits, the words name the gate
+  open now, not the next stop.
+- **Going** is in the Claude color. **Waiting** is amber and bold. No state is told by color alone: each has its own
+  words or mark.
+- **A problem comes first.** When the band shows something wrong, the run's words take the 90-to-109 form on a band
+  of 110 columns or more, and aren't drawn under 110. Next still isn't drawn.
+
+**A stopped run** reads `run stopped`, in red, or in amber after an interrupt, and **▶ Next** is back: it fills the
+prompt with `/quorum:run`, which continues the run (`▶ /quorum:run` at 110 columns or more, `▶ Next` under). A
+`HALTED` task keeps its own Next, since `/quorum:run` doesn't continue a halted task.
+
+**On a band that doesn't fit,** these give way in order:
+
+1. the run's words step down to the next shorter form;
+2. the shortest form is cut at the end (`▸▸ plan…`), down to its `▸▸` or `◆`;
+3. the words go;
+4. the slug and risk;
+5. the stage dots and the stage's name;
+6. the problem's words are cut at the end, then go;
+7. last, the progress, the file count, and a review's text.
+
+For a stopped run the problem's words give way first, then the slug and risk, the stage dots, and the progress, file
+count and review text; `run stopped` and Next stay whole. The badge and the buttons always stay.
+
+### The Run card
+
+During a run a **Run card** is the first card of the task's pane, docked and above the prompt: above the Task card,
+and above the [Map card](#the-map-card) when there is one. It has three rows:
+
+- **The run's state:** `Run · autopilot · since 14:02`, or `Run · stopped · since 14:02`. The time is when the run
+  started, and is left out when the dashboard can't read it.
+- **How it was started:** `started with --until review --yes`, with only the flags you gave, or
+  `stops only where you must decide` with neither.
+- **What the state says:**
+  - going: `next stop: PR drafted, then your review` (no row when the status has no next stop);
+  - waiting: `waiting for you: plan approval`, or `waiting for you`;
+  - stopped: why, and what to do: `ESCALATED · /quorum:run continues it`, with `API error`, `refused` or
+    `interrupted` for a turn that died, and `HALTED · see the post-mortem` for a halted task.
+
+Its border is amber while the run waits and after an interrupt, red for any other stop, and plain otherwise. Long
+rows wrap within the pane.
+
+### The Now card
+
+During a run the Now card's last row changes too:
+
+- **Going:** no Next button. Two lines say `the run goes on by itself` and `next stop: …`.
+- **Waiting:** no Next button. The Run card's waiting line shows, in amber and bold.
+- **Stopped:** a `▶ Next: /quorum:run` button that fills the prompt. A `HALTED` task keeps its own Next.
+
+The Task card doesn't change.
+
+### When nothing of the run shows
+
+Outside a run, the band and the pane are as the rest of this guide describes. With no task on show, or in a
+[map session](#the-map-session), nothing of the run is drawn; the run's words and the Run card appear once a task is
+on show. The dashboard shows only this session's run, never another session's. A run raises no notification, and the
+toasts read as they do outside one.
+
 ## Maps
 
 A [map](research-and-maps.md) shows in two places: as a **Map card** on a task started from it, and as the whole pane
@@ -84,8 +173,9 @@ in a `/quorum:map` session.
 ### The Map card
 
 When the task on show records `map` and `map_task` in its state.md, and that map's files read, a Map card sits
-directly above the Task card. Above the prompt, the order is the Now card, the Task card, then the Map card. A task
-with no map, or whose map folder is missing, has no Map card and looks as it did.
+directly above the Task card. Above the prompt, the order is the Now card, the Task card, then the Map card.
+[During a run](#during-a-quorumrun) the Run card comes first, in both places. A task with no map, or whose map
+folder is missing, has no Map card and looks as it did.
 
 - **The title row:** `Map · <title>` with the map's slug on the right; a long title is cut at the end and never runs
   into the slug.
