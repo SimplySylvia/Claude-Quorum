@@ -57,9 +57,10 @@ run starts a new task; for a MEDIUM or HIGH task it's dropped.
 ## 1. Before the first stage
 
 - If `REVIEW.md` or `.claude/hooks/verify-completion.sh` is missing, suggest `/quorum:init-pipeline` and stop.
-- Run `quorum-run enter ${CLAUDE_SESSION_ID}`. Until the task's build starts, `hooks/run-guard.sh` blocks you from
-  editing files outside `.tasks/` or committing: the stages before the build read the code, and the builder writes
-  it. It doesn't watch Bash, so don't write the code from Bash either.
+- Run `quorum-run enter ${CLAUDE_SESSION_ID}`, adding this run's own `--until <stage>` and `--yes` to that one call, only the ones the user gave.
+  Until the task's build starts, `hooks/run-guard.sh` blocks you from editing files outside `.tasks/` or committing:
+  the stages before the build read the code, and the builder writes it. It doesn't watch Bash, so don't write the
+  code from Bash either.
 - **A request and an active task** (`quorum-active-task` prints a slug whose status isn't `READY`,
   `AWAITING-HUMAN`, or `HALTED`): ask whether to continue that task or start the new one. Starting the new one
   leaves the old task's files as they are; it only stops being active (`quorum-active-task --clear`).
@@ -116,7 +117,8 @@ says stop, after the stage `--until` names, or after 12 stages in one run (then 
   out).
 - **Don't hand off.** When a stage's steps end by telling the user which command to run next, don't: go round the
   loop, which reaches that stage by its status. A stage's steps that say "stop" end that stage, not the run, unless
-  the status didn't change (a precondition failed): then stop the run, say why, and what fixes it.
+  the status didn't change (a precondition failed): then stop the run, say why, and what fixes it, and run
+  `quorum-run leave` (section 4).
 - **Keep the chat short.** Agents' replies go to the files the steps name, verbatim, as always. In the chat, show a
   gate's content in full (the research options, the spec review, the plan, the summary before human review), and
   for everything else one line per stage: what ran and its result, for example
@@ -126,7 +128,8 @@ says stop, after the stage `--until` names, or after 12 stages in one run (then 
 ## 4. When it stops
 
 Stopping for a gate's question isn't the end: the run goes on after the answer. When the run is over (the task's
-PR is drafted, it halted or escalated, `--until` was reached, the 12-stage cap, or the user ends the run), run
+PR is drafted, it halted or escalated, `--until` was reached, the 12-stage cap, a stage's steps stopped and the
+status didn't change (a precondition failed), or the user ends the run), run
 `quorum-run leave ${CLAUDE_SESSION_ID}` before you stop.
 
 Say where the task is (status, round, risk), why it stopped (a gate's question, `--until`, the end, a halt, or a
