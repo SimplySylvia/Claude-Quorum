@@ -265,6 +265,13 @@ export type MapView = {
 // results, which opens the map's task list.
 export type MapStates = { slug: string; states: Record<string, string> | null; triedAt: number; ready: number[] | null; isHandoff: boolean }
 
+// A /quorum:run's stages, as `quorum-run enter --until STAGE` takes them.
+export type RunStage = 'spec' | 'plan' | 'build' | 'review' | 'blind' | 'pr'
+
+// This session's run marker (.tasks/.run-sessions/<session>), as `quorum-run enter` wrote it: the `HH:MM` the run
+// started ('' when line 1 isn't a time), the stage `--until` named ('' for none), and whether `--yes` was given.
+export type RunMarker = { since: string; until: RunStage | ''; isYes: boolean }
+
 declare module 'claude-code' {
   interface PluginState {
     quorum: {

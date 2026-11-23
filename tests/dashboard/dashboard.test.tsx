@@ -18,6 +18,7 @@ import {
   MAX_TICKET_DEPTH, isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, openBlockers,
   parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskState, ticketOrder, ticketRow, ticketStatus, ticketSummary, wrapWhole,
 } from '../../hooks/dashboard/map'
+import { gateNow, nextStop } from '../../hooks/dashboard/run'
 import type { ChangedFile, FileList, FindingsView, MapStates, MapTaskRun, MapTicket, MapView, TreeFinding } from '../../types'
 import { DEMO_DONE } from './fixtures/demo-done'
 import { DEMO_MAP, DEMO_MAP_TASKS, DEMO_MAP_TICKETS } from './fixtures/demo-map'
@@ -6538,4 +6539,87 @@ test("the demo map's task shows its Map card, and its session shows ticket 04 wa
   expect(await mapNowTitle(d)).toBe('Now · ◆ waiting for you · answer ticket 04')
   expect((await d.find({ type: 'Box', key: 'map-now' }))?.props.borderColor).toBe('warning')
   await d.unmount()
+})
+
+test("the run's next stop comes from the status, the risk, --until and --yes", () => {
+  const same = (word: string) => ({ long: word, short: word })
+  const LAST = { long: 'PR drafted, then your review', short: 'your review' }
+  const LATER = ['BUILDING', 'IN_REVIEW', 'CONVERGED', 'BLIND-TEST', 'READY', 'AWAITING-HUMAN']
+
+  // DRAFT-AWAITING-VISUAL-SIGNOFF: the end of the spec under --until spec, else the mockup's sign-off, --yes or not.
+  for (const isYes of [false, true]) {
+    expect(nextStop('DRAFT-AWAITING-VISUAL-SIGNOFF', 'MEDIUM', 'spec', isYes)).toEqual(same('end of spec'))
+    for (const until of ['', 'plan', 'build', 'review', 'blind', 'pr'] as const) {
+      expect(nextStop('DRAFT-AWAITING-VISUAL-SIGNOFF', 'MEDIUM', until, isYes)).toEqual(same('mockup sign-off'))
+    }
+  }
+
+  // PLANNING: --until spec is honoured first, then plan approval unless --yes skips it, then --until plan.
+  expect(nextStop('PLANNING', 'MEDIUM', 'spec', false)).toEqual(same('end of spec'))
+  expect(nextStop('PLANNING', 'MEDIUM', 'spec', true)).toEqual(same('end of spec'))
+  expect(nextStop('PLANNING', 'MEDIUM', '', false)).toEqual(same('plan approval'))
+  expect(nextStop('PLANNING', 'MEDIUM', 'plan', false)).toEqual(same('plan approval'))
+  expect(nextStop('PLANNING', 'MEDIUM', 'build', false)).toEqual(same('plan approval'))
+  expect(nextStop('PLANNING', 'LOW', 'plan', true)).toEqual(same('end of plan'))
+  expect(nextStop('PLANNING', 'MEDIUM', 'plan', true)).toEqual(same('end of plan'))
+  // With --yes and no stop at the plan, PLANNING goes on to the later stops.
+  expect(nextStop('PLANNING', 'MEDIUM', 'build', true)).toEqual(same('end of build'))
+  expect(nextStop('PLANNING', 'MEDIUM', 'review', true)).toEqual(same('end of review'))
+  expect(nextStop('PLANNING', 'MEDIUM', 'blind', true)).toEqual(same('end of blind test'))
+  expect(nextStop('PLANNING', 'MEDIUM', '', true)).toEqual(LAST)
+  expect(nextStop('PLANNING', 'LOW', '', true)).toEqual(same('PR drafted'))
+  // HIGH with --yes: plan approval is still asked, whatever --until says past the spec.
+  expect(nextStop('PLANNING', 'HIGH', '', true)).toEqual(same('plan approval'))
+  expect(nextStop('PLANNING', 'HIGH', 'plan', true)).toEqual(same('plan approval'))
+  expect(nextStop('PLANNING', 'HIGH', 'review', true)).toEqual(same('plan approval'))
+  expect(nextStop('PLANNING', 'HIGH', 'spec', true)).toEqual(same('end of spec'))
+
+  // --until build, review or blind stops there while the status's stage is at or before it, and is ignored after:
+  // `reached` counts the statuses of LATER that sit at or before the stage.
+  const STOPS = [['build', 'end of build', 1], ['review', 'end of review', 2], ['blind', 'end of blind test', 4]] as const
+  for (const [until, word, reached] of STOPS) {
+    LATER.forEach((status, i) => {
+      expect(nextStop(status, 'MEDIUM', until, false)).toEqual(i < reached ? same(word) : LAST)
+      expect(nextStop(status, 'HIGH', until, true)).toEqual(i < reached ? same(word) : LAST)
+    })
+  }
+  // --until plan behind a status in review, and --until spec past PLANNING, are ignored.
+  expect(nextStop('IN_REVIEW', 'MEDIUM', 'plan', false)).toEqual(LAST)
+  expect(nextStop('BUILDING', 'MEDIUM', 'plan', true)).toEqual(LAST)
+  expect(nextStop('BUILDING', 'MEDIUM', 'spec', false)).toEqual(LAST)
+  expect(nextStop('BUILDING', 'LOW', 'spec', false)).toEqual(same('PR drafted'))
+
+  // A LOW task has no blind test: --until blind is ignored, and its other stops are kept.
+  for (const status of ['PLANNING', ...LATER]) expect(nextStop(status, 'LOW', 'blind', true)).toEqual(same('PR drafted'))
+  expect(nextStop('BUILDING', 'LOW', 'build', false)).toEqual(same('end of build'))
+  expect(nextStop('BUILDING', 'LOW', 'review', false)).toEqual(same('end of review'))
+
+  // The last stop, with no --until and under --until pr: PR drafted for LOW; MEDIUM and HIGH add the review,
+  // and theirs is the only stop whose short form differs.
+  for (const status of LATER) {
+    for (const until of ['', 'pr'] as const) {
+      expect(nextStop(status, 'LOW', until, false)).toEqual(same('PR drafted'))
+      expect(nextStop(status, 'MEDIUM', until, false)).toEqual(LAST)
+      expect(nextStop(status, 'HIGH', until, true)).toEqual(LAST)
+    }
+  }
+
+  // HALTED, ESCALATED and any other status have no next stop, whatever the flags.
+  for (const status of ['HALTED', 'ESCALATED', 'DRAFT', 'DONE', '']) {
+    for (const until of ['', 'spec', 'plan', 'build', 'review', 'blind', 'pr'] as const) {
+      expect(nextStop(status, 'MEDIUM', until, false)).toBeNull()
+      expect(nextStop(status, 'LOW', until, true)).toBeNull()
+    }
+  }
+})
+
+test('the gate open now is named for mockup sign-off and plan approval only', () => {
+  expect(gateNow('DRAFT-AWAITING-VISUAL-SIGNOFF')).toBe('mockup sign-off')
+  expect(gateNow('PLANNING')).toBe('plan approval')
+  for (const status of ['BUILDING', 'IN_REVIEW', 'CONVERGED', 'BLIND-TEST', 'READY', 'AWAITING-HUMAN', 'HALTED', 'ESCALATED', 'DRAFT', '']) {
+    expect(gateNow(status)).toBe('')
+  }
+  // The gate comes from the status alone: under --yes the next stop at PLANNING is a later one, and the gate's
+  // name is still plan approval.
+  expect(nextStop('PLANNING', 'MEDIUM', '', true)?.long).toBe('PR drafted, then your review')
 })
