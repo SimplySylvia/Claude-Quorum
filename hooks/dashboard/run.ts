@@ -1,7 +1,8 @@
 // A /quorum:run's pure model: read the session's marker as bin/quorum-run enter writes it (the start time, then
 // `until STAGE` and `yes` for the run's own flags), say where the run stops next from the task's status and risk
 // and those flags, and name the gate open now from the status alone; then the run's state (going, waiting on the
-// person, or stopped), its words for the band by width, and what gives way on a band's row that doesn't fit them.
+// person, or stopped), its words for the band by width, and what gives way on a band's row that doesn't fit them;
+// and the texts of the run's announcements (waiting on the person, stopped, ended) and of its quiet status toasts.
 // No `$` here, so tests can call it directly.
 
 import type { RunMarker, RunStage } from '../../types'
@@ -110,6 +111,50 @@ export function runForms(view: RunView, columns: number, hasProblem: boolean): {
 // continue a halted task, and stops again on an escalated one until its checks pass.
 const WHY = { error: 'API error', refusal: 'refused', aborted: 'interrupted' }
 
+// Why a run stopped and what continues it: the Run card's last row, and the end of a stop's announcement.
+export function stopRow(reason: NonNullable<RunView['reason']>): string {
+  if (reason === 'HALTED') return 'HALTED · see the post-mortem'
+  if (reason === 'ESCALATED') return 'ESCALATED · fix the checks, then /quorum:run'
+  return `${WHY[reason]} · /quorum:run continues it`
+}
+
+// A message for the task `slug`: `<slug>: <text>`, or the text alone with no task to name.
+export function withSlug(slug: string, text: string): string {
+  return slug ? `${slug}: ${text}` : text
+}
+
+// The announcement of a run waiting on the person, with the gate open now when there is one.
+export function waitingText(slug: string, gate: string): string {
+  return withSlug(slug, gate ? `waiting for you · ${gate}` : 'the run is waiting for you')
+}
+
+// The announcement of a run that stopped: a halt, an escalation, or a turn that died.
+export function stoppedText(slug: string, reason: Exclude<NonNullable<RunView['reason']>, 'aborted'>): string {
+  return withSlug(slug, `run stopped · ${stopRow(reason)}`)
+}
+
+// The announcement of a run's end, with its task's status; `run ended` for a run with no task.
+export function endedText(slug: string, status: string): string {
+  return slug ? withSlug(slug, `run ended · ${status}`) : 'run ended'
+}
+
+// The toast, without the slug, for a status a run goes on from: the status and what the run does next, or the
+// status alone when `until` stops the run there; null for a status with no toast in a run.
+export function runToast(status: string, risk: string, until: RunStage | ''): string | null {
+  if (status === 'CONVERGED') {
+    if (risk === 'LOW') return 'CONVERGED · final proof next'
+    return until === 'review' ? 'CONVERGED' : 'CONVERGED · blind test next'
+  }
+  if (status === 'READY') return until === 'review' ? 'READY' : 'READY · drafting the PR'
+  if (status === 'AWAITING-HUMAN') return until === 'blind' ? 'AWAITING-HUMAN' : 'AWAITING-HUMAN · drafting the PR'
+  return null
+}
+
+// `text` without its control characters (C0, DEL and C1), so a message can't carry a terminal's control codes.
+export function stripControls(text: string): string {
+  return text.replace(/[ --]/g, '')
+}
+
 // The run's own flags as the marker recorded them, `--until <stage>` then `--yes`.
 const runFlags = (marker: RunMarker) => [marker.until ? `--until ${marker.until}` : '', marker.isYes ? '--yes' : ''].filter(Boolean)
 
@@ -128,11 +173,9 @@ export function runCardRows(marker: RunMarker, view: RunView): string[] {
   const head = `Run · ${isStopped ? 'stopped' : 'autopilot'}${marker.since ? ` · ${isStopped ? 'started' : 'since'} ${marker.since}` : ''}`
   const flags = runFlags(marker)
   const started = flags.length > 0 ? `started with ${flags.join(' ')}` : 'stops only where you must decide'
-  const last = view.reason === 'HALTED' ? 'HALTED · see the post-mortem'
-    : view.reason === 'ESCALATED' ? 'ESCALATED · fix the checks, then /quorum:run'
-      : view.reason ? `${WHY[view.reason]} · /quorum:run continues it`
-        : view.state === 'waiting' ? (view.gate ? `waiting for you: ${view.gate}` : 'waiting for you')
-          : view.stop ? `next stop: ${view.stop.long}` : ''
+  const last = view.reason ? stopRow(view.reason)
+    : view.state === 'waiting' ? (view.gate ? `waiting for you: ${view.gate}` : 'waiting for you')
+      : view.stop ? `next stop: ${view.stop.long}` : ''
   return [head, started, ...(last ? [last] : [])]
 }
 
