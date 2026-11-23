@@ -18,7 +18,7 @@ import {
   MAX_TICKET_DEPTH, isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, openBlockers,
   parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskState, ticketOrder, ticketRow, ticketStatus, ticketSummary, wrapWhole,
 } from '../../hooks/dashboard/map'
-import { gateNow, nextStop } from '../../hooks/dashboard/run'
+import { fitRun, gateNow, nextStop, runForms, runView } from '../../hooks/dashboard/run'
 import type { ChangedFile, FileList, FindingsView, MapStates, MapTaskRun, MapTicket, MapView, TreeFinding } from '../../types'
 import { DEMO_DONE } from './fixtures/demo-done'
 import { DEMO_MAP, DEMO_MAP_TASKS, DEMO_MAP_TICKETS } from './fixtures/demo-map'
@@ -6769,6 +6769,7 @@ test("a problem comes first: the run's words drop a size, and go under 110 colum
   // form (41) is 112 columns.
   const files: Record<string, string> = { ...repo('BUILDING'), [RUN_MARKER]: RUN_SINCE }
   world(on, files)
+  on('turn.complete', (_, e) => ({ text: e.answer }))
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   let band = await $.ui.mount(bandAt(120))
   const found = await runWords(band)
@@ -6783,6 +6784,27 @@ test("a problem comes first: the run's words drop a size, and go under 110 colum
   await band.unmount()
 
   // Under 110 the words give the problem the row, and Next still isn't drawn.
+  for (const columns of [109, 100, 80]) {
+    band = await $.ui.mount(bandAt(columns))
+    expect(await band.find({ type: 'Text', text: /^1 pending$/ })).toBeDefined()
+    expect(await runWords(band)).toEqual([])
+    await expectNoNext(band)
+    await band.unmount()
+  }
+
+  // The same while the run waits on the person: its turn ended, and the re-read (at once, on this world's clock)
+  // found the run still there. The 90-to-109 form at 120, after the problem.
+  await finish($)
+  await settle()
+  band = await $.ui.mount(bandAt(120))
+  const waiting = await runWords(band)
+  expect(waiting.map(x => x.text)).toEqual(['waiting for you'])
+  expect(waiting[0]?.props).toMatchObject({ color: 'warning', bold: true })
+  const waitingRow = (await drawnRows(band)).map(x => x.text)
+  expect(waitingRow.indexOf('1 pending')).toBeGreaterThan(-1)
+  expect(waitingRow.indexOf('1 pending')).toBeLessThan(waitingRow.indexOf('waiting for you'))
+  await expectNoNext(band)
+  await band.unmount()
   for (const columns of [109, 100, 80]) {
     band = await $.ui.mount(bandAt(columns))
     expect(await band.find({ type: 'Text', text: /^1 pending$/ })).toBeDefined()
@@ -6839,4 +6861,616 @@ test('nothing of the run is drawn with no task or in a map session', async ($, o
   expect((await runWords(band)).map(x => x.text)).toEqual(['auto · next: end of review'])
   await expectNoNext(band)
   await band.unmount()
+})
+
+// ---- A run's turn: waiting, stopped by a dead turn, and the re-read
+
+// RUN_REREAD_MS in hooks/dashboard/register.tsx: how long after a main-session turn ends the task is read again.
+const REREAD_MS = 500
+// A world whose clock the test moves, so the re-read fires when the test says; the engine beneath answers a turn's
+// start and end.
+function runWorld(on: On, files: Record<string, string>) {
+  const seen = world(on, files, '/repo', {}, [], { clock: false })
+  const clock = mock.clock(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  return { seen, clock }
+}
+// AskUserQuestion calls stay open until the test answers them, oldest first. Registered before world(), so it sits
+// above the world's own tool.call hook.
+function heldQuestions(on: On) {
+  const open: (() => void)[] = []
+  on('tool.call', { tool: 'AskUserQuestion' }, () => new Promise<{ result: Record<string, never> }>(resolve => { open.push(() => resolve({ result: {} })) }))
+  return { answer: () => open.shift()?.() }
+}
+const ask = ($: Engine, agentId?: string) => $.tool.call({
+  tool: 'AskUserQuestion',
+  questions: [{ question: 'Approve the plan?', header: 'Plan', options: [{ label: 'Yes', description: 'Approve it' }, { label: 'No', description: 'Revise it' }], multiSelect: false }],
+  ...(agentId ? { agentId } : {}),
+})
+const startTurn = ($: Engine, agentId?: string) => $.turn.start({ text: '', turnId: 'x', ...(agentId ? { agentId } : {}) })
+function endTurn($: Engine, reason: 'answer' | 'error' | 'refusal' | 'aborted' = 'answer', agentId?: string) {
+  const base = { ...(agentId ? { agentId } : {}), turnId: 'x', answer: '', durationMs: 1, isAborted: reason === 'aborted' }
+  return reason === 'refusal' ? $.turn.complete({ ...base, reason, refusal: { category: null, explanation: null } }) : $.turn.complete({ ...base, reason })
+}
+// The band's row as drawn, from the root Box's direct children: each Text's whole text, the buttons' labels, and the
+// row's width (a Text as its cells, a Button as its label plus 2, 1 between buttons, 2 between items).
+type Drawing = { props?: Record<string, unknown>; children?: unknown[] }
+const isDrawing = (c: unknown): c is Drawing => typeof c === 'object' && c !== null
+const drawingText = (c: unknown): string => (typeof c === 'string' ? c : isDrawing(c) ? (c.children ?? []).map(drawingText).join('') : '')
+async function bandRow($: Engine, columns: number) {
+  const band = await $.ui.mount(bandAt(columns))
+  const items = ((await band.findAll({ type: 'Box' }))[0]?.children ?? []).filter(isDrawing)
+  await band.unmount()
+  const texts: string[] = []
+  const buttons: string[] = []
+  let width = 2 * Math.max(0, items.length - 1)
+  for (const item of items) {
+    const labels = (item.children ?? []).filter(isDrawing).map(b => b.props?.label).filter((l): l is string => typeof l === 'string')
+    if (labels.length > 0) {
+      buttons.push(...labels)
+      width += labels.reduce((n, l) => n + cellWidth(l) + 2, 0) + labels.length - 1
+    } else {
+      texts.push(drawingText(item))
+      width += cellWidth(texts[texts.length - 1] ?? '')
+    }
+  }
+  // The run's words are the row's last text, when it reads as one of their forms.
+  const last = texts[texts.length - 1] ?? ''
+  return { texts, buttons, width, words: /^(autopilot ·|auto ·|▸▸|waiting|◆ |◆…|run stopped)/.test(last) ? last : '' }
+}
+// The look of the Text that reads exactly `text` on the band.
+async function wordsLook($: Engine, columns: number, text: string) {
+  const band = await $.ui.mount(bandAt(columns))
+  const props = (await band.findAll({ type: 'Text' })).find(x => x.text === text)?.props
+  await band.unmount()
+  return { color: props?.color, bold: props?.bold === true }
+}
+const STATE_MD = '.tasks/export-csv/state.md'
+const inRun = (status: string, marker = RUN_SINCE): Record<string, string> => ({ ...repo(status), [STATE_MD]: calm(status), [RUN_MARKER]: marker })
+
+test('a run waits on you from a question until its answer, and after a turn ends until the next begins', async ($, on) => {
+  const held = heldQuestions(on)
+  const files = inRun('PLANNING')
+  const { clock } = runWorld(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const GOING = 'autopilot · next stop: plan approval'
+  const WAITING = 'autopilot · waiting for you: plan approval'
+  const words = async () => (await bandRow($, 140)).words
+  expect(await words()).toBe(GOING)
+
+  // (a) A question the main session asks: waiting from the call until it returns.
+  let asked = ask($)
+  await clock.settle()
+  expect(await words()).toBe(WAITING)
+  expect((await bandRow($, 140)).buttons).toEqual(['Dashboard'])
+  held.answer()
+  await asked
+  expect(await words()).toBe(GOING)
+  // A subagent's question changes nothing.
+  asked = ask($, 'b1')
+  await clock.settle()
+  expect(await words()).toBe(GOING)
+  held.answer()
+  await asked
+  expect(await words()).toBe(GOING)
+  // Two questions open at once: waiting until the second returns.
+  const first = ask($)
+  const second = ask($)
+  await clock.settle()
+  held.answer()
+  await first
+  expect(await words()).toBe(WAITING)
+  held.answer()
+  await second
+  expect(await words()).toBe(GOING)
+
+  // (b) The turn ends with an answer: waiting begins at the re-read, not before, and ends at the next turn's start.
+  await endTurn($)
+  expect(await words()).toBe(GOING)
+  await clock.advance(REREAD_MS - 1)
+  expect(await words()).toBe(GOING)
+  await clock.advance(1)
+  expect(await words()).toBe(WAITING)
+  // A subagent's turn starting or ending leaves the wait as it is.
+  await startTurn($, 'b1')
+  await endTurn($, 'error', 'b1')
+  await clock.advance(REREAD_MS)
+  expect(await words()).toBe(WAITING)
+  await startTurn($)
+  expect(await words()).toBe(GOING)
+  // A subagent's turn ending never starts a wait, or a re-read.
+  await endTurn($, 'answer', 'b1')
+  await clock.advance(REREAD_MS)
+  expect(await words()).toBe(GOING)
+
+  // The questions of the turn that entered the run count too: the turn began outside a run.
+  delete files[RUN_MARKER]
+  await $.tool.call({ tool: 'Bash', command: 'bin/quorum-run leave sess-a' })
+  await startTurn($)
+  expect(await words()).toBe('')
+  files[RUN_MARKER] = RUN_SINCE
+  await $.tool.call({ tool: 'Bash', command: 'bin/quorum-run enter sess-a' })
+  expect(await words()).toBe(GOING)
+  asked = ask($)
+  await clock.settle()
+  expect(await words()).toBe(WAITING)
+  held.answer()
+  await asked
+  expect(await words()).toBe(GOING)
+})
+
+test('a stop the Stop hook sends back to work never reads as waiting', async ($, on) => {
+  const { clock } = runWorld(on, inRun('BUILDING'))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const GOING = 'autopilot · next stop: PR drafted, then your review'
+  const drawn: string[] = []
+  const look = async () => { drawn.push((await bandRow($, 140)).words) }
+  await look()
+  // The turn ends with an answer, and the work goes on in a new turn before the delay is over.
+  await endTurn($)
+  await look()
+  await clock.advance(REREAD_MS - 100)
+  await look()
+  await startTurn($)
+  await look()
+  // The re-read fires in the new turn: it reads the task, and starts no wait.
+  await clock.advance(100)
+  await look()
+  await clock.advance(10 * REREAD_MS)
+  await look()
+  expect(drawn).toEqual([GOING, GOING, GOING, GOING, GOING, GOING])
+})
+
+test('a run has stopped on a stuck status or a dead turn, and a status reason outlasts the next turn', async ($, on) => {
+  const held = heldQuestions(on)
+  const files = inRun('BUILDING')
+  const { clock } = runWorld(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const GOING = 'autopilot · next stop: PR drafted, then your review'
+  const words = async () => (await bandRow($, 140)).words
+  const color = async () => (await wordsLook($, 140, 'run stopped')).color
+  const to = async (status: string) => {
+    files[STATE_MD] = calm(status)
+    await $.tool.call({ tool: 'Bash', command: `bin/quorum-state set status ${status}` })
+  }
+  expect(await words()).toBe(GOING)
+
+  // A dead turn: an API error, a refusal, an interrupt. Each clears at the next turn's start.
+  for (const [reason, look] of [['error', 'error'], ['refusal', 'error'], ['aborted', 'warning']] as const) {
+    await endTurn($, reason)
+    expect(await words()).toBe('run stopped')
+    expect(await color()).toBe(look)
+    // The re-read doesn't turn a dead turn into a wait.
+    await clock.advance(REREAD_MS)
+    expect(await words()).toBe('run stopped')
+    // A subagent's turn starting clears nothing.
+    await startTurn($, 'b1')
+    expect(await words()).toBe('run stopped')
+    await startTurn($)
+    expect(await words()).toBe(GOING)
+  }
+  // A subagent's dead turn stops nothing.
+  await endTurn($, 'error', 'b1')
+  expect(await words()).toBe(GOING)
+
+  // A stuck status, with the marker: stopped, and still stopped after the next turn starts.
+  for (const status of ['ESCALATED', 'HALTED']) {
+    await to(status)
+    expect(await words()).toBe('run stopped')
+    expect(await color()).toBe('error')
+    await startTurn($)
+    expect(await words()).toBe('run stopped')
+    // A status reason wins over a turn reason: an interrupt alone would read amber.
+    await endTurn($, 'aborted')
+    expect(await words()).toBe('run stopped')
+    expect(await color()).toBe('error')
+    // Stopped wins over waiting: an answered turn's re-read, and an open question.
+    await startTurn($)
+    await endTurn($)
+    await clock.advance(REREAD_MS)
+    expect(await words()).toBe('run stopped')
+    const asked = ask($)
+    await clock.settle()
+    expect(await words()).toBe('run stopped')
+    held.answer()
+    await asked
+    await startTurn($)
+  }
+  // The status's part holds until the status changes.
+  await to('BUILDING')
+  expect(await words()).toBe(GOING)
+  // A dead turn wins over an open question too.
+  const asked = ask($)
+  await clock.settle()
+  expect(await words()).toBe('autopilot · waiting for you')
+  await endTurn($, 'error')
+  expect(await words()).toBe('run stopped')
+  held.answer()
+  await asked
+  // And with the marker gone nothing has stopped: the band is today's.
+  delete files[RUN_MARKER]
+  await $.tool.call({ tool: 'Bash', command: 'bin/quorum-run leave sess-a' })
+  expect(await words()).toBe('')
+  expect((await bandRow($, 140)).buttons).toEqual(['▶ /quorum:build', 'Dashboard'])
+})
+
+test("an ESCALATED written after the turn's end is seen at the re-read, as stopped", async ($, on) => {
+  const files = inRun('BUILDING')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const GOING = 'autopilot · next stop: PR drafted, then your review'
+  const words = async () => (await bandRow($, 140)).words
+  const reads = () => seen.reads.filter(p => p === `/repo/${STATE_MD}`).length
+  // How many times one re-read of the task reads state.md.
+  let before = reads()
+  await $.tool.call({ tool: 'Bash', command: 'bin/quorum-state get status' })
+  const once = reads() - before
+  expect(once).toBeGreaterThan(0)
+
+  // The turn ends, and only then the Stop hook writes ESCALATED, with nothing to prompt a re-read. The turn's end
+  // returned with the clock where it was: it didn't wait for the delay.
+  await endTurn($)
+  expect(clock.now()).toBe(0)
+  files[STATE_MD] = calm('ESCALATED')
+  const drawn = [await words()]
+  await clock.advance(REREAD_MS - 1)
+  drawn.push(await words())
+  expect((await bandRow($, 140)).texts[0]).toBe(' BUILDING ')
+  await clock.advance(1)
+  drawn.push(await words())
+  await clock.advance(10 * REREAD_MS)
+  drawn.push(await words())
+  // Stopped at the re-read, and never the waiting words.
+  expect(drawn).toEqual([GOING, GOING, 'run stopped', 'run stopped'])
+  expect(await bandRow($, 140)).toMatchObject({ buttons: ['▶ /quorum:run', 'Dashboard'] })
+  expect((await bandRow($, 140)).texts[0]).toBe(' ESCALATED ')
+
+  // A second turn ending before the first's re-read fires leaves one re-read, the second's.
+  files[STATE_MD] = calm('BUILDING')
+  await $.tool.call({ tool: 'Bash', command: 'bin/quorum-state set status BUILDING' })
+  await startTurn($)
+  await endTurn($)
+  await clock.advance(300)
+  await startTurn($)
+  await endTurn($)
+  before = reads()
+  // The first's time, and up to the second's: the first timer was cancelled, so nothing is read.
+  await clock.advance(200)
+  expect(reads()).toBe(before)
+  await clock.advance(REREAD_MS - 200 - 1)
+  expect(reads()).toBe(before)
+  expect(await words()).toBe(GOING)
+  // The second's: one re-read, and the wait begins.
+  await clock.advance(1)
+  expect(reads()).toBe(before + once)
+  expect(await words()).toBe('autopilot · waiting for you')
+  await clock.advance(10 * REREAD_MS)
+  expect(reads()).toBe(before + once)
+
+  // The run left after the turn's end (the marker is gone, with nothing to prompt a re-read): the re-read finds no
+  // marker and draws nothing of the run.
+  await startTurn($)
+  await endTurn($)
+  delete files[RUN_MARKER]
+  await clock.advance(REREAD_MS)
+  expect(await bandRow($, 140)).toMatchObject({ words: '', buttons: ['▶ /quorum:build', 'Dashboard'] })
+  // Outside a run a turn's end sets no re-read.
+  await startTurn($)
+  await endTurn($)
+  before = reads()
+  await clock.advance(10 * REREAD_MS)
+  expect(reads()).toBe(before)
+})
+
+test('while the run waits on you the words are amber and name the gate open now', async ($, on) => {
+  const files = inRun('PLANNING')
+  const { clock } = runWorld(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  // A turn that ended with an answer, once the re-read has found the run still there.
+  const wait = async (next: Record<string, string>) => {
+    await reload($, files, next)
+    await startTurn($)
+    await endTurn($)
+    await clock.advance(REREAD_MS)
+  }
+  const check = async (forms: readonly (readonly [number, string])[]) => {
+    for (const [columns, words] of forms) {
+      const row = await bandRow($, columns)
+      expect(row.words).toBe(words)
+      expect(row.width).toBeLessThanOrEqual(columns)
+      // No Next at any width: the run isn't waiting for a command.
+      expect(row.buttons).toEqual(['Dashboard'])
+      expect(await wordsLook($, columns, words)).toEqual({ color: 'warning', bold: true })
+    }
+  }
+  // A gate the status names. With the plan review's progress (13) the row with the long form is 116 columns, so
+  // under that it steps down (the overflow test).
+  await wait(inRun('PLANNING'))
+  expect((await bandRow($, 120)).width).toBe(116)
+  await check([[120, 'autopilot · waiting for you: plan approval'], [116, 'autopilot · waiting for you: plan approval'], [109, 'waiting: plan approval'], [100, 'waiting: plan approval'], [90, 'waiting: plan approval'], [89, '◆ plan approval'], [80, '◆ plan approval']])
+  await wait(inRun('DRAFT-AWAITING-VISUAL-SIGNOFF'))
+  // (The longest badge leaves less room: each form here is the first that fits its width.)
+  await check([[140, 'autopilot · waiting for you: mockup sign-off'], [120, 'waiting: mockup sign-off'], [100, '◆ mockup sign-off']])
+  // With --yes the run's next stop at PLANNING is past plan approval, and the gate open now is still plan approval.
+  await wait(inRun('PLANNING', `${RUN_SINCE}yes\n`))
+  await check([[120, 'autopilot · waiting for you: plan approval'], [100, 'waiting: plan approval'], [80, '◆ plan approval']])
+  await startTurn($)
+  expect((await bandRow($, 140)).words).toBe('autopilot · next stop: PR drafted, then your review')
+  // No gate to name: the generic words.
+  await wait(inRun('BUILDING'))
+  await check([[120, 'autopilot · waiting for you'], [110, 'autopilot · waiting for you'], [109, 'waiting for you'], [100, 'waiting for you'], [90, 'waiting for you'], [89, '◆ waiting'], [80, '◆ waiting']])
+})
+
+test('a stopped run reads run stopped, with a Next that fills /quorum:run', async ($, on) => {
+  const files = inRun('BUILDING')
+  const { seen } = runWorld(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const press = async (columns: number) => {
+    const band = await $.ui.mount(bandAt(columns))
+    await band.press({ key: 'next' })
+    await settle()
+    await band.unmount()
+    return seen.filled[seen.filled.length - 1]
+  }
+  // `run stopped` whole, in its color, beside a Next and Dashboard, on a row that fits.
+  const check = async (color: string, next: string, fills: string) => {
+    for (const columns of [120, 110, 109, 100, 80, 70]) {
+      const row = await bandRow($, columns)
+      expect(row.words).toBe('run stopped')
+      expect(row.buttons).toEqual([columns >= 110 ? next : '▶ Next', 'Dashboard'])
+      expect(row.width).toBeLessThanOrEqual(columns)
+      expect(await wordsLook($, columns, 'run stopped')).toEqual({ color, bold: false })
+    }
+    expect(await press(120)).toBe(fills)
+    expect(await press(80)).toBe(fills)
+  }
+
+  // A dead turn: an API error and a refusal in red, an interrupt in amber.
+  await endTurn($, 'error')
+  await check('error', '▶ /quorum:run', '/quorum:run ')
+  await startTurn($)
+  await endTurn($, 'refusal')
+  await check('error', '▶ /quorum:run', '/quorum:run ')
+  await startTurn($)
+  await endTurn($, 'aborted')
+  await check('warning', '▶ /quorum:run', '/quorum:run ')
+  await startTurn($)
+  // ESCALATED, which outside a run draws no Next.
+  await reload($, files, { ...repo('ESCALATED'), [STATE_MD]: calm('ESCALATED') })
+  expect((await bandRow($, 120)).buttons).toEqual(['Dashboard'])
+  await reload($, files, inRun('ESCALATED'))
+  await check('error', '▶ /quorum:run', '/quorum:run ')
+  // Beside a problem `run stopped` and Next are whole too.
+  await reload($, files, { ...repo('ESCALATED'), [RUN_MARKER]: RUN_SINCE })
+  expect((await bandRow($, 120)).texts).toContain('1 pending')
+  await check('error', '▶ /quorum:run', '/quorum:run ')
+  // HALTED keeps the status's own Next, as it is outside a run: /quorum:run doesn't continue a halted task.
+  await reload($, files, { ...repo('HALTED'), [STATE_MD]: calm('HALTED') })
+  const own = (await bandRow($, 120)).buttons[0] ?? ''
+  expect(own).toMatch(/^▶ \/quorum:(?!run$)/)
+  await reload($, files, inRun('HALTED'))
+  await check('error', own, `${own.slice(2)} `)
+})
+
+test("the band never overflows during a run: the run's words are cut at the end", async ($, on) => {
+  const LONG = 'export-customers-as-csv-file'
+  expect(cellWidth(`${LONG} · MEDIUM`)).toBe(37)
+  // The same files for a task with the long slug.
+  const long = (from: Record<string, string>) => Object.fromEntries(Object.entries(from).map(([k, v]) => [k.split('export-csv').join(LONG), v.split('export-csv').join(LONG)]))
+  const noPending = (from: Record<string, string>) => Object.fromEntries(Object.entries(from).map(([k, v]) => [k, v.replace('pending_findings: ["app/report.py:42"]', 'pending_findings: []')]))
+  const twelve = filesTsv(Array.from({ length: 12 }, (_, i) => fileRow('M', '1', '0', `src/f${i}.ts`)))
+  const one = filesTsv([fileRow('M', '1', '0', 'src/a.ts')])
+  const STALE = '9'.repeat(40)
+  const files = inRun('DRAFT-AWAITING-VISUAL-SIGNOFF')
+  const { clock } = runWorld(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  // The task in `next`, in a run that goes, waits (an answered turn, re-read), or stopped on a dead turn.
+  const to = async (next: Record<string, string>, turn: 'going' | 'waiting' | 'error' = 'going') => {
+    await reload($, files, { ...next, [RUN_MARKER]: RUN_SINCE })
+    await startTurn($)
+    if (turn !== 'going') await endTurn($, turn === 'waiting' ? 'answer' : 'error')
+    if (turn === 'waiting') await clock.advance(REREAD_MS)
+  }
+  // The columns the words have, their gap aside: what the row leaves once everything else on it is drawn.
+  const room = (columns: number, row: { width: number; words: string }) => columns - row.width + cellWidth(row.words)
+  const DOTS = /^[✓●◆✗○–]{6}/
+
+  // Waiting at 70 with the longest badge: the shortest form is cut at the end, and the rest is whole.
+  await to(inRun('DRAFT-AWAITING-VISUAL-SIGNOFF'), 'waiting')
+  let row = await bandRow($, 70)
+  expect(room(70, row)).toBeLessThan(cellWidth('◆ mockup sign-off'))
+  expect(row.width).toBeLessThanOrEqual(70)
+  expect(row.words).toMatch(/^◆ .+…$/)
+  expect('◆ mockup sign-off'.startsWith(row.words.slice(0, -1))).toBe(true)
+  expect(row.texts[0]).toBe(' DRAFT-AWAITING-VISUAL-SIGNOFF ')
+  expect(row.texts[1]).toMatch(DOTS)
+  expect(row.texts.length).toBe(3)
+  expect(row.buttons).toEqual(['Dashboard'])
+
+  // ESCALATED at 70 with a problem: the problem is cut, and `run stopped` and Next are whole.
+  await to(checksTask('ESCALATED', '1a2b3c4', STALE, { fail: [1, 2], pending: true }))
+  const whole = '✗ 2 checks failing'
+  row = await bandRow($, 70)
+  expect(row.width - cellWidth(row.texts[row.texts.length - 2] ?? '') + cellWidth(whole)).toBeGreaterThan(70)
+  expect(row.width).toBeLessThanOrEqual(70)
+  expect(row.texts[row.texts.length - 2]).toMatch(/^✗ .*…$/)
+  expect(whole.startsWith((row.texts[row.texts.length - 2] ?? '').slice(0, -1))).toBe(true)
+  expect(row.words).toBe('run stopped')
+  expect(row.buttons).toEqual(['▶ Next', 'Dashboard'])
+
+  // Going at 120, the row leaving the words 50 columns: the long form (51) steps down to the 90-to-109 form, whole.
+  await to({ ...inRun('BUILDING'), [LIST]: twelve })
+  row = await bandRow($, 120)
+  expect(row.texts.slice(0, -1).map(cellWidth)).toEqual([10, 19, 12, 8])
+  expect(room(120, row)).toBe(50)
+  expect(cellWidth('autopilot · next stop: PR drafted, then your review')).toBe(51)
+  expect(row.words).toBe('auto · next: PR drafted, then your review')
+  expect(row.texts).toEqual([' BUILDING ', 'export-csv · MEDIUM', expect.stringMatching(/ Build$/), '12 files', row.words])
+  expect(row.buttons).toEqual(['Dashboard'])
+
+  // Going at 120 with the long slug, progress and a file count: 13 columns, under the shortest form's 31, so it is
+  // cut at the end, and the rest of the row is whole.
+  const reviewing = { ...long(noPending(inRounds([NOTHING_KEPT, null]))), [`.tasks/${LONG}/files.tsv`]: one }
+  await to(reviewing)
+  row = await bandRow($, 120)
+  expect(row.texts.slice(0, -1).map(cellWidth)).toEqual([11, 37, 17, 13, 6])
+  expect(room(120, row)).toBe(13)
+  expect(cellWidth('▸▸ PR drafted, then your review')).toBe(31)
+  expect(row.width).toBeLessThanOrEqual(120)
+  expect(row.words).toBe('▸▸ PR drafte…')
+  expect(row.texts.slice(0, -1)).toEqual([' IN_REVIEW ', `${LONG} · MEDIUM`, expect.stringMatching(/ Review 2\/3$/), expect.stringMatching(/^reviewers \d\/\d$/), '1 file'])
+  expect(row.buttons).toEqual(['Dashboard'])
+
+  // The same task at 100, where the progress and the file count aren't drawn: 16 columns, under the 90-to-109
+  // form's 24, and the under-90 form (14) is drawn whole.
+  row = await bandRow($, 100)
+  expect(row.texts.slice(0, -1).map(cellWidth)).toEqual([11, 37, 17])
+  expect(room(100, row)).toBe(16)
+  expect(cellWidth('auto · next: your review')).toBe(24)
+  expect(row.words).toBe('▸▸ your review')
+  expect(row.width).toBeLessThanOrEqual(100)
+
+  // Going at 110 with three problems: the words, the slug and the dots have gone, then the problems are cut; the
+  // progress and the file count are whole.
+  const three = { ...long(checksTask('IN_REVIEW', '1a2b3c4', STALE, { fail: [1], pending: true })), [`.tasks/${LONG}/files.tsv`]: one }
+  await to(three)
+  const joined = '✗ 1 check failing · proof older than HEAD · 1 pending'
+  row = await bandRow($, 110)
+  expect(row.texts.length).toBe(4)
+  const [badge, progress, count, problems] = row.texts
+  // The badge, progress, file count, joined problems, Dashboard and gaps are more than the band.
+  expect(row.width - cellWidth(problems ?? '') + cellWidth(joined)).toBeGreaterThan(110)
+  expect(row.width).toBeLessThanOrEqual(110)
+  expect(badge).toBe(' IN_REVIEW ')
+  expect(progress).toMatch(/^reviewers \d\/\d · checks stale$/)
+  expect(count).toBe('1 file')
+  expect(problems).toMatch(/…$/)
+  expect(joined.startsWith((problems ?? '').slice(0, -1))).toBe(true)
+  expect(row.words).toBe('')
+  expect(row.buttons).toEqual(['Dashboard'])
+
+  // Stopped at 90 (ESCALATED, no problem) with the long slug: the slug and risk give way, and the row fits.
+  await to(long(inRun('ESCALATED')))
+  row = await bandRow($, 90)
+  expect(row.width + 2 + 37).toBeGreaterThan(90)
+  expect(row.width).toBeLessThanOrEqual(90)
+  expect(row.texts).toEqual([' ESCALATED ', expect.stringMatching(DOTS), 'run stopped'])
+  expect(row.buttons).toEqual(['▶ Next', 'Dashboard'])
+  // At 140 there is room for it.
+  expect((await bandRow($, 140)).texts).toContain(`${LONG} · MEDIUM`)
+
+  // Stopped by a turn that died at 70, with the longest badge: the stage dots give way.
+  await to(inRun('DRAFT-AWAITING-VISUAL-SIGNOFF'), 'error')
+  row = await bandRow($, 70)
+  expect(row.width + 2 + 6).toBeGreaterThan(70)
+  expect(row.width).toBeLessThanOrEqual(70)
+  expect(row.texts).toEqual([' DRAFT-AWAITING-VISUAL-SIGNOFF ', 'run stopped'])
+  expect(row.buttons).toEqual(['▶ Next', 'Dashboard'])
+  expect((await bandRow($, 140)).texts[2]).toMatch(DOTS)
+
+  // Stopped at 120 with two problems: the joined problems are cut, and the row fits.
+  // (Escalated from Build, so the row has no reviewers to count and the problems keep some of their room.)
+  await to(Object.fromEntries(Object.entries(checksTask('ESCALATED', '1a2b3c4', STALE, { pending: true })).map(([k, v]) => [k, v.replace('stop_blocks: 0\n', 'stop_blocks: 0\nescalated_from: BUILDING\n')])))
+  const two = 'proof older than HEAD · 1 pending'
+  row = await bandRow($, 120)
+  const cut = row.texts[row.texts.length - 2] ?? ''
+  expect(row.width - cellWidth(cut) + cellWidth(two)).toBeGreaterThan(120)
+  expect(row.width).toBeLessThanOrEqual(120)
+  expect(cut).toMatch(/^proof .*…$/)
+  expect(two.startsWith(cut.slice(0, -1))).toBe(true)
+  expect(row.words).toBe('run stopped')
+  expect(row.buttons).toEqual(['▶ /quorum:run', 'Dashboard'])
+
+  // Stopped at 110 with reviewer and check progress, a file count and a review beside the task: after the slug and
+  // the dots, the three extras give way, and `run stopped` and Next are whole.
+  const beside = { ...noPending(checksTask('IN_REVIEW', '1a2b3c4', AT_HEAD)), [LIST]: one, '.tasks/review-pr-12/state.md': reviewState('REVIEWING', 'HIGH') }
+  await to(beside, 'error')
+  const wide = await bandRow($, 200)
+  expect(wide.texts).toEqual([' IN_REVIEW ', 'export-csv · MEDIUM', expect.stringMatching(/ Review 2\/3$/), expect.stringMatching(/^reviewers \d\/\d · checks 24\/24$/), '1 file', expect.stringMatching(/^review-pr-12: reviewers \d\/\d$/), 'run stopped'])
+  // Without the slug and the dots the row is still wider than 110.
+  expect(wide.width - 2 * 2 - cellWidth(wide.texts[1] ?? '') - cellWidth(wide.texts[2] ?? '')).toBeGreaterThan(110)
+  row = await bandRow($, 110)
+  expect(row.width).toBeLessThanOrEqual(110)
+  expect(row.texts).toEqual([' IN_REVIEW ', 'run stopped'])
+  expect(row.buttons).toEqual(['▶ /quorum:run', 'Dashboard'])
+
+  // fitRun called directly. Going and waiting never read the same, whatever room the words get, and a cut form keeps
+  // its own first glyph: at PLANNING the next stop and the gate are the same words.
+  const marker = { since: '09:41', until: '' as const, isYes: false }
+  const base = { badge: ' PLANNING ', id: '', rail: '', extras: [] as string[], problem: '', buttons: ['Dashboard'] }
+  const taken = cellWidth(base.badge) + 2 + cellWidth('Dashboard') + 2
+  for (const status of ['PLANNING', 'DRAFT-AWAITING-VISUAL-SIGNOFF', 'BUILDING']) {
+    const going = runView(marker, status, 'MEDIUM', { asking: 0, ended: null, isIdle: false })
+    const waiting = runView(marker, status, 'MEDIUM', { asking: 0, ended: 'answer', isIdle: true })
+    expect([going.state, waiting.state]).toEqual(['going', 'waiting'])
+    for (const size of [120, 100, 80]) {
+      const goes = runForms(going, size, false)?.forms ?? []
+      const waits = runForms(waiting, size, false)?.forms ?? []
+      for (let cells = 1; cells <= 60; cells++) {
+        // `cells` columns for the words, after their gap.
+        const g = fitRun(taken + 2 + cells, base, goes, false).words
+        const w = fitRun(taken + 2 + cells, base, waits, false).words
+        expect(cellWidth(g)).toBeLessThanOrEqual(cells)
+        expect(cellWidth(w)).toBeLessThanOrEqual(cells)
+        if (g !== '' || w !== '') expect(g).not.toBe(w)
+        if (g !== '' && !goes.includes(g)) expect(g).toMatch(/^▸▸.*…$/)
+        if (w !== '' && !waits.includes(w)) expect(w).toMatch(/^◆.*…$/)
+      }
+      // The least drawn is the first glyph and the cut's mark.
+      expect(fitRun(taken + 2 + 3, base, goes, false).words).toBe('▸▸…')
+      expect(fitRun(taken + 2 + 2, base, goes, false).words).toBe('')
+      expect(fitRun(taken + 2 + 2, base, waits, false).words).toBe('◆…')
+      expect(fitRun(taken + 2 + 1, base, waits, false).words).toBe('')
+    }
+  }
+  // No forms (a going run with no next stop): no words, and nothing thrown, at any width.
+  for (const columns of [0, 1, 20, 120]) expect(fitRun(columns, base, [], false).words).toBe('')
+  expect(fitRun(120, base, [], true).words).toBe('')
+  // The extras go last: on a band too small for them once the words, the slug, the dots and the problem have gone.
+  const full = { badge: ' IN_REVIEW ', id: 'export-csv · MEDIUM', rail: '✓✓✓●○○ Review 2/3', extras: ['reviewers 1/3', '1 file'], problem: '1 pending', buttons: ['Dashboard'] }
+  expect(fitRun(30, full, ['▸▸ your review'], false)).toEqual({ words: '', problem: '', hasId: false, hasRail: false, hasExtras: false })
+  // With the columns the badge, the extras and Dashboard need, they stay.
+  expect(fitRun(11 + 2 + 13 + 2 + 6 + 2 + 11, full, ['▸▸ your review'], false)).toEqual({ words: '', problem: '', hasId: false, hasRail: false, hasExtras: true })
+  const stopped = { ...full, buttons: ['▶ Next', 'Dashboard'] }
+  expect(fitRun(50, stopped, ['run stopped'], true)).toEqual({ words: 'run stopped', problem: '', hasId: false, hasRail: false, hasExtras: false })
+  expect(fitRun(11 + 2 + 13 + 2 + 6 + 2 + 11 + 2 + 20, stopped, ['run stopped'], true)).toEqual({ words: 'run stopped', problem: '', hasId: false, hasRail: false, hasExtras: true })
+})
+
+test('a run changes no toast and raises no notification', async ($, on) => {
+  const held = heldQuestions(on)
+  let notified = 0
+  on('ui.notify', () => { notified++; return { value: { isSent: false, reason: 'test' } } as never })
+  const files: Record<string, string> = repo('IN_REVIEW')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  // A status change a Bash call brings, a question asked and answered, and one a turn's re-read finds.
+  const changes = async () => {
+    seen.toasts.length = 0
+    files[STATE_MD] = state('IN_REVIEW')
+    await $.tool.call({ tool: 'Bash', command: 'bin/quorum-state set status IN_REVIEW' })
+    await startTurn($)
+    files[STATE_MD] = state('CONVERGED')
+    await $.tool.call({ tool: 'Bash', command: 'bin/quorum-state set status CONVERGED' })
+    const asked = ask($)
+    await clock.settle()
+    held.answer()
+    await asked
+    await endTurn($)
+    files[STATE_MD] = state('HALTED')
+    await clock.advance(REREAD_MS)
+    await $.tool.call({ tool: 'Bash', command: 'bin/quorum-state get status' })
+    await startTurn($)
+    await endTurn($, 'error')
+    await clock.advance(REREAD_MS)
+    return [...seen.toasts]
+  }
+  const outside = await changes()
+  expect(outside).toEqual(['export-csv: review converged', 'export-csv: HALTED after the round cap; see the post-mortem'])
+  // In a run, through its going, waiting and stopped states: the same toasts.
+  files[RUN_MARKER] = RUN_SINCE
+  await $.tool.call({ tool: 'Bash', command: 'bin/quorum-run enter sess-a' })
+  expect(await changes()).toEqual(outside)
+  expect((await bandRow($, 140)).words).toBe('run stopped')
+  expect(notified).toBe(0)
 })

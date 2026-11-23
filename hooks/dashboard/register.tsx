@@ -63,6 +63,19 @@ const EDIT_STATUSES = ['BUILDING', 'IN_REVIEW']
 // What the main session's turn tells of the run: its open questions, how its last turn ended, and whether it now
 // waits on the person. Kept in memory only; a session start replaces it.
 let runTurn: RunTurn = { asking: 0, ended: null, isIdle: false }
+// How long after a main-session turn ends, in a run, the task is read once more: only then does a turn that ended
+// with an answer read as waiting on the person, and a status the Stop hook wrote late is still seen. From the trial
+// in .tasks/map-release-0-13/trials/11-result.md (main working tree), on Claude Code 2.1.330, headless, Windows 11:
+// (a) the Stop hook's write lands before `turn.complete`: the last hook's write came 47 to 63 ms before it, and
+//     `turn.complete` fired only after the last Stop hook had finished. So the delay (a) needs is the least, 500 ms.
+// (b) neither `turn.complete` nor `turn.start` fires for a stop the Stop hook blocks: the work the block sends
+//     back stays inside the same turn, so there is no gap between a blocked stop's `turn.complete` and the
+//     `turn.start` after it to measure (0 of 3 runs), and three times it adds nothing.
+// The delay is the larger of the two, rounded up to 500 ms. Should a blocked stop ever end a turn with `answer`,
+// the `turn.start` that follows within the delay keeps the run from reading as waiting (requirement 10).
+const RUN_REREAD_MS = 500
+// The one pending re-read; a later turn's end replaces it, and a session start drops it. Kept in memory only.
+let reread: Timer | null = null
 function clearEdit() {
   flash?.cancel()
   flash = null
@@ -685,6 +698,44 @@ async function noteEdit($: EngineInterface, rawPath: string, agentId: string | u
   }
 }
 
+// Redraw for a change of `runTurn`, which no atom holds. Never throws.
+function redraw($: EngineInterface) {
+  try {
+    $.ui.invalidate('ui.render')
+  } catch {
+    // The dashboard only watches: the next redraw shows it.
+  }
+}
+
+// The main session's turn ended: note how, and in a run set the one re-read of the task, RUN_REREAD_MS on, without
+// waiting for it. Only at that re-read does an answered turn start to read as waiting, and only if no turn started
+// since and the run is still there. Never throws.
+async function noteTurnEnd($: EngineInterface, reason: RunTurn['ended'], maxRounds: number) {
+  try {
+    runTurn = { ...runTurn, ended: reason, isIdle: false }
+    redraw($)
+    if ((await read($, run)) === null) return
+    reread?.cancel()
+    // A superseded timer was cancelled; the guard keeps one that still fires from doing a newer one's work.
+    const mine: Timer = $.clock.after(RUN_REREAD_MS, () => {
+      if (reread !== mine) return
+      reread = null
+      void (async () => {
+        try {
+          await refresh($, maxRounds)
+          if (runTurn.ended === 'answer' && (await read($, run)) !== null) runTurn = { ...runTurn, isIdle: true }
+          redraw($)
+        } catch {
+          // A failed re-read leaves the run as it read; the next refresh reads the task again.
+        }
+      })()
+    })
+    reread = mine
+  } catch {
+    // The dashboard only watches: a failed note leaves the turn as it read.
+  }
+}
+
 function open($: EngineInterface, focus?: true) {
   return $.ui.open({ id: PANE, title: 'Quorum', ...(focus ? { focus } : {}) })
 }
@@ -699,6 +750,8 @@ export const register: Register = (on, options) => {
     await settleAgents($)
     selected = null
     runTurn = { asking: 0, ended: null, isIdle: false }
+    reread?.cancel()
+    reread = null
     clearEdit()
     // A run from before settles only its own record. The first result after a reload only records the ready set;
     // the attempt's time stays, so the 2-minute wait still holds.
@@ -814,9 +867,33 @@ export const register: Register = (on, options) => {
       keepTicking($, await update($, agents, all => all.map(a => (a.id === id && a.endedAt === null ? { ...a, endedAt: now } : a))))
     } else {
       await refresh($, maxRounds)
+      await noteTurnEnd($, e.reason, maxRounds)
     }
     return done
   })
+
+  // The main session's turn begins: the run goes on, so a wait or a dead turn is over. A pending re-read stays: it
+  // still sees a late ESCALATED, and can't start a wait in a turn that hasn't ended.
+  on('turn.start', ($, e, next) => {
+    if (e.agentId === undefined) {
+      runTurn = { asking: 0, ended: null, isIdle: false }
+      redraw($)
+    }
+    return next(e)
+  })
+
+  // A question the main session asks: the run waits on the person from the call until it returns.
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e)
+    runTurn = { ...runTurn, asking: runTurn.asking + 1 }
+    redraw($)
+    try {
+      return await next(e)
+    } finally {
+      runTurn = { ...runTurn, asking: Math.max(0, runTurn.asking - 1) }
+      redraw($)
+    }
+  }).catch(($, e, next) => next(e))
 
   // The band: one row, most important first. A status badge colored by whose move it is, the task, a dot per stage
   // and the current one by name, the round's progress, then Next (it fills the prompt) and Dashboard. During a
