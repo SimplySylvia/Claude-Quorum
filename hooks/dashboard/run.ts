@@ -27,7 +27,8 @@ const END_OF: Partial<Record<RunStage, string>> = { build: 'end of build', revie
 
 // The marker's text: `since` is the HH:MM of a line 1 that reads `YYYY-MM-DD HH:MM`, `until` the stage of the first
 // `until <stage>` line that names one, `isYes` whether a line reads `yes`. Every other line is ignored, so nothing
-// of the file is kept but a time, a stage of RUN_STAGES and a flag.
+// of the file is kept but a time, a stage of RUN_STAGES and a flag. `escalated`, which `quorum-run escalated` adds
+// for hooks/run-guard.sh, is such a line: the run reads the same with it.
 export function parseRunMarker(text: string): RunMarker {
   const lines = text.split('\n').map((l) => l.replace(/\r$/, ''))
   const since = /^\d{4}-\d{2}-\d{2} (\d{2}:\d{2})$/.exec(lines[0] ?? '')?.[1] ?? ''
@@ -145,8 +146,10 @@ export type RunRow = { badge: string; id: string; rail: string; extras: string[]
 // its label plus BUTTON_FRAME, with 1 between buttons and 2 between items (the buttons are one item). Each step is
 // taken only while the row is still too wide. Going or waiting, the words outrank the slug and the dots: the first
 // form that fits whole, tried beside the whole row, then without the slug, then without the dots too. When none
-// fits even so, the slug and then the dots go only while the row is too wide without any words, and the last form
-// is cut at the end down to its first word, else no words; then the problem is cut, and last the extras go.
+// fits even so, the last form is cut at the end, down to its first word and the cut's mark, and a cut form outranks
+// the slug and the dots too: it is tried beside the whole row, then without the slug, then without the dots. When
+// not even that can be drawn there are no words, and the slug and the dots are back, to go only while the row is
+// too wide without any words; then the problem is cut, and last the extras go.
 // Stopped: the words stay whole, the problem is cut first, then the slug goes, the dots, and the extras. The badge
 // and the buttons always stay.
 export function fitRun(columns: number, row: RunRow, forms: string[], isStopped: boolean): { words: string; problem: string; hasId: boolean; hasRail: boolean; hasExtras: boolean } {
@@ -180,14 +183,29 @@ export function fitRun(columns: number, row: RunRow, forms: string[], isStopped:
       fit.words = whole()
     }
     if (!fit.words) {
-      // No form fits whole, so the slug and the dots go only for a row too wide without the words.
+      // No form fits whole: the last one cut to what the row leaves it, '' when that is less than its first word
+      // and the cut's mark. The slug and then the dots give way for it, as they do for a whole form.
+      const last = forms[forms.length - 1] ?? ''
+      const cut = () => {
+        const left = room('', fit.problem) - 2
+        return left >= cellWidth(last.split(' ')[0] ?? '') + 1 ? cutEnd(last, left) : ''
+      }
       fit.hasId = true
       fit.hasRail = true
-      if (isWide()) fit.hasId = false
-      if (isWide()) fit.hasRail = false
-      const last = forms[forms.length - 1] ?? ''
-      const left = room('', fit.problem) - 2
-      if (left >= cellWidth(last.split(' ')[0] ?? '') + 1) fit.words = cutEnd(last, left)
+      fit.words = cut()
+      if (!fit.words && row.id) {
+        fit.hasId = false
+        fit.words = cut()
+      }
+      if (!fit.words && row.rail) {
+        fit.hasRail = false
+        fit.words = cut()
+      }
+      // No words can be drawn without them either, so they stay unless the row is too wide (below).
+      if (!fit.words) {
+        fit.hasId = true
+        fit.hasRail = true
+      }
     }
   }
   if (isWide()) fit.hasId = false

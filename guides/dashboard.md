@@ -95,6 +95,11 @@ its turn has ended the band still reads `run stopped` and the Run card is still 
 you fix the checks by hand and the status leaves `ESCALATED` before any of those, the band reads the run as waiting
 on you until one of them happens. A halted run ends itself: once its turn is over, nothing of the run shows.
 
+The run guard, which keeps a run's session from editing the code or committing before the build, doesn't hold a
+session whose run stopped on an escalation: the run marks its marker (`quorum-run escalated <session id>`), and the
+guard ignores a marked one, so you can fix the checks by hand there whichever task is active. Running `/quorum:run`
+again starts the guard again.
+
 ### The band
 
 While the run goes or waits, **▶ Next** isn't drawn, since the run runs the next command itself, and the run's words
@@ -131,23 +136,26 @@ A `HALTED` task keeps its own Next, since `/quorum:run` doesn't continue a halte
 1. the run's words step down to the next shorter form;
 2. the slug and risk go, and the forms are tried again, longest first;
 3. the stage dots and the stage's name go, and the forms are tried again;
-4. the shortest form is cut at the end (`▸▸ plan…`), down to its `▸▸` or `◆`;
-5. the words go;
+4. the shortest form is cut at the end (`▸▸ plan…`), down to its `▸▸` or `◆`, and when it can't be drawn beside
+   them the slug and risk go for it too, then the stage dots;
+5. the words go, when not even a cut form can be drawn;
 6. the problem's words are cut at the end, then go;
 7. last, the progress, the file count, and a review's text.
 
-The run's words outrank the slug and the stage dots, which go only when that lets a form fit whole, or when the row
-is too wide for them even with no words. So on a crowded band you may see `◆ waiting` with no slug beside it: the
-pane's Task card still names the task.
+The run's words outrank the slug and the stage dots, which go when that lets a form fit whole, when it lets the
+shortest form be drawn cut where it couldn't be drawn at all beside them, or when the row is too wide for them even
+with no words. They stay when the row fits and dropping them wouldn't let any of the words be drawn. So on a
+crowded band you may see `◆ waiting` with no slug beside it: the pane's Task card still names the task.
 
 For a stopped run the problem's words give way first, then the slug and risk, the stage dots, and the progress, file
 count and review text; `run stopped` and Next stay whole. The badge and the buttons always stay. The run's words and
 `run stopped` are never wrapped onto a second row. A button counts as the terminal draws it, `[ Dashboard ]`: its
 label and four columns.
 
-So on a band whose row is already too wide with the slug on it, the run's words go before the slug does, and a
-going or waiting run shows only by its missing Next. The demo task in review is one: on a 140-column band its
-progress, file count and two problems leave the words no room.
+So on a band whose row is already too wide with the slug on it, the slug goes before the run's words do. The demo
+task in review is one: on a 140-column band its progress, file count and two problems leave the words no room
+beside the slug, so the band draws no slug, and reads `◆ waiting` whole while the run waits and a cut
+`▸▸ PR draf…` while it goes.
 
 ### The Run card
 

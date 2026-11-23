@@ -72,3 +72,27 @@ teardown() { cleanup_repo; }
   [ "$status" -eq 2 ]
   [ ! -e .tasks/.run-sessions/fresh ]
 }
+
+@test "escalated adds its line to a marker once, sessions still prints line 1, and enter writes the marker afresh" {
+  "$BIN/quorum-run" enter s1 --until review --yes
+  "$BIN/quorum-run" escalated s1
+  "$BIN/quorum-run" escalated s1
+  [ "$(wc -l < .tasks/.run-sessions/s1 | tr -d ' ')" = 4 ]
+  [ "$(sed -n 2p .tasks/.run-sessions/s1)" = "until review" ]
+  [ "$(sed -n 3p .tasks/.run-sessions/s1)" = "yes" ]
+  [ "$(sed -n 4p .tasks/.run-sessions/s1)" = "escalated" ]
+  run "$BIN/quorum-run" sessions; [ "$status" -eq 0 ]
+  [[ "$output" =~ ^s1$'\t'[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}$ ]]
+  "$BIN/quorum-run" enter s1
+  [ "$(wc -l < .tasks/.run-sessions/s1 | tr -d ' ')" = 1 ]
+  "$BIN/quorum-run" escalated s1
+  "$BIN/quorum-run" leave s1
+  [ ! -e .tasks/.run-sessions/s1 ]
+}
+
+@test "escalated writes nothing for a session with no marker, and refuses a bad session id" {
+  run "$BIN/quorum-run" escalated fresh; [ "$status" -eq 0 ]; [ -z "$output" ]
+  [ ! -e .tasks/.run-sessions/fresh ]
+  run "$BIN/quorum-run" escalated;        [ "$status" -eq 2 ]
+  run "$BIN/quorum-run" escalated '../x'; [ "$status" -eq 2 ]
+}

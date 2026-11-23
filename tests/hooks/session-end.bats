@@ -40,6 +40,13 @@ end() { jq -n --arg s "$1" --arg c "${2:-$WORK}" '{session_id: $s, cwd: $c, hook
   [ ! -e .tasks/.run-sessions/s1 ] && [ -f .tasks/.run-sessions/s2 ]
 }
 
+@test "a run that stopped escalated and kept its marker leaves it when the session ends" {
+  "$BIN/quorum-run" escalated s1
+  [ "$(sed -n 2p .tasks/.run-sessions/s1)" = "escalated" ]
+  run end s1; [ "$status" -eq 0 ]
+  [ ! -e .tasks/.run-sessions/s1 ] && [ -f .tasks/.run-sessions/s2 ]
+}
+
 @test "session-end probes git once for its children" {
   SHIM="$BATS_TEST_TMPDIR/shim"; git_shim "$SHIM"; export GIT_LOG="$BATS_TEST_TMPDIR/git.log"
   : > "$GIT_LOG"

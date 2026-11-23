@@ -4,8 +4,9 @@
 # /quorum:map ends its map session with `quorum-map leave <session>`, and /quorum:run its run session with
 # `quorum-run leave <session>`, before they're done, but a session cut off partway (closed, /clear, logged out)
 # never gets there. Its .tasks/.map-sessions/<session id> or .tasks/.run-sessions/<session id> marker would keep
-# the map guard or the run guard blocking that session if it's resumed. This removes the markers of the session that
-# ended. A session that crashes doesn't run SessionEnd; `quorum-map sessions` and `quorum-run sessions` list what's
+# the map guard or the run guard blocking that session if it's resumed. A run that stopped on an ESCALATED task
+# doesn't leave either: its marker stays, with the line `escalated`, for the dashboard to show the stopped run (the
+# run guard ignores it). This removes the markers of the session that ended, whatever their lines. A session that crashes doesn't run SessionEnd; `quorum-map sessions` and `quorum-run sessions` list what's
 # left, and /quorum:map with no arguments shows its own. Anything else, or any failure, exits 0 without a word.
 # Bash 3.2 compatible.
 set -uo pipefail

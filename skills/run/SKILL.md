@@ -97,7 +97,7 @@ says stop, after the stage `--until` names, or after 12 stages in one run (then 
 | `BLIND-TEST` | an earlier blind test was cut off: `rm -f .tasks/<slug>/.blind-mode-active .tasks/.blind-mode-active`, stop any server it left running, `quorum-state set status CONVERGED`, say so, and follow `blind-test` | none | `blind` |
 | `READY`, `AWAITING-HUMAN` | `pr-draft`, unless `.tasks/<slug>/pr.md` already exists; then stop | the slug | `pr` |
 | `HALTED` | stop: show the post-mortem's two redesign options, and say `/quorum:spec-and-eval --redesign <slug>` restarts it | | |
-| `ESCALATED` | stop, without `quorum-run leave` (section 4): show the last check failure; the user fixes the environment or the checks, then runs `/quorum:run` again | | |
+| `ESCALATED` | stop, without `quorum-run leave`: run `quorum-run escalated ${CLAUDE_SESSION_ID}` in its place (section 4); show the last check failure; the user fixes the environment or the checks, then runs `/quorum:run` again | | |
 
 `--models` asks again only in the first stage of this run that starts reviewers or helpers; drop it after that.
 
@@ -133,8 +133,12 @@ status didn't change (a precondition failed), or the user ends the run), run
 `quorum-run leave ${CLAUDE_SESSION_ID}` before you stop.
 
 An escalated run is the exception: when the task is `ESCALATED`, stop without `quorum-run leave`. Its marker stays,
-so the dashboard keeps reading `run stopped` for someone who comes back later. The marker goes when `/quorum:run` is
-run again and that run ends, when the session ends, or when the user runs `quorum-run leave` by hand.
+so the dashboard keeps reading `run stopped` for someone who comes back later. Run
+`quorum-run escalated ${CLAUDE_SESSION_ID}` in its place: it adds the line `escalated` to the marker, and
+`hooks/run-guard.sh` ignores a marker with that line, so the user can edit and commit by hand to fix the checks,
+whichever task is active. `quorum-run enter` writes the marker afresh, so the next `/quorum:run` in this session is
+guarded again. The marker goes when `/quorum:run` is run again and that run ends, when the session ends, or when the
+user runs `quorum-run leave` by hand.
 
 Say where the task is (status, round, risk), why it stopped (a gate's question, `--until`, the end, a halt, an
 escalation, or a precondition), and the next step. At the end of a task (`pr.md` drafted):

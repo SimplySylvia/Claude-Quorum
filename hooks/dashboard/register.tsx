@@ -500,10 +500,13 @@ const prOf = (t: Snapshot, known: PullRequest | null) => (known?.slug === t.slug
 
 
 // Put a Quorum command in the prompt for the person to send, edit, or add to; never send it. A draft they already
-// typed stays, after the command, as its arguments.
+// typed stays, after the command, as its arguments. The command is never doubled: a draft that is the start of it
+// (the bare `/quorum:run`, for a stopped run's Next with flags) gives way to the command, and a draft that already
+// starts with it, or is the same slash command with arguments of the person's own, stays as typed.
 async function fillPrompt($: EngineInterface, cmd: string) {
   const draft = ((await $.prompt.read().catch(() => null))?.text ?? '').trim()
-  const text = draft.startsWith(cmd) ? draft : draft ? `${cmd} ${draft}` : `${cmd} `
+  const isSame = draft.startsWith(cmd) || draft.split(' ')[0] === cmd.split(' ')[0]
+  const text = !draft || cmd.startsWith(`${draft} `) ? `${cmd} ` : isSame ? draft : `${cmd} ${draft}`
   await $.prompt.fill({ text, cursor: text.length }).catch(() => undefined)
 }
 
@@ -923,9 +926,9 @@ export const register: Register = (on, options) => {
   // The band: one row, most important first. A status badge colored by whose move it is, the task, a dot per stage
   // and the current one by name, the round's progress, then Next (it fills the prompt) and Dashboard. During a
   // /quorum:run the run's words take Next's place; on a row that doesn't fit, the words step down a form, then the
-  // slug and the stage dots give way for a form that fits whole, then the words are cut or go, and the problem and
-  // the progress give way in that order. For a stopped run the problem gives way first, and `run stopped` and Next
-  // stay whole.
+  // slug and the stage dots give way for a form that fits whole, else for the shortest form cut at the end; when
+  // not even that can be drawn the words go, and the problem and the progress give way in that order. For a stopped
+  // run the problem gives way first, and `run stopped` and Next stay whole.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const t = await read($, task)
     const r = liveReview(await read($, reviews))

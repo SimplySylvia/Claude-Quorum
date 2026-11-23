@@ -6684,7 +6684,8 @@ test("the run marker is read from the main tree's .tasks, flags or not", async (
   files[MAIN_MARKER] = ''
   expect(await words()).toEqual(stop('plan approval'))
   // A line it doesn't know is passed over, and the flags beside it are still read. With CRLF line ends too.
-  files[MAIN_MARKER] = `${RUN_SINCE}cap 12\nuntil spec\nUNTIL review\nyes\n`
+  // `escalated` is one: `quorum-run escalated` adds it for the run guard, and the run reads as before.
+  files[MAIN_MARKER] = `${RUN_SINCE}cap 12\nuntil spec\nUNTIL review\nyes\nescalated\n`
   expect(await words()).toEqual(stop('end of spec'))
   files[MAIN_MARKER] = '2026-11-22 09:41\r\nuntil review\r\nyes\r\n'
   expect(await words()).toEqual(stop('end of review'))
@@ -7401,6 +7402,9 @@ test('a stopped run reads run stopped, with a Next that fills /quorum:run', asyn
     [`${RUN_SINCE}yes\nuntil review\n`, BOTH],
     [`${RUN_SINCE}until review\n`, '/quorum:run --until review'],
     [`${RUN_SINCE}yes\n`, '/quorum:run --yes'],
+    // The line `quorum-run escalated` adds for the run guard changes nothing here.
+    [`${RUN_SINCE}until review\nyes\nescalated\n`, BOTH],
+    [`${RUN_SINCE}escalated\n`, '/quorum:run'],
   ] as const) {
     await reload($, files, inRun('ESCALATED', marker))
     await check('error', `▶ ${command}`, `${command} `)
@@ -7413,6 +7417,24 @@ test('a stopped run reads run stopped, with a Next that fills /quorum:run', asyn
   await reload($, files, { ...repo('ESCALATED'), [RUN_MARKER]: `${RUN_SINCE}until review\nyes\n` })
   expect((await bandRow($, 140)).texts).toContain('1 pending')
   await check('error', `▶ ${BOTH}`, `${BOTH} `)
+  // A draft that is already the command is never doubled: the bare command gives way to the command with the run's
+  // flags, and the command with its flags, with more after them, or with flags of the person's own stays as typed.
+  await reload($, files, inRun('ESCALATED', `${RUN_SINCE}until review\n`))
+  for (const [draft, fills] of [
+    ['/quorum:run', '/quorum:run --until review '],
+    ['/quorum:run --until review', '/quorum:run --until review'],
+    ['/quorum:run --until review --models', '/quorum:run --until review --models'],
+    ['/quorum:run --yes', '/quorum:run --yes'],
+    ['focus on the CSV quoting', '/quorum:run --until review focus on the CSV quoting'],
+  ] as const) {
+    seen.draft = draft
+    expect(await press(120)).toBe(fills)
+    expect(await press(80)).toBe(fills)
+  }
+  await reload($, files, inRun('ESCALATED'))
+  seen.draft = '/quorum:run'
+  expect(await press(120)).toBe('/quorum:run')
+  seen.draft = ''
   // HALTED keeps the status's own Next, as it is outside a run: /quorum:run doesn't continue a halted task, with
   // the run's flags or without.
   await reload($, files, { ...repo('HALTED'), [STATE_MD]: calm('HALTED') })
@@ -7671,6 +7693,26 @@ test("the band never overflows during a run: the run's words are cut at the end"
   expect(fitRun(140, blindRow, blindGoes, false)).toEqual({ words: '▸▸ PR draf…', problem: blindRow.problem, hasId: false, hasRail: true, hasExtras: true })
   // With room for a form beside the slug, the slug stays.
   expect(fitRun(159, blindRow, blindWaits, false)).toEqual({ words: '◆ waiting', problem: blindRow.problem, hasId: true, hasRail: true, hasExtras: true })
+  // A cut form outranks the slug too. A row that fits exactly with the slug on it, with no column for any words:
+  // without the slug the under-90 form has 9 columns for its 13, so the slug gives way and the form is drawn cut.
+  const tightRow = { badge: ' IN_REVIEW ', id: 'csv · LOW', rail: '', extras: ['reviewers 2/4 · checks stale'], problem: '', buttons: ['Dashboard'] }
+  expect(11 + 9 + 28 + (9 + 4) + 3 * 2).toBe(67)
+  expect(fitRun(67, tightRow, ['▸▸ PR drafted'], false)).toEqual({ words: '▸▸ PR dr…', problem: '', hasId: false, hasRail: true, hasExtras: true })
+  // The same row and band where even that can't be drawn: a form whose first word and the cut's mark take 10
+  // columns has 9 without the slug, so the slug stays, on a row that fits, and no words are drawn.
+  const LONG_FIRST = 'autopilot · next stop: PR drafted'
+  expect(fitRun(67, tightRow, [LONG_FIRST], false)).toEqual({ words: '', problem: '', hasId: true, hasRail: true, hasExtras: true })
+  // One column more and its first word is drawn, without the slug.
+  expect(fitRun(68, tightRow, [LONG_FIRST], false)).toEqual({ words: 'autopilot…', problem: '', hasId: false, hasRail: true, hasExtras: true })
+  // The dots give way for a cut form as well, after the slug: with both gone that form has 28 columns for its 32.
+  // A whole form still comes before a cut one: the under-90 form fits whole with both gone, so it isn't drawn cut
+  // beside the dots.
+  const dotsRow = { ...tightRow, rail: '✓✓✓●○○ Review 2/3' }
+  const cutLong = fitRun(86, dotsRow, [LONG_FIRST], false)
+  expect({ ...cutLong, words: '' }).toEqual({ words: '', problem: '', hasId: false, hasRail: false, hasExtras: true })
+  expect(cutLong.words).toMatch(/^autopilot · next stop.*…$/)
+  expect(cellWidth(cutLong.words)).toBe(28)
+  expect(fitRun(86, dotsRow, ['▸▸ PR drafted'], false)).toEqual({ words: '▸▸ PR drafted', problem: '', hasId: false, hasRail: false, hasExtras: true })
 })
 
 test('a run changes no toast and raises no notification', async ($, on) => {

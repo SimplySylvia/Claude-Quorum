@@ -77,3 +77,44 @@ Summary: 0 issues
 EOF2';                                                                          [ "$status" -eq 0 ]
   run bash_cmd "sed -i '' 's|tests_file.py|x|' .tasks/csv-export/eval.md";       [ "$status" -eq 0 ]
 }
+
+# A run that stops on an ESCALATED task keeps its marker for the dashboard and marks it with `quorum-run escalated`.
+@test "a run that stopped on an escalation isn't guarded while the escalated task is active" {
+  task csv-export BUILDING
+  "$BIN/quorum-state" --task csv-export set status ESCALATED
+  "$BIN/quorum-run" escalated s1
+  [ -f .tasks/.run-sessions/s1 ]
+  run edit app/report.py;                    [ "$status" -eq 0 ]
+  run edit "$WORK/README.md" Write;          [ "$status" -eq 0 ]
+  run bash_cmd 'git add -A && git commit -m fix';  [ "$status" -eq 0 ]
+}
+
+@test "a run that stopped on an escalation isn't guarded with no task active, or beside a task that hasn't started its build" {
+  "$BIN/quorum-run" escalated s1
+  [ -z "$("$BIN/quorum-active-task" 2>/dev/null)" ]
+  run edit app/report.py;                    [ "$status" -eq 0 ]
+  run bash_cmd 'git commit -m fix';          [ "$status" -eq 0 ]
+  task other PLANNING
+  run edit app/report.py;                    [ "$status" -eq 0 ]
+  run bash_cmd 'git commit -m fix';          [ "$status" -eq 0 ]
+}
+
+@test "a run still going is guarded: an ESCALATED status, another session's escalated run, and a new quorum-run enter don't lift the block" {
+  # The status alone says nothing of this session's run: its marker has no escalated line.
+  task csv-export PLANNING
+  "$BIN/quorum-state" --task csv-export set status ESCALATED
+  run edit app/report.py;                    [ "$status" -eq 2 ]
+  run bash_cmd 'git commit -m fix';          [ "$status" -eq 2 ]
+  # Another session's run stopped escalated: only that session is let through.
+  "$BIN/quorum-run" enter s2
+  "$BIN/quorum-run" escalated s2
+  run edit app/report.py Edit s2;            [ "$status" -eq 0 ]
+  run edit app/report.py;                    [ "$status" -eq 2 ]
+  # This session's run stops escalated, then /quorum:run is run again: enter writes the marker afresh.
+  "$BIN/quorum-run" escalated s1
+  run edit app/report.py;                    [ "$status" -eq 0 ]
+  "$BIN/quorum-run" enter s1 --until review
+  run edit app/report.py;                    [ "$status" -eq 2 ]
+  [[ "$output" == *"BLOCKED BY QUORUM"* ]]
+  run bash_cmd 'git commit -m fix';          [ "$status" -eq 2 ]
+}
