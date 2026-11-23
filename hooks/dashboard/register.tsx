@@ -502,10 +502,11 @@ const prOf = (t: Snapshot, known: PullRequest | null) => (known?.slug === t.slug
 // Put a Quorum command in the prompt for the person to send, edit, or add to; never send it. A draft they already
 // typed stays, after the command, as its arguments. The command is never doubled: a draft that is the start of it
 // (the bare `/quorum:run`, for a stopped run's Next with flags) gives way to the command, and a draft that already
-// starts with it, or is the same slash command with arguments of the person's own, stays as typed.
+// starts with it, or is the same slash command with arguments of the person's own after any whitespace, stays as
+// typed.
 async function fillPrompt($: EngineInterface, cmd: string) {
   const draft = ((await $.prompt.read().catch(() => null))?.text ?? '').trim()
-  const isSame = draft.startsWith(cmd) || draft.split(' ')[0] === cmd.split(' ')[0]
+  const isSame = draft.startsWith(cmd) || draft.split(/\s/)[0] === cmd.split(' ')[0]
   const text = !draft || cmd.startsWith(`${draft} `) ? `${cmd} ` : isSame ? draft : `${cmd} ${draft}`
   await $.prompt.fill({ text, cursor: text.length }).catch(() => undefined)
 }

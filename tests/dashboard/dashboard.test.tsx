@@ -7425,6 +7425,9 @@ test('a stopped run reads run stopped, with a Next that fills /quorum:run', asyn
     ['/quorum:run --until review', '/quorum:run --until review'],
     ['/quorum:run --until review --models', '/quorum:run --until review --models'],
     ['/quorum:run --yes', '/quorum:run --yes'],
+    // Whatever whitespace follows the command in the draft.
+    ['/quorum:run\n--yes', '/quorum:run\n--yes'],
+    ['/quorum:run\t--yes', '/quorum:run\t--yes'],
     ['focus on the CSV quoting', '/quorum:run --until review focus on the CSV quoting'],
   ] as const) {
     seen.draft = draft
@@ -7798,7 +7801,7 @@ test('the Run card sits on top of the pane and says how the run was started', as
     return c
   }
   const SINCE = 'Run · autopilot · since 09:41'
-  const STOPPED = 'Run · stopped · since 09:41'
+  const STOPPED = 'Run · stopped · started 09:41'
   const NO_FLAGS = 'stops only where you must decide'
 
   // Going, with both flags: the three rows, the default border, and first in both placements.
@@ -7854,11 +7857,13 @@ test('the Run card sits on top of the pane and says how the run was started', as
     expect(c.look('Run · ')).toMatchObject({ bold: true })
     await startTurn($)
   }
-  // Stopped on the status: ESCALATED is continued by /quorum:run, HALTED points at the post-mortem.
+  // Stopped on the status: ESCALATED says to fix the checks first, since /quorum:run stops again until they pass,
+  // and HALTED points at the post-mortem.
   await reload($, files, inRun('ESCALATED', `${RUN_SINCE}until blind\nyes\n`))
   c = await card()
-  expect(c.rows).toEqual([STOPPED, 'started with --until blind --yes', `ESCALATED · ${CONTINUES}`])
+  expect(c.rows).toEqual([STOPPED, 'started with --until blind --yes', 'ESCALATED · fix the checks, then /quorum:run'])
   expect(c.border).toBe('error')
+  expect(c.lines.join(' ')).not.toContain('continues it')
   await reload($, files, inRun('HALTED', ''))
   c = await card()
   expect(c.rows).toEqual(['Run · stopped', NO_FLAGS, 'HALTED · see the post-mortem'])

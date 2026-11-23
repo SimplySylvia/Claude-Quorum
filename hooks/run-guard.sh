@@ -18,6 +18,9 @@
 # with `quorum-run escalated <session>`, which adds the line `escalated`. A marker with that line is ignored here:
 # the run is over and the person fixes the checks by hand, with the escalated task active, another one, or none.
 # `quorum-run enter` writes the marker afresh, without the line, so the session's next run is guarded again.
+# Not marked: a task the Stop hook itself escalated as the run's own turn ended, since the run had no turn left to
+# mark it in. That marker is guarded as any other (another task before its build, or no task active) until
+# `quorum-run leave <session>` or /quorum:run is run again and stops on the status.
 #
 # Without a run session, or on any failure to tell, it exits 0 at once. Bash 3.2 compatible.
 set -uo pipefail

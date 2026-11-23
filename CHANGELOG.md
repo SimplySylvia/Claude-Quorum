@@ -17,11 +17,13 @@ copy with `/plugin marketplace update`.
   or in a map session.
 - **The Run card.** During a run it's the first card of the task's pane: `Run · autopilot · since 14:02`, how the run
   was started (`started with --until review --yes`, or `stops only where you must decide`), and the next stop, what
-  the run waits on, or why it stopped. The Now card draws no Next while the run goes or waits, and says
+  the run waits on, or why it stopped. A stopped run's first row reads `Run · stopped · started 14:02`, so the time
+  isn't read as when it stopped. The Now card draws no Next while the run goes or waits, and says
   `the run goes on by itself`.
 - **A stopped run.** When the task is `ESCALATED` or `HALTED`, or the run's turn ended on an API error, a refusal,
   or an interrupt, the band reads `run stopped` beside a Next that fills `/quorum:run`, and the Run card says why
-  (`interrupted · /quorum:run continues it`). Next carries the flags the run was started with
+  (`interrupted · /quorum:run continues it`; for an escalated task `ESCALATED · fix the checks, then /quorum:run`,
+  since `/quorum:run` stops again until its checks pass). Next carries the flags the run was started with
   (`/quorum:run --until review --yes`), so the run you continue stops where the first one would have. A `HALTED`
   task keeps its own Next and reads `HALTED · see the post-mortem`.
 - **An escalated run keeps its marker.** `/quorum:run` no longer runs `quorum-run leave` when the task is
@@ -30,7 +32,9 @@ copy with `/plugin marketplace update`.
   or with `quorum-run leave`. A halted run still leaves. So that the kept marker doesn't keep the run guard on,
   the run marks it with the new `quorum-run escalated <session id>`, and `hooks/run-guard.sh` ignores a marked one:
   you can edit and commit by hand to fix the checks, whichever task is active, until `/quorum:run` is run again
-  (`quorum-run enter` writes the marker afresh).
+  (`quorum-run enter` writes the marker afresh). Not when the Stop hook itself escalated the task as the run's own
+  turn ended: the run couldn't mark its marker, so with another task active before its build, or with none, the
+  guard still holds until `quorum-run leave <session id>` or `/quorum:run` is run again.
 - **`quorum-run enter` takes `--until <stage>` and `--yes`.** `/quorum:run` passes the flags you gave it, and they're
   written to the run's marker (`.tasks/.run-sessions/<session id>`) under its start time, so the dashboard knows
   where the run stops next. An unknown flag or stage is refused and leaves an existing marker unchanged.

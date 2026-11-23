@@ -98,13 +98,18 @@ on you until one of them happens. A halted run ends itself: once its turn is ove
 The run guard, which keeps a run's session from editing the code or committing before the build, doesn't hold a
 session whose run stopped on an escalation: the run marks its marker (`quorum-run escalated <session id>`), and the
 guard ignores a marked one, so you can fix the checks by hand there whichever task is active. Running `/quorum:run`
-again starts the guard again.
+again starts the guard again. There is one case the run can't mark: when the Stop hook itself escalates the task as
+the run's own turn ends (the checks failed three times in a row), the run has no turn left to mark its marker in.
+You can still fix the escalated task by hand while it is the active one, since its build has started. But with
+another task active that hasn't started its build, or with none, the guard still holds, until you run
+`quorum-run leave <session id>` or run `/quorum:run` again, which stops on the escalated task and marks the marker.
 
 ### The band
 
 While the run goes or waits, **▶ Next** isn't drawn, since the run runs the next command itself, and the run's words
-take its place. The badge, the stage dots, the progress, and **Dashboard** are as before. The words depend on the
-band's own width:
+take its place. The badge and **Dashboard** are as before, and so are the slug, the stage dots and the progress
+where the band has room for them beside the words; on a band that doesn't fit they give way to the words, in the
+order given below. The words depend on the band's own width:
 
 | Band width | Going | Waiting at a named gate | Waiting anywhere else |
 |---|---|---|---|
@@ -162,15 +167,18 @@ beside the slug, so the band draws no slug, and reads `◆ waiting` whole while 
 During a run a **Run card** is the first card of the task's pane, docked and above the prompt: above the Task card,
 and above the [Map card](#the-map-card) when there is one. It has three rows:
 
-- **The run's state:** `Run · autopilot · since 14:02`, or `Run · stopped · since 14:02`. The time is when the run
-  started, and is left out when the dashboard can't read it.
+- **The run's state:** `Run · autopilot · since 14:02`, or `Run · stopped · started 14:02` for a stopped run. Either
+  way the time is when `/quorum:run` was last started in this session, not when the run stopped, and is left out
+  when the dashboard can't read it.
 - **How it was started:** `started with --until review --yes`, with only the flags you gave, or
   `stops only where you must decide` with neither.
 - **What the state says:**
   - going: `next stop: PR drafted, then your review` (no row when the status has no next stop);
   - waiting: `waiting for you: plan approval`, or `waiting for you`;
-  - stopped: why, and what to do: `ESCALATED · /quorum:run continues it`, with `API error`, `refused` or
-    `interrupted` for a turn that died, and `HALTED · see the post-mortem` for a halted task.
+  - stopped: why, and what to do. For a turn that died, `API error · /quorum:run continues it`, with `refused` or
+    `interrupted` in its place. For an escalated task, `ESCALATED · fix the checks, then /quorum:run`, since
+    `/quorum:run` stops again on an escalated task until its checks pass. For a halted task,
+    `HALTED · see the post-mortem`.
 
 Its border is amber while the run waits and after an interrupt, red for any other stop, and plain otherwise. Long
 rows wrap within the pane.

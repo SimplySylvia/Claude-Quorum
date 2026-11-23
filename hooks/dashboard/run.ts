@@ -106,8 +106,9 @@ export function runForms(view: RunView, columns: number, hasProblem: boolean): {
   return { forms: [`autopilot · next stop: ${stop}`, `auto · next: ${stop}`, `▸▸ ${stop}`].slice(first), color: 'claude', isBold: false }
 }
 
-// Why a run stopped, in the Run card's words. HALTED has a row of its own, since /quorum:run doesn't continue it.
-const WHY = { ESCALATED: 'ESCALATED', error: 'API error', refusal: 'refused', aborted: 'interrupted' }
+// Why a run stopped, in the Run card's words. HALTED and ESCALATED have rows of their own: /quorum:run doesn't
+// continue a halted task, and stops again on an escalated one until its checks pass.
+const WHY = { error: 'API error', refusal: 'refused', aborted: 'interrupted' }
 
 // The run's own flags as the marker recorded them, `--until <stage>` then `--yes`.
 const runFlags = (marker: RunMarker) => [marker.until ? `--until ${marker.until}` : '', marker.isYes ? '--yes' : ''].filter(Boolean)
@@ -118,17 +119,20 @@ export function runCommand(marker: RunMarker): string {
   return ['/quorum:run', ...runFlags(marker)].join(' ')
 }
 
-// The Run card's rows: `Run · autopilot` or `Run · stopped` with the start time when the marker has one, how the
+// The Run card's rows: `Run · autopilot` or `Run · stopped` with the start time when the marker has one (`since`
+// it, or `started` at it for a stopped run, where `since` would read as when the run stopped), how the
 // run was started (only the flags given), and what the state says: where the run stops next, what it waits on, or
 // why it stopped and what continues it. A going run with no next stop has two rows.
 export function runCardRows(marker: RunMarker, view: RunView): string[] {
-  const head = `Run · ${view.state === 'stopped' ? 'stopped' : 'autopilot'}${marker.since ? ` · since ${marker.since}` : ''}`
+  const isStopped = view.state === 'stopped'
+  const head = `Run · ${isStopped ? 'stopped' : 'autopilot'}${marker.since ? ` · ${isStopped ? 'started' : 'since'} ${marker.since}` : ''}`
   const flags = runFlags(marker)
   const started = flags.length > 0 ? `started with ${flags.join(' ')}` : 'stops only where you must decide'
   const last = view.reason === 'HALTED' ? 'HALTED · see the post-mortem'
-    : view.reason ? `${WHY[view.reason]} · /quorum:run continues it`
-      : view.state === 'waiting' ? (view.gate ? `waiting for you: ${view.gate}` : 'waiting for you')
-        : view.stop ? `next stop: ${view.stop.long}` : ''
+    : view.reason === 'ESCALATED' ? 'ESCALATED · fix the checks, then /quorum:run'
+      : view.reason ? `${WHY[view.reason]} · /quorum:run continues it`
+        : view.state === 'waiting' ? (view.gate ? `waiting for you: ${view.gate}` : 'waiting for you')
+          : view.stop ? `next stop: ${view.stop.long}` : ''
   return [head, started, ...(last ? [last] : [])]
 }
 
