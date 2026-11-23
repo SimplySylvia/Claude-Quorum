@@ -2,7 +2,8 @@
 // round, the blind test's reports), how the task's checks stand, its stages, review rounds and running agents, and
 // standalone reviews (/quorum:review): the one running now, and the ones before it; the Map card of the map a task was
 // started from, and, in a /quorum:map session, the map itself. During a /quorum:run the band and the pane show the
-// run: its next stop, that it waits on the person, or that it stopped. It reads .tasks/, and runs two commands in the
+// run: its next stop, that it waits on the person, or that it stopped; and the run's stops are announced (a
+// notification, or a toast when it can't be sent). It reads .tasks/, and runs two commands in the
 // background: `gh` for the task's PR, and the plugin's `bin/quorum-map tasks` for the map's task states, which asks
 // git, or GitHub through `gh` when a task records a PR, whether a task merged. The skills and bin/ scripts stay the source of truth.
 
@@ -13,12 +14,12 @@ import type { Blind, ChangedFile, Check, FileList, Findings, FindingsView, MapRe
 import {
   GLYPH, ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, parsePlanSteps, SLICE_AT, stageFor, stages, tokenCount,
-  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep, editPath, unmetNote, unmetNow, unmetWords, checksRow, blindSummary, whoseMove,
+  nextCommand, openByDefault, problemsOf, splitTicket, ago, isReviewId, isReviewRunning, latestRun, liveReview, shortRange, plural, voterNext, parseFileList, stepProgress, buildingStep, editPath, unmetNote, unmetNow, unmetWords, checksRow, blindSummary, whoseMove, isStuck,
 } from './task'
 import { awaitingFrom, awaitingOf, cellWidth, changeHeader, cutEnd, confidenceRow, footprint, glue, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows, wrap } from './tree'
 import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
 import { isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskRow, taskState, ticketOrder, ticketRow, ticketSummary, wrapWhole } from './map'
-import { BUTTON_FRAME, fitRun, parseRunMarker, runCardRows, runCommand, runForms, runView } from './run'
+import { BUTTON_FRAME, endedText, fitRun, parseRunMarker, runCardRows, runCommand, runForms, runToast, runView, stoppedText, stripControls, withSlug } from './run'
 import type { RunTurn } from './run'
 
 const PANE = 'quorum-dashboard'
@@ -58,11 +59,34 @@ type Edit = { slug: string; path: string; agentId: string | null; at: number }
 let edit: Edit | null = null
 let flash: Timer | null = null
 const FLASH_MS = 2500
+// How long an announcement's toast stays. The quiet toasts keep Claude Code's default.
+const ANNOUNCE_TOAST_MS = 15_000
 // The statuses an edit is recorded and shown in: Build and the code review's fix rounds.
 const EDIT_STATUSES = ['BUILDING', 'IN_REVIEW']
 // What the main session's turn tells of the run: its open questions, how its last turn ended, and whether it now
 // waits on the person. Kept in memory only; a session start replaces it.
 let runTurn: RunTurn = { asking: 0, ended: null, isIdle: false }
+// What a run's announcements remember. Each is kept in memory only, so a plugin reload drops it: after one there
+// is no quiet start, and the run's task is the one on show.
+// The quiet start: from entering the run until a Quorum agent starts, the task on show changes, or the next
+// main-session turn starts. The person has just typed the command, so its questions aren't announced.
+let isQuiet = false
+// The last task on show in a run outside the quiet start, with the status it had then. Memory only.
+let lastShown: { slug: string; status: string } | null = null
+// The session id the last decided read was made under. A `/clear` and a resume go on under a new id with no
+// `session.start`, and the first read under one counts no read before it. Memory only.
+let runSession: string | null = null
+// The end of the last refresh's write-and-decide section: the next one starts after it. Memory only.
+let deciding: Promise<unknown> = Promise.resolve()
+// The run's task: the task on show, else the last one shown since the quiet start ended; null for none.
+const runTaskOf = (t: Snapshot | null): { slug: string; status: string } | null => (t ? { slug: t.slug, status: t.status } : isQuiet ? null : lastShown)
+// Run `work` once every `work` given before it has ended, whether it failed or not. A failed one rejects only its
+// own caller.
+function inOrder<T>(work: () => Promise<T>): Promise<T> {
+  const mine = deciding.then(work, work)
+  deciding = mine.then(() => undefined, () => undefined)
+  return mine
+}
 // How many main-session turns have started. A hook that awaits takes it first, and after the await writes `runTurn`
 // only if it's unchanged: what an earlier turn left to write must not land on a later turn's state.
 let turnNo = 0
@@ -87,7 +111,8 @@ function clearEdit() {
   edit = null
 }
 
-// Statuses worth interrupting for.
+// Statuses worth interrupting for: the toasts outside a run. In a run `runToast` words three of them (CONVERGED,
+// READY and AWAITING-HUMAN say what the run does next), and a halt or an escalation is announced.
 const TOASTS: Record<string, string> = {
   CONVERGED: 'review converged',
   HALTED: 'HALTED after the round cap; see the post-mortem',
@@ -633,17 +658,69 @@ const nextFor = (t: Snapshot, known: PullRequest | null) => (isPrStage(t.status)
 
 const seconds = (a: QuorumAgent, now: number) => `${Math.max(0, Math.round(((a.endedAt ?? now) - a.startedAt) / 1000))}s`
 
-// Re-read the task, the reviews, and the other tasks, redraw, and toast a status change worth interrupting for.
-async function refresh($: EngineInterface, maxRounds: number, forcePr = false): Promise<Snapshot | null> {
+// Re-read the task, the reviews, and the other tasks, and redraw. Announce a run's halt, escalation and end, and
+// toast the other status changes worth interrupting for. The task's and the marker's writes and that decision run
+// one refresh at a time (inOrder): each refresh decides from what the one before left in both atoms, so one change
+// is one refresh's to tell. `o.isStart`: the read at a session start; `o.isEnter`: the read after `quorum-run enter`.
+async function refresh($: EngineInterface, maxRounds: number, forcePr = false, o: { isStart?: true; isEnter?: true } = {}): Promise<Snapshot | null> {
   const before = await read($, task)
   const after = await snapshot($, maxRounds, before)
-  await update($, task, () => after)
   if (edit && (!after || after.slug !== edit.slug || !EDIT_STATUSES.includes(after.status))) clearEdit()
   const session = await $.session.id().catch(() => '')
   const sessionRoot = await $.session.root()
   const { tasksRoot } = await gitPaths($, sessionRoot)
   const marker = await readRun($, tasksRoot, session)
-  await update($, run, () => marker)
+  const { isStatusChange } = await inOrder(async () => {
+    // Each write answers the value it replaced, through a holder: the engine's scan takes an atom only where it is
+    // named, so no helper can do the swap for both.
+    const held: { was: Snapshot | null; ran0: RunMarker | null } = { was: after, ran0: marker }
+    await update($, task, p => { held.was = p; return after })
+    await update($, run, p => { held.ran0 = p; return marker })
+    const { was, ran0 } = held
+    // From here to the section's end nothing is awaited.
+    // A start read, and the first read under another session id, count no read before them for entering a run
+    // and for its end, and forget the quiet start and the run's task. For a halt the read before still counts
+    // under the same id.
+    const isNewId = session !== runSession
+    const isFresh = o.isStart === true || isNewId
+    runSession = session
+    if (isFresh) {
+      isQuiet = false
+      lastShown = null
+    }
+    const ran = isFresh ? null : ran0
+    const wasInRun = !isNewId && ran0 !== null
+    const isStatusChange = was !== null && after !== null && was.slug === after.slug && was.status !== after.status
+    // The quiet start ends when the task on show changes; a task going off show with none in its place isn't one.
+    if (isQuiet && after && (!was || was.slug !== after.slug || was.status !== after.status)) isQuiet = false
+    // Entering the run, after the line above: a change found at the entering read doesn't end the quiet it starts.
+    if (marker && !isFresh && (ran === null || o.isEnter)) {
+      isQuiet = true
+      lastShown = null
+    }
+    // The task atom outlives a reload, so a fresh read doesn't take the run's task from it.
+    if ((marker || ran) && !isQuiet) lastShown = after ? { slug: after.slug, status: after.status } : was && !isFresh ? { slug: was.slug, status: was.status } : lastShown
+    const mine = runTaskOf(after)
+    if (after && isStatusChange) {
+      if ((marker || wasInRun) && (after.status === 'HALTED' || after.status === 'ESCALATED')) {
+        // In a run at this read or the one before: announced, with no status toast.
+        announce($, stoppedText(after.slug, after.status))
+      } else if (marker) {
+        const words = runToast(after.status, after.risk, marker.until)
+        if (words !== null) $.ui.toast(withSlug(after.slug, words))
+      } else if (TOASTS[after.status]) {
+        // Claude Code draws toasts under the plugin's name ("quorum"), so the text doesn't repeat it.
+        $.ui.toast(`${after.slug}: ${TOASTS[after.status]}`)
+      }
+    }
+    // The run's end. A halt or an escalation was announced already: the status says so, and nothing is remembered.
+    if (ran && !marker) {
+      if (!(mine && isStuck(mine.status))) announce($, endedText(mine?.slug ?? '', mine?.status ?? ''))
+      isQuiet = false
+      lastShown = null
+    }
+    return { isStatusChange }
+  })
   const found = await reviewsSnapshot($, tasksRoot, session, sessionRoot)
   await update($, reviews, () => found)
   const shown = await mapToShow($, tasksRoot, session, sessionRoot, after)
@@ -654,13 +731,7 @@ async function refresh($: EngineInterface, maxRounds: number, forcePr = false): 
   // In the background, so a slow GitHub never holds up the turn; a failed lookup just leaves the last answer.
   if (after) void lookupPr($, after, forcePr).catch(() => undefined)
   // The same for quorum-map, run again at once when the task on show changes status.
-  const isStatusChange = before !== null && after !== null && before.slug === after.slug && before.status !== after.status
   if (shown) void lookupMapStates($, shown.slug, tasksRoot, shown.tasks ?? [], isStatusChange).catch(() => undefined)
-  const message = after && TOASTS[after.status]
-  if (message && before?.slug === after.slug && before.status !== after.status) {
-    // Claude Code draws toasts under the plugin's name ("quorum"), so the text doesn't repeat it.
-    $.ui.toast(`${after.slug}: ${message}`)
-  }
   return after
 }
 
@@ -713,6 +784,25 @@ function redraw($: EngineInterface) {
     $.ui.invalidate('ui.render')
   } catch {
     // The dashboard only watches: the next redraw shows it.
+  }
+}
+
+// Announce `text`, without its control characters: a native notification through the person's own channel, and
+// the same text as a toast that stays ANNOUNCE_TOAST_MS when it wasn't sent, when the call failed, or when the
+// channel only rings a bell and shows no text. Waits for neither, and never throws.
+function announce($: EngineInterface, text: string): void {
+  const clean = stripControls(text)
+  const toast = () => {
+    try {
+      $.ui.toast(clean, { timeoutMs: ANNOUNCE_TOAST_MS })
+    } catch {
+      // The dashboard only watches: the band and the Run card say the same for as long as it lasts.
+    }
+  }
+  try {
+    void $.ui.notify(clean).then(r => { if (!r.isSent || r.channel === 'terminal_bell') toast() }, () => toast())
+  } catch {
+    toast()
   }
 }
 
@@ -780,7 +870,7 @@ export const register: Register = (on, options) => {
     if ((await read($, mapStates)) !== null) await update($, mapStates, s => (s === null ? s : { ...s, ready: null, isHandoff: false }))
     // The band above the prompt says it all, so Quorum keeps no status line; clear one an earlier version set.
     $.ui.status(undefined)
-    if ((await refresh($, maxRounds)) || liveReview(await read($, reviews)) || (await read($, map))?.isSession) void open($)
+    if ((await refresh($, maxRounds, false, { isStart: true })) || liveReview(await read($, reviews)) || (await read($, map))?.isSession) void open($)
     return next(e)
   })
 
@@ -813,7 +903,9 @@ export const register: Register = (on, options) => {
     const ran = await next(e)
     // `gh pr create` or a push can open or change the PR: look it up again now.
     const isPrCommand = /\bgh\s+pr\b|\bgit\s+push\b/.test(e.command)
-    if (isPrCommand || /quorum-(state|active-task|branch|files|map|run)|\.tasks\//.test(e.command)) await refresh($, maxRounds, isPrCommand)
+    // `quorum-run enter` (the run skill's call) enters a run even over a marker that never went.
+    const isEnter = /\bquorum-run\s+enter\b/.test(e.command)
+    if (isPrCommand || /quorum-(state|active-task|branch|files|map|run)|\.tasks\//.test(e.command)) await refresh($, maxRounds, isPrCommand, isEnter ? { isEnter: true } : {})
     return ran
   }).catch(($, e, next) => next(e))
 
@@ -842,6 +934,8 @@ export const register: Register = (on, options) => {
   on('agent.spawn', async ($, e, next) => {
     const spawned = await next(e)
     if (spawned.deny === undefined && spawned.agentId && e.subagentType.startsWith('quorum:')) {
+      // The run's work has started: its quiet start is over.
+      isQuiet = false
       const agent: QuorumAgent = {
         id: spawned.agentId,
         type: e.subagentType.slice('quorum:'.length),
@@ -896,12 +990,13 @@ export const register: Register = (on, options) => {
     return done
   })
 
-  // The main session's turn begins: the run goes on, so a wait or a dead turn is over. A pending re-read stays: it
+  // The main session's turn begins: the run goes on, so a wait, a dead turn or a quiet start is over. A pending re-read stays: it
   // still sees a late ESCALATED, and can't start a wait in a turn that hasn't ended.
   on('turn.start', ($, e, next) => {
     if (e.agentId === undefined) {
       turnNo++
       runTurn = { asking: 0, ended: null, isIdle: false }
+      isQuiet = false
       redraw($)
     }
     return next(e)

@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { On, UiNotifyResult } from 'claude-code'
 import type { ElementQuery, Engine, FoundElement } from 'claude-code/testing'
 
 import {
@@ -18,7 +18,7 @@ import {
   MAX_TICKET_DEPTH, isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, openBlockers,
   parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskState, ticketOrder, ticketRow, ticketStatus, ticketSummary, wrapWhole,
 } from '../../hooks/dashboard/map'
-import { fitRun, gateNow, nextStop, runForms, runView } from '../../hooks/dashboard/run'
+import { fitRun, gateNow, nextStop, runForms, runView, stripControls } from '../../hooks/dashboard/run'
 import type { ChangedFile, FileList, FindingsView, MapStates, MapTaskRun, MapTicket, MapView, TreeFinding } from '../../types'
 import { DEMO_DONE } from './fixtures/demo-done'
 import { DEMO_MAP, DEMO_MAP_TASKS, DEMO_MAP_TICKETS } from './fixtures/demo-map'
@@ -143,8 +143,16 @@ const settle = async () => {
 // `links`: absolute folders that list as symbolic links, as a task's folder in the main tree does once it has a worktree.
 // `o.cwd`: the session's cwd, read on each call (`root` when not given); `o.clock: false` leaves `clock.now` and
 // `clock.every` to the test, so `mock.clock(on)` can drive time (the engine takes one unmatched hook per event).
+// `seen.session`: the session's id, which a test changes for a `/clear` or a resume. `seen.notified`: the text of
+// every `$.ui.notify`, answered as `seen.notify` says: `sent` through a channel that shows the text, `bell` through
+// the one that only rings, `unsent`, `reject` (the hook's `{ deny }`), `throw` (the hook throws), or `held`, which
+// answers only when the test calls the resolver pushed to `seen.held`. `seen.toastMs`: each toast's `timeoutMs`,
+// beside `seen.toasts`; `seen.toastFails` makes the toast's hook throw or deny after recording it.
 function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Record<string, number> = {}, links: string[] = [], o: { cwd?: string; clock?: false } = {}) {
-  const seen = { status: [] as (string | undefined)[], toasts: [] as string[], opened: 0, ticks: 0, live: [] as string[], copied: [] as string[], filled: [] as string[], draft: '', reads: [] as string[], writes: [] as string[] }
+  const seen = {
+    status: [] as (string | undefined)[], toasts: [] as string[], toastMs: [] as (number | undefined)[], notified: [] as string[], session: 'sess-a',
+    notify: 'sent' as 'sent' | 'bell' | 'unsent' | 'reject' | 'throw' | 'held', held: [] as ((answer: UiNotifyResult) => void)[], toastFails: '' as '' | 'throw' | 'deny', opened: 0, ticks: 0, live: [] as string[], copied: [] as string[], filled: [] as string[], draft: '', reads: [] as string[], writes: [] as string[],
+  }
   // Paths are relative to `root`, or absolute (a worktree's session reads the main working tree's .tasks/).
   const abs = (path: string) => (path.startsWith('/') ? path : `${root}/${path}`)
   // The path the engine asked for, in the POSIX form `files` is keyed by: on Windows it resolves `/repo/x` to
@@ -181,7 +189,7 @@ function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Re
   })
   on('session.root', () => ({ value: root }))
   on('session.cwd', () => ({ value: o.cwd ?? root }))
-  on('session.id', () => ({ value: 'sess-a' }))
+  on('session.id', () => ({ value: seen.session }))
   on('agent.list', () => ({ value: seen.live.map(id => ({ id, description: '', type: 'quorum:code-reviewer', status: 'running' as const, kind: 'local_agent', taskStatus: 'running' as const, label: '', startTime: 0, cwd: o.cwd ?? root, tokenCount: 0, tokenSamples: [0], hasRow: true })) }))
   // Each period of $.clock.every is one dispatch; refusing the first ends that interval, so this counts intervals.
   if (o.clock !== false) on('clock.every', () => { seen.ticks++; return { deny: 'test' } })
@@ -199,7 +207,21 @@ function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Re
   on('fs.write', (_, e) => { const path = posix(e.path); seen.writes.push(path); files[path] = e.text; return { value: undefined } })
   if (o.clock !== false) on('clock.now', () => ({ value: 1_000 }))
   on('ui.status', (_, e) => { seen.status.push(e.text); return { value: undefined } })
-  on('ui.toast', (_, e) => { seen.toasts.push(e.text); return { value: undefined } })
+  on('ui.toast', (_, e) => {
+    seen.toasts.push(e.text)
+    seen.toastMs.push(e.timeoutMs)
+    if (seen.toastFails === 'throw') throw new Error('toast: test')
+    if (seen.toastFails === 'deny') return { deny: 'test' }
+    return { value: undefined }
+  })
+  on('ui.notify', (_, e) => {
+    seen.notified.push(e.text)
+    if (seen.notify === 'throw') throw new Error('notify: test')
+    if (seen.notify === 'reject') return { deny: 'test' }
+    if (seen.notify === 'held') return new Promise<{ value: UiNotifyResult }>(resolve => { seen.held.push(value => resolve({ value })) })
+    if (seen.notify === 'unsent') return { value: { isSent: false, reason: 'disabled' } }
+    return { value: { isSent: true, channel: seen.notify === 'bell' ? 'terminal_bell' : 'kitty' } }
+  })
   on('ui.open', () => { seen.opened++; return { value: { isPlaced: true } } })
   on('command.register', () => ({ value: { command: 'quorum-dashboard' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -7718,42 +7740,377 @@ test("the band never overflows during a run: the run's words are cut at the end"
   expect(fitRun(86, dotsRow, ['▸▸ PR drafted'], false)).toEqual({ words: '▸▸ PR drafted', problem: '', hasId: false, hasRail: false, hasExtras: true })
 })
 
-test('a run changes no toast and raises no notification', async ($, on) => {
-  const held = heldQuestions(on)
-  let notified = 0
-  on('ui.notify', () => { notified++; return { value: { isSent: false, reason: 'test' } } as never })
-  const files: Record<string, string> = repo('IN_REVIEW')
+// ---- A run's announcements: the channel, a halt or an escalation, the run's end, and the quiet toasts
+
+const HALTED_TEXT = 'export-csv: run stopped · HALTED · see the post-mortem'
+const ESCALATED_TEXT = 'export-csv: run stopped · ESCALATED · fix the checks, then /quorum:run'
+const START = { cwd: '/repo', surface: 'terminal', isInteractive: true } as const
+const ON_MAIN = 'ref: refs/heads/main\n'
+const ON_TASK = 'ref: refs/heads/feat/export-csv\n'
+// A Bash call after which the dashboard reads the task and the marker again.
+const readAgain = ($: Engine) => $.tool.call({ tool: 'Bash', command: 'bin/quorum-state get status' })
+// The Bash call the run skill enters a run with.
+const enterRun = ($: Engine) => $.tool.call({ tool: 'Bash', command: 'bin/quorum-run enter sess-a' })
+type Seen = ReturnType<typeof world>
+const forget = (seen: Seen) => { seen.notified.length = 0; seen.toasts.length = 0; seen.toastMs.length = 0 }
+
+test("an announcement is a notification, or a toast when it wasn't sent", async ($, on) => {
+  const files = inRun('IN_REVIEW')
   const { seen, clock } = runWorld(on, files)
-  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  // A status change a Bash call brings, a question asked and answered, and one a turn's re-read finds.
-  const changes = async () => {
-    seen.toasts.length = 0
-    files[STATE_MD] = state('IN_REVIEW')
-    await $.tool.call({ tool: 'Bash', command: 'bin/quorum-state set status IN_REVIEW' })
-    await startTurn($)
-    files[STATE_MD] = state('CONVERGED')
-    await $.tool.call({ tool: 'Bash', command: 'bin/quorum-state set status CONVERGED' })
-    const asked = ask($)
+  await $.session.start(START)
+  // A change to HALTED in a run, with the notification answered as `mode` says.
+  const halt = async (mode: Seen['notify']) => {
+    files[STATE_MD] = calm('IN_REVIEW')
+    await readAgain($)
     await clock.settle()
-    held.answer()
-    await asked
-    await endTurn($)
-    files[STATE_MD] = state('HALTED')
-    await clock.advance(REREAD_MS)
-    await $.tool.call({ tool: 'Bash', command: 'bin/quorum-state get status' })
-    await startTurn($)
-    await endTurn($, 'error')
-    await clock.advance(REREAD_MS)
+    forget(seen)
+    seen.notify = mode
+    files[STATE_MD] = calm('HALTED')
+    await readAgain($)
+    await clock.settle()
+  }
+  // Sent through a channel that shows the text: the notification alone.
+  await halt('sent')
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+  // Through the bell (no text shown), not sent, rejected, and with a hook that throws: the same text as a toast
+  // that stays 15 seconds, once, and the Bash call that found the halt has resolved.
+  for (const mode of ['bell', 'unsent', 'reject', 'throw'] as const) {
+    await halt(mode)
+    expect({ mode, notified: seen.notified }).toEqual({ mode, notified: [HALTED_TEXT] })
+    expect({ mode, toasts: seen.toasts }).toEqual({ mode, toasts: [HALTED_TEXT] })
+    expect({ mode, toastMs: seen.toastMs }).toEqual({ mode, toastMs: [15000] })
+  }
+  // An answer that comes after the session moved on to its next turn: one toast, then.
+  await halt('held')
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+  await startTurn($)
+  await clock.settle()
+  expect(seen.toasts).toEqual([])
+  expect(seen.held.length).toBe(1)
+  seen.held[0]?.({ isSent: false, reason: 'disabled' })
+  await clock.settle()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([HALTED_TEXT])
+  expect(seen.toastMs).toEqual([15000])
+})
+
+test('a halt or an escalation in a run is announced once, with no status toast', async ($, on) => {
+  // The task's file calls `atRead.next` once, the next time the dashboard reads its files: the test's way into the
+  // middle of a refresh.
+  const atRead: { next: (() => void) | null } = { next: null }
+  const md = { text: calm('IN_REVIEW') }
+  const files = inRun('IN_REVIEW')
+  Object.defineProperty(files, STATE_MD, { enumerable: true, get: () => { const act = atRead.next; atRead.next = null; act?.(); return md.text } })
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  const to = async (status: string) => {
+    md.text = calm(status)
+    await readAgain($)
+    await clock.settle()
+  }
+
+  // Both messages word for word, each once, and no status toast; a second refresh adds nothing.
+  await to('HALTED')
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  await to('HALTED')
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  // A task that escalates, recovers and escalates again is announced twice.
+  await to('IN_REVIEW')
+  await to('ESCALATED')
+  await to('ESCALATED')
+  await to('IN_REVIEW')
+  await to('ESCALATED')
+  expect(seen.notified).toEqual([HALTED_TEXT, ESCALATED_TEXT, ESCALATED_TEXT])
+  expect(seen.toasts).toEqual([])
+
+  // Two refreshes that overlap over one change: one of them sees the edge.
+  await to('IN_REVIEW')
+  forget(seen)
+  md.text = calm('HALTED')
+  await Promise.all([readAgain($), readAgain($)])
+  await clock.settle()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+  // The same with the second started from inside the first's read of the task.
+  await to('IN_REVIEW')
+  forget(seen)
+  md.text = calm('ESCALATED')
+  const inside: Promise<unknown>[] = []
+  atRead.next = () => { inside.push(readAgain($)) }
+  await readAgain($)
+  expect(inside.length).toBe(1)
+  await Promise.all(inside)
+  await clock.settle()
+  expect(seen.notified).toEqual([ESCALATED_TEXT])
+  expect(seen.toasts).toEqual([])
+  // Two overlapping refreshes that find the halt and the marker gone: the halt alone, and no run's end.
+  await to('IN_REVIEW')
+  forget(seen)
+  md.text = calm('HALTED')
+  delete files[RUN_MARKER]
+  await Promise.all([readAgain($), readAgain($)])
+  await clock.settle()
+  await readAgain($)
+  await clock.settle()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+
+  // A session start under the same id that finds both: the read before counts for the halt, and only the run's
+  // end is silent there.
+  files[RUN_MARKER] = RUN_SINCE
+  await to('IN_REVIEW')
+  forget(seen)
+  md.text = calm('HALTED')
+  delete files[RUN_MARKER]
+  await $.session.start(START)
+  await clock.settle()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+})
+
+test('the marker going after a halt or an escalation is silent', async ($, on) => {
+  const files = inRun('IN_REVIEW')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  const to = async (status: string) => {
+    files[STATE_MD] = calm(status)
+    await readAgain($)
+    await clock.settle()
+  }
+  const leave = async () => {
+    delete files[RUN_MARKER]
+    await readAgain($)
+    await clock.settle()
+  }
+
+  // The run's own leave after a halt, the halted task taken off show first: nothing after the halt's message.
+  await to('HALTED')
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  files['.git/HEAD'] = ON_MAIN
+  await readAgain($)
+  await leave()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+
+  // An escalated run's marker, removed by hand later.
+  files['.git/HEAD'] = ON_TASK
+  files[RUN_MARKER] = RUN_SINCE
+  await to('IN_REVIEW')
+  forget(seen)
+  await to('ESCALATED')
+  await readAgain($)
+  await leave()
+  expect(seen.notified).toEqual([ESCALATED_TEXT])
+
+  // A session that starts with the task already ESCALATED: no edge to announce, and the marker's removal is
+  // silent too, from the status alone.
+  forget(seen)
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  await clock.settle()
+  await leave()
+  expect(seen.notified).toEqual([])
+
+  // A task that escalated and went back to IN_REVIEW: its run's end is announced.
+  files[RUN_MARKER] = RUN_SINCE
+  await to('IN_REVIEW')
+  await to('ESCALATED')
+  await to('IN_REVIEW')
+  await leave()
+  expect(seen.notified).toEqual([ESCALATED_TEXT, 'export-csv: run ended · IN_REVIEW'])
+  expect(seen.toasts).toEqual([])
+})
+
+test("the run's end is announced with the task's status", async ($, on) => {
+  const ENDED = 'export-csv: run ended · AWAITING-HUMAN'
+  const files = inRun('AWAITING-HUMAN')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  const again = async () => {
+    await readAgain($)
+    await clock.settle()
+  }
+  const leave = async () => {
+    delete files[RUN_MARKER]
+    await again()
+  }
+
+  // The marker goes with the task on show; the read after it announces nothing more.
+  await leave()
+  expect(seen.notified).toEqual([ENDED])
+  await again()
+  expect(seen.notified).toEqual([ENDED])
+
+  // The task taken off show before the marker went (off its branch, a finished task): the last task shown, with
+  // its last status.
+  forget(seen)
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  files['.git/HEAD'] = ON_MAIN
+  await again()
+  await leave()
+  expect(seen.notified).toEqual([ENDED])
+
+  // A run with no task.
+  forget(seen)
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  await leave()
+  expect(seen.notified).toEqual(['run ended'])
+
+  // A run whose only task went off show during the quiet start (one the person chose not to continue).
+  forget(seen)
+  files['.git/HEAD'] = ON_TASK
+  await again()
+  files[RUN_MARKER] = RUN_SINCE
+  await enterRun($)
+  files['.git/HEAD'] = ON_MAIN
+  await again()
+  await leave()
+  expect(seen.notified).toEqual(['run ended'])
+
+  // A run that begins and ends inside its quiet start.
+  forget(seen)
+  files['.git/HEAD'] = ON_TASK
+  await again()
+  files[RUN_MARKER] = RUN_SINCE
+  await enterRun($)
+  await leave()
+  expect(seen.notified).toEqual([ENDED])
+
+  // The read at a session start that finds the marker gone is no run ending, and neither is the one after it.
+  forget(seen)
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  delete files[RUN_MARKER]
+  await $.session.start(START)
+  await clock.settle()
+  await again()
+  expect(seen.notified).toEqual([])
+
+  // A /clear after the run left: the session goes on under a new id with no session start.
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  delete files[RUN_MARKER]
+  seen.session = 'sess-b'
+  await again()
+  await again()
+  expect(seen.notified).toEqual([])
+  expect(seen.toasts).toEqual([])
+
+  // A /clear straight from a read in a run, whose marker is still there: the first read under the new id counts
+  // no read before, so a halt it finds is the toast of a session with no run, and no run has ended.
+  seen.session = 'sess-a'
+  files[RUN_MARKER] = RUN_SINCE
+  files[STATE_MD] = calm('PLANNING')
+  await $.session.start(START)
+  await clock.settle()
+  forget(seen)
+  seen.session = 'sess-b'
+  files[STATE_MD] = calm('HALTED')
+  await again()
+  expect(seen.toasts).toEqual(['export-csv: HALTED after the round cap; see the post-mortem'])
+  expect(seen.toastMs).toEqual([undefined])
+  expect(seen.notified).toEqual([])
+
+  // A start read forgets the run's task: one that went off show before it is not named when the run ends.
+  seen.session = 'sess-a'
+  files[STATE_MD] = calm('PLANNING')
+  await $.session.start(START)
+  await clock.settle()
+  forget(seen)
+  files['.git/HEAD'] = ON_MAIN
+  await $.session.start(START)
+  await leave()
+  expect(seen.notified).toEqual(['run ended'])
+  expect(seen.toasts).toEqual([])
+})
+
+test('in a run the quiet toasts say what the run does next', async ($, on) => {
+  const files = inRun('IN_REVIEW')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  // The toasts a change from `from` to `status` raises, under a marker with `until` ('' for none).
+  const toasts = async (status: string, until: string, o: { risk?: string; from?: string } = {}) => {
+    const md = (s: string) => calm(s).replace('risk: MEDIUM', `risk: ${o.risk ?? 'MEDIUM'}`)
+    files[RUN_MARKER] = until ? `${RUN_SINCE}until ${until}\n` : RUN_SINCE
+    files[STATE_MD] = md(o.from ?? 'IN_REVIEW')
+    await readAgain($)
+    await clock.settle()
+    seen.toasts.length = 0
+    files[STATE_MD] = md(status)
+    await readAgain($)
+    await clock.settle()
     return [...seen.toasts]
   }
-  const outside = await changes()
-  expect(outside).toEqual(['export-csv: review converged', 'export-csv: HALTED after the round cap; see the post-mortem'])
-  // In a run, through its going, waiting and stopped states: the same toasts.
-  files[RUN_MARKER] = RUN_SINCE
-  await $.tool.call({ tool: 'Bash', command: 'bin/quorum-run enter sess-a' })
-  expect(await changes()).toEqual(outside)
-  expect((await bandRow($, 140)).words).toBe('run stopped')
-  expect(notified).toBe(0)
+  // Each row of the table: the full toast with no `until` and with one past the status, the status alone with
+  // the row's `until`, and the full toast under the other rows' `until`.
+  for (const until of ['', 'pr', 'blind']) expect({ until, toasts: await toasts('CONVERGED', until) }).toEqual({ until, toasts: ['export-csv: CONVERGED · blind test next'] })
+  expect(await toasts('CONVERGED', 'review')).toEqual(['export-csv: CONVERGED'])
+  for (const until of ['', 'pr', 'blind']) expect({ until, toasts: await toasts('READY', until) }).toEqual({ until, toasts: ['export-csv: READY · drafting the PR'] })
+  expect(await toasts('READY', 'review')).toEqual(['export-csv: READY'])
+  for (const until of ['', 'pr', 'review']) expect({ until, toasts: await toasts('AWAITING-HUMAN', until) }).toEqual({ until, toasts: ['export-csv: AWAITING-HUMAN · drafting the PR'] })
+  expect(await toasts('AWAITING-HUMAN', 'blind')).toEqual(['export-csv: AWAITING-HUMAN'])
+  // A LOW task has no blind test: its review goes on to the proof whatever `until` says, and stops at READY.
+  for (const until of ['', 'review']) expect({ until, toasts: await toasts('CONVERGED', until, { risk: 'LOW' }) }).toEqual({ until, toasts: ['export-csv: CONVERGED · final proof next'] })
+  expect(await toasts('READY', 'review', { risk: 'LOW', from: 'CONVERGED' })).toEqual(['export-csv: READY'])
+  // Every one a toast of the default length, and none a notification.
+  expect(seen.toastMs.length).toBeGreaterThan(0)
+  expect(seen.toastMs.filter(ms => ms !== undefined)).toEqual([])
+  expect(seen.notified).toEqual([])
+})
+
+test('outside a run the toasts read as before and nothing is announced', async ($, on) => {
+  const held = heldQuestions(on)
+  const files: Record<string, string> = repo('IN_REVIEW')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  const to = async (status: string) => {
+    files[STATE_MD] = calm(status)
+    await readAgain($)
+    await clock.settle()
+  }
+  // The five status toasts, word for word, each of the default length.
+  for (const status of ['CONVERGED', 'HALTED', 'ESCALATED', 'READY', 'AWAITING-HUMAN']) {
+    await to('IN_REVIEW')
+    await to(status)
+  }
+  expect(seen.toasts).toEqual([
+    'export-csv: review converged',
+    'export-csv: HALTED after the round cap; see the post-mortem',
+    'export-csv: ESCALATED: the Stop-hook checks failed 3 times',
+    'export-csv: READY for /quorum:pr-draft',
+    'export-csv: waiting for your review',
+  ])
+  expect(seen.toastMs).toEqual([undefined, undefined, undefined, undefined, undefined])
+  // A question, a turn that dies with its re-read, and a status change: no notification.
+  await to('IN_REVIEW')
+  await startTurn($)
+  const asked = ask($)
+  await clock.settle()
+  held.answer()
+  await asked
+  await endTurn($, 'error')
+  await clock.advance(REREAD_MS)
+  await to('HALTED')
+  expect(seen.notified).toEqual([])
+})
+
+test('a message is sent without control characters', async ($, on) => {
+  // The status is free text in state.md: here it holds an ESC and a BEL.
+  const files = inRun('READY')
+  files[STATE_MD] = calm('READY').replace('status: READY', 'status: REA\u001bDY\u0007')
+  const { seen, clock } = runWorld(on, files)
+  seen.notify = 'unsent'
+  await $.session.start(START)
+  delete files[RUN_MARKER]
+  await readAgain($)
+  await clock.settle()
+  // The text given to the notification, and to the toast that stands in for it, has neither.
+  expect(seen.notified).toEqual(['export-csv: run ended · READY'])
+  expect(seen.toasts).toEqual(seen.notified)
+  expect(stripControls('a\u001b\u0007\u007f\u0085b')).toBe('ab')
 })
 
 // ---- The Run card, and the Now card during a run

@@ -152,7 +152,7 @@ export function runToast(status: string, risk: string, until: RunStage | ''): st
 
 // `text` without its control characters (C0, DEL and C1), so a message can't carry a terminal's control codes.
 export function stripControls(text: string): string {
-  return text.replace(/[ --]/g, '')
+  return text.replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
 }
 
 // The run's own flags as the marker recorded them, `--until <stage>` then `--yes`.
