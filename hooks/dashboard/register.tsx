@@ -1,14 +1,15 @@
 // Quorum's dashboard: a band above the prompt, and a pane with what the current stage is doing (each reviewer of the
 // round, the blind test's reports), how the task's checks stand, its stages, review rounds and running agents, and
 // standalone reviews (/quorum:review): the one running now, and the ones before it; the Map card of the map a task was
-// started from, and, in a /quorum:map session, the map itself. It reads .tasks/, and runs two commands in the
+// started from, and, in a /quorum:map session, the map itself. During a /quorum:run the band and the pane show the
+// run: its next stop, that it waits on the person, or that it stopped. It reads .tasks/, and runs two commands in the
 // background: `gh` for the task's PR, and the plugin's `bin/quorum-map tasks` for the map's task states, which asks
 // git, or GitHub through `gh` when a task records a PR, whether a task merged. The skills and bin/ scripts stay the source of truth.
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Blind, ChangedFile, Check, FileList, Findings, FindingsView, MapReview, MapTask, MapTaskRun, MapTicket, MapView, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, RoundKept, Section, Snapshot, Stage } from '../../types'
+import type { Blind, ChangedFile, Check, FileList, Findings, FindingsView, MapReview, MapTask, MapTaskRun, MapTicket, MapView, Now, OtherTask, PullRequest, QuorumAgent, Review, Reviewer, Round, RoundKept, RunMarker, Section, Snapshot, Stage } from '../../types'
 import {
   GLYPH, ROLE_LABEL, STAGES, branchFromHead, isStaleProof, packedRef, checksNoteFromLog, isPrStage, isReportedPass, parsePr, prDetail, prFromUrl, prNext, count, countFindings, countRequirements, evalRows, expectedProof, isHookActive, joinChecks, parseSpec, requirementState, list, nextStep, parseBlind,
   parseFrontmatter, parseProof, reviewer, roleOf, roundReviewers, scalar, slugFromHead, spendOf, modelMismatches, choiceLabel, normalizePath, isFinished, countPlanSteps, parsePlanSteps, SLICE_AT, stageFor, stages, tokenCount,
@@ -17,6 +18,8 @@ import {
 import { awaitingFrom, awaitingOf, cellWidth, changeHeader, cutEnd, confidenceRow, footprint, glue, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows, wrap } from './tree'
 import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
 import { isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskRow, taskState, ticketOrder, ticketRow, ticketSummary, wrapWhole } from './map'
+import { fitRun, parseRunMarker, runForms, runView } from './run'
+import type { RunTurn } from './run'
 
 const PANE = 'quorum-dashboard'
 const COMMAND = 'quorum-dashboard'
@@ -35,6 +38,8 @@ const sections = atom({ plugin: 'quorum', key: 'sections' } as const, {}, { shap
 const map = atom({ plugin: 'quorum', key: 'map' } as const, null, { shape: 'map-1' })
 // The last `quorum-map tasks` result, for the map its slug names.
 const mapStates = atom({ plugin: 'quorum', key: 'mapstates' } as const, null, { shape: 'mapstates-1' })
+// This session's /quorum:run, as its marker reads (`quorum-run enter` writes it, `leave` removes it); null outside a run.
+const run = atom({ plugin: 'quorum', key: 'run' } as const, null, { shape: 'run-1' })
 // How long a PR lookup stands before the next refresh asks GitHub again.
 const PR_TTL_MS = 2 * 60 * 1000
 // How long a `quorum-map tasks` attempt stands before the next refresh runs it again.
@@ -55,6 +60,9 @@ let flash: Timer | null = null
 const FLASH_MS = 2500
 // The statuses an edit is recorded and shown in: Build and the code review's fix rounds.
 const EDIT_STATUSES = ['BUILDING', 'IN_REVIEW']
+// What the main session's turn tells of the run: its open questions, how its last turn ended, and whether it now
+// waits on the person. Kept in memory only; a session start replaces it.
+let runTurn: RunTurn = { asking: 0, ended: null, isIdle: false }
 function clearEdit() {
   flash?.cancel()
   flash = null
@@ -385,6 +393,13 @@ async function mapToShow($: EngineInterface, root: string, session: string, sess
   return t && t.mapSlug !== '' && t.mapTask > 0 ? readMap($, root, t.mapSlug, sessionRoot, false) : null
 }
 
+// This session's run marker, from the main working tree's .tasks/; null for no run. An empty marker is still a run.
+async function readRun($: EngineInterface, tasksRoot: string, session: string): Promise<RunMarker | null> {
+  if (!isSessionId(session)) return null
+  const text = await readOr($, `${tasksRoot}/.tasks/.run-sessions/${session}`)
+  return text === null ? null : parseRunMarker(text)
+}
+
 // How many other tasks the pane lists.
 const OTHERS_SHOWN = 6
 
@@ -605,6 +620,8 @@ async function refresh($: EngineInterface, maxRounds: number, forcePr = false): 
   const session = await $.session.id().catch(() => '')
   const sessionRoot = await $.session.root()
   const { tasksRoot } = await gitPaths($, sessionRoot)
+  const marker = await readRun($, tasksRoot, session)
+  await update($, run, () => marker)
   const found = await reviewsSnapshot($, tasksRoot, session, sessionRoot)
   await update($, reviews, () => found)
   const shown = await mapToShow($, tasksRoot, session, sessionRoot, after)
@@ -681,6 +698,7 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: COMMAND, description: "Show or hide the Quorum task dashboard" })
     await settleAgents($)
     selected = null
+    runTurn = { asking: 0, ended: null, isIdle: false }
     clearEdit()
     // A run from before settles only its own record. The first result after a reload only records the ready set;
     // the attempt's time stays, so the 2-minute wait still holds.
@@ -715,13 +733,13 @@ export const register: Register = (on, options) => {
   })
 
   // Every status change goes through bin/quorum-state or quorum-active-task, quorum-files records the change, and
-  // quorum-map enters, claims, resolves and leaves a map, so re-read after those. The dashboard only watches: if one
-  // of its hooks fails, the call goes on as if it weren't there.
+  // quorum-map enters, claims, resolves and leaves a map, and quorum-run enters and leaves a run, so re-read after
+  // those. The dashboard only watches: if one of its hooks fails, the call goes on as if it weren't there.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
     // `gh pr create` or a push can open or change the PR: look it up again now.
     const isPrCommand = /\bgh\s+pr\b|\bgit\s+push\b/.test(e.command)
-    if (isPrCommand || /quorum-(state|active-task|branch|files|map)|\.tasks\//.test(e.command)) await refresh($, maxRounds, isPrCommand)
+    if (isPrCommand || /quorum-(state|active-task|branch|files|map|run)|\.tasks\//.test(e.command)) await refresh($, maxRounds, isPrCommand)
     return ran
   }).catch(($, e, next) => next(e))
 
@@ -801,7 +819,10 @@ export const register: Register = (on, options) => {
   })
 
   // The band: one row, most important first. A status badge colored by whose move it is, the task, a dot per stage
-  // and the current one by name, the round's progress, then Next (it fills the prompt) and Dashboard.
+  // and the current one by name, the round's progress, then Next (it fills the prompt) and Dashboard. During a
+  // /quorum:run the run's words take Next's place; on a row that doesn't fit, the words, the slug, the stage dots, the
+  // problem and the progress give way in that order. For a stopped run the problem gives way first, and `run stopped`
+  // and Next stay whole.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const t = await read($, task)
     const r = liveReview(await read($, reviews))
@@ -850,25 +871,55 @@ export const register: Register = (on, options) => {
     const command = nextCommand(nextFor(t, known))
     // The recorded change's file count, once the build has a base (the Task card's footprint line).
     const fp = t.files ? footprint(t.files, t.rounds, t.head, awaitingOf(t.codeView, t.rereview)) : null
+    // Each item's text as drawn, '' for one not on show at this width.
+    const badge = ` ${t.status || 'no status'} `
+    const id = columns >= 90 ? `${t.slug} · ${t.risk}` : ''
+    const progressText = columns >= 110 ? progress : ''
+    const filesText = columns >= 110 && fp ? plural(fp.files, 'file') : ''
+    const problem = (columns >= 110 ? problems.join(' · ') : problems[0]) ?? ''
+    // A review running beside the task, briefly: the pane has the rest.
+    const reviewText = r && columns >= 110 ? `${r.id}: ${reviewProgress(r)}` : ''
+    // During a run: its words in Next's place while it goes or waits, and `run stopped` beside a Next once it stopped.
+    const marker = await read($, run)
+    const view = marker ? runView(marker, t.status, t.risk, runTurn) : null
+    const isStopped = view?.state === 'stopped'
+    const words = view ? runForms(view, columns, problem !== '') : null
+    // /quorum:run doesn't continue a halted task, so HALTED keeps the status's own Next.
+    const nextCmd = !view ? command : !isStopped ? '' : view.reason === 'HALTED' ? command : '/quorum:run'
+    const nextLabel = columns >= 110 ? `▶ ${nextCmd}` : '▶ Next'
+    const fit = view
+      ? fitRun(columns, {
+        badge,
+        id,
+        rail: `${rail.map(s => GLYPH[s.state][0]).join('')}${currentLabel ? ` ${currentLabel}` : ''}`,
+        extras: [progressText, filesText, reviewText],
+        problem,
+        buttons: [...(nextCmd ? [nextLabel] : []), 'Dashboard'],
+      }, words?.forms ?? [], isStopped)
+      : null
+    const hasExtras = fit?.hasExtras ?? true
+    const shownProblem = fit ? fit.problem : problem
 
     return (
       <Box flexDirection="row" gap={2}>
-        <Text backgroundColor={whoseMove(t.status)} color="inverseText" bold> {t.status || 'no status'} </Text>
-        {columns >= 90 ? <Text dimColor>{t.slug} · {t.risk}</Text> : null}
-        <Text>
-          {rail.map(s => {
-            const [glyph, color] = GLYPH[s.state]
-            return <Text key={s.name} color={color}>{glyph}</Text>
-          })}
-          {currentLabel ? <Text bold> {currentLabel}</Text> : null}
-        </Text>
-        {columns >= 110 && progress ? <Text dimColor>{progress}</Text> : null}
-        {columns >= 110 && fp ? <Text dimColor>{plural(fp.files, 'file')}</Text> : null}
-        {problems.length > 0 ? <Text color="error">{columns >= 110 ? problems.join(' · ') : problems[0]}</Text> : null}
-        {/* A review running beside the task, briefly: the pane has the rest. */}
-        {r && columns >= 110 ? <Text dimColor>{r.id}: {reviewProgress(r)}</Text> : null}
+        <Text backgroundColor={whoseMove(t.status)} color="inverseText" bold>{badge}</Text>
+        {id && (fit?.hasId ?? true) ? <Text dimColor>{id}</Text> : null}
+        {fit?.hasRail ?? true ? (
+          <Text>
+            {rail.map(s => {
+              const [glyph, color] = GLYPH[s.state]
+              return <Text key={s.name} color={color}>{glyph}</Text>
+            })}
+            {currentLabel ? <Text bold> {currentLabel}</Text> : null}
+          </Text>
+        ) : null}
+        {progressText && hasExtras ? <Text dimColor>{progressText}</Text> : null}
+        {filesText && hasExtras ? <Text dimColor>{filesText}</Text> : null}
+        {shownProblem ? <Text color="error">{shownProblem}</Text> : null}
+        {reviewText && hasExtras ? <Text dimColor>{reviewText}</Text> : null}
+        {fit?.words && words ? <Text color={words.color} bold={words.isBold}>{fit.words}</Text> : null}
         <Box flexDirection="row" gap={1}>
-          {command ? <Button key="next" variant="primary" label={columns >= 110 ? `▶ ${command}` : '▶ Next'} onPress={() => void fillPrompt($, command)} /> : null}
+          {nextCmd ? <Button key="next" variant="primary" label={nextLabel} onPress={() => void fillPrompt($, nextCmd)} /> : null}
           <Button key="open" label="Dashboard" onPress={() => open($, true)} />
         </Box>
       </Box>

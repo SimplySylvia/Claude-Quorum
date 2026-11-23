@@ -292,6 +292,8 @@ declare module 'claude-code' {
       map: Shaped<MapView | null>
       // The last quorum-map tasks result, for the map its slug names, and when it was tried.
       mapstates: Shaped<MapStates | null>
+      // This session's /quorum:run, as its marker reads; null outside a run.
+      run: Shaped<RunMarker | null>
     }
   }
 }

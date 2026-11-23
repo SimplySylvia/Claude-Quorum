@@ -6623,3 +6623,220 @@ test('the gate open now is named for mockup sign-off and plan approval only', ()
   // name is still plan approval.
   expect(nextStop('PLANNING', 'MEDIUM', '', true)?.long).toBe('PR drafted, then your review')
 })
+
+// ---- A /quorum:run on the band (hooks/dashboard/run.ts)
+
+// This session's run marker, as `quorum-run enter sess-a` writes it with no flags.
+const RUN_MARKER = '.tasks/.run-sessions/sess-a'
+const RUN_SINCE = '2026-11-22 09:41\n'
+const bandAt = (columns: number) => ({ ...BAND, props: { ...BAND.props, bodyColumns: columns }, surface: 'terminal' }) as const
+// state.md with no pending finding, so the band has no problem to show.
+const calm = (status: string) => state(status).replace('pending_findings: ["app/report.py:42"]', 'pending_findings: []')
+// The run's words on the band: every Text that reads as one of their forms.
+const runWords = async (d: Drawn) => (await d.findAll({ type: 'Text' })).filter(x => /^(autopilot ·|auto ·|▸▸|waiting|◆|run stopped)/.test(x.text))
+// What a run that goes or waits leaves of the buttons: no Next, and Dashboard.
+async function expectNoNext(d: Drawn) {
+  expect(await d.find({ type: 'Button', key: 'next' })).toBeUndefined()
+  expect((await d.find({ type: 'Button', key: 'open' }))?.text).toBe('Dashboard')
+}
+
+test("the run marker is read from the main tree's .tasks, flags or not", async ($, on) => {
+  // A session in the task's worktree: its .git names its git dir, whose commondir leads to the main tree, and the
+  // marker is the main tree's.
+  const MAIN_MARKER = `/repo/${RUN_MARKER}`
+  const files: Record<string, string> = {
+    '.git': 'gitdir: /repo/.git/worktrees/export-csv\n',
+    '/repo/.git/worktrees/export-csv/HEAD': 'ref: refs/heads/feat/export-csv\n',
+    '/repo/.git/worktrees/export-csv/commondir': '../..\n',
+    '/repo/.tasks/export-csv/state.md': calm('PLANNING'),
+    '/repo/.tasks/export-csv/rd.md': RD,
+    // A marker in the worktree's own .tasks/ is nobody's: with none in the main tree there is no run.
+    [RUN_MARKER]: `${RUN_SINCE}until spec\n`,
+  }
+  const seen = world(on, files, '/repo/.claude/worktrees/export-csv')
+  await $.session.start({ cwd: '/repo/.claude/worktrees/export-csv', surface: 'terminal', isInteractive: true })
+  const words = async () => {
+    await $.tool.call({ tool: 'Bash', command: 'bin/quorum-state get status' })
+    const band = await $.ui.mount(bandAt(140))
+    const found = (await runWords(band)).map(x => x.text)
+    const next = (await band.find({ type: 'Button', key: 'next' }))?.text
+    await band.unmount()
+    return { found, next }
+  }
+  expect(await words()).toEqual({ found: [], next: '▶ /quorum:plan' })
+  expect(seen.reads).toContain(MAIN_MARKER)
+  expect(seen.reads).not.toContain(`/repo/.claude/worktrees/export-csv/${RUN_MARKER}`)
+
+  const stop = (text: string) => ({ found: [`autopilot · next stop: ${text}`], next: undefined })
+  // Both flags: --yes takes the run past plan approval, to where --until says.
+  files[MAIN_MARKER] = `${RUN_SINCE}until review\nyes\n`
+  expect(await words()).toEqual(stop('end of review'))
+  // Each flag alone, and both in the other order.
+  files[MAIN_MARKER] = `${RUN_SINCE}yes\n`
+  expect(await words()).toEqual(stop('PR drafted, then your review'))
+  files[MAIN_MARKER] = `${RUN_SINCE}until review\n`
+  expect(await words()).toEqual(stop('plan approval'))
+  files[MAIN_MARKER] = `${RUN_SINCE}yes\nuntil plan\n`
+  expect(await words()).toEqual(stop('end of plan'))
+  // Line 1 alone, as an older quorum-run wrote it, and an empty marker: a run with no flags.
+  files[MAIN_MARKER] = RUN_SINCE
+  expect(await words()).toEqual(stop('plan approval'))
+  files[MAIN_MARKER] = ''
+  expect(await words()).toEqual(stop('plan approval'))
+  // A line it doesn't know is passed over, and the flags beside it are still read. With CRLF line ends too.
+  files[MAIN_MARKER] = `${RUN_SINCE}cap 12\nuntil spec\nUNTIL review\nyes\n`
+  expect(await words()).toEqual(stop('end of spec'))
+  files[MAIN_MARKER] = '2026-11-22 09:41\r\nuntil review\r\nyes\r\n'
+  expect(await words()).toEqual(stop('end of review'))
+  // The marker gone: no run.
+  delete files[MAIN_MARKER]
+  expect(await words()).toEqual({ found: [], next: '▶ /quorum:plan' })
+})
+
+test('the band changes as soon as quorum-run enters and leaves', async ($, on) => {
+  const files: Record<string, string> = { ...repo('BUILDING'), '.tasks/export-csv/state.md': calm('BUILDING') }
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let band = await $.ui.mount(bandAt(120))
+  expect(await runWords(band)).toEqual([])
+  expect((await band.find({ type: 'Button', key: 'next' }))?.text).toBe('▶ /quorum:build')
+  await band.unmount()
+
+  // The run enters: the Bash call that names quorum-run re-reads, with nothing else to prompt it.
+  files[RUN_MARKER] = `${RUN_SINCE}until review\n`
+  await $.tool.call({ tool: 'Bash', command: 'bin/quorum-run enter sess-a --until review' })
+  band = await $.ui.mount(bandAt(120))
+  expect((await runWords(band)).map(x => x.text)).toEqual(['autopilot · next stop: end of review'])
+  await expectNoNext(band)
+  await band.unmount()
+
+  // And leaves: Next is back, and the words are gone.
+  delete files[RUN_MARKER]
+  await $.tool.call({ tool: 'Bash', command: 'bin/quorum-run leave sess-a' })
+  band = await $.ui.mount(bandAt(120))
+  expect(await runWords(band)).toEqual([])
+  expect((await band.find({ type: 'Button', key: 'next' }))?.text).toBe('▶ /quorum:build')
+  await band.unmount()
+})
+
+test("during a run the band shows the run's words in place of Next, by width", async ($, on) => {
+  // BUILDING, MEDIUM, no problem, progress or file count: at 120 the row is the badge (10), the slug and risk (19),
+  // the dots and `Build` (12), the long form (51) and Dashboard (11) with four gaps, 111 columns, so each width
+  // draws its own form.
+  const files: Record<string, string> = { ...repo('BUILDING'), '.tasks/export-csv/state.md': calm('BUILDING'), [RUN_MARKER]: RUN_SINCE }
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const FORMS = [
+    [120, 'autopilot · next stop: PR drafted, then your review'],
+    [111, 'autopilot · next stop: PR drafted, then your review'],
+    [109, 'auto · next: your review'],
+    [100, 'auto · next: your review'],
+    [90, 'auto · next: your review'],
+    [89, '▸▸ your review'],
+    [80, '▸▸ your review'],
+  ] as const
+  for (const [columns, words] of FORMS) {
+    const band = await $.ui.mount(bandAt(columns))
+    const found = await runWords(band)
+    expect(found.map(x => x.text)).toEqual([words])
+    expect(found[0]?.props.color).toBe('claude')
+    expect(found[0]?.props.bold).not.toBe(true)
+    await expectNoNext(band)
+    // The rest of the row is as it is outside a run.
+    expect(await band.find({ type: 'Text', text: /^ BUILDING $/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /^ Build$/ })).toBeDefined()
+    expect((await band.find({ type: 'Text', text: /^export-csv · MEDIUM$/ })) !== undefined).toBe(columns >= 90)
+    // The words are the last thing before the buttons.
+    const row = await drawnRows(band)
+    expect(row.slice(-2)).toMatchObject([{ type: 'Text', text: words }, { type: 'Button', key: 'open' }])
+    await band.unmount()
+  }
+
+  // A going run with no next stop: a status outside the table, which outside a run draws a Next.
+  files['.tasks/export-csv/state.md'] = calm('DRAFT')
+  await $.tool.call({ tool: 'Bash', command: 'bin/quorum-state set status DRAFT' })
+  for (const columns of [120, 100, 80]) {
+    const band = await $.ui.mount(bandAt(columns))
+    expect(await band.find({ type: 'Text', text: /^ DRAFT $/ })).toBeDefined()
+    expect(await runWords(band)).toEqual([])
+    await expectNoNext(band)
+    await band.unmount()
+  }
+})
+
+test("a problem comes first: the run's words drop a size, and go under 110 columns", async ($, on) => {
+  // The same task with a pending finding, the band's problem (`1 pending`, 9): at 120 the row with the 90-to-109
+  // form (41) is 112 columns.
+  const files: Record<string, string> = { ...repo('BUILDING'), [RUN_MARKER]: RUN_SINCE }
+  world(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  let band = await $.ui.mount(bandAt(120))
+  const found = await runWords(band)
+  expect(found.map(x => x.text)).toEqual(['auto · next: PR drafted, then your review'])
+  expect(found[0]?.props.color).toBe('claude')
+  // The problem is whole, in its own color, and comes before the words.
+  const row = (await drawnRows(band)).map(x => x.text)
+  expect(await band.find({ type: 'Text', text: /^1 pending$/ })).toMatchObject({ props: { color: 'error' } })
+  expect(row.indexOf('1 pending')).toBeGreaterThan(-1)
+  expect(row.indexOf('1 pending')).toBeLessThan(row.indexOf('auto · next: PR drafted, then your review'))
+  await expectNoNext(band)
+  await band.unmount()
+
+  // Under 110 the words give the problem the row, and Next still isn't drawn.
+  for (const columns of [109, 100, 80]) {
+    band = await $.ui.mount(bandAt(columns))
+    expect(await band.find({ type: 'Text', text: /^1 pending$/ })).toBeDefined()
+    expect(await runWords(band)).toEqual([])
+    await expectNoNext(band)
+    await band.unmount()
+  }
+})
+
+test('nothing of the run is drawn with no task or in a map session', async ($, on) => {
+  const files: Record<string, string> = {}
+  world(on, files)
+  on('process.run', () => { throw new Error('quorum-map: command not found') })
+  // With no task the band leaves the row to the engine (the no-map baseline test says why there are two hooks).
+  const engine: Parameters<typeof on<'ui.render'>>[1] = ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>engine</Text>
+  }
+  on('ui.render', { plugin: 'quorum' }, engine)
+  on('ui.render', ($, e, next) => (e.plugin === undefined ? engine($, e, next) : next(e)))
+  // The band and the pane, as a session started on these files draws them.
+  const look = async (next: Record<string, string>) => {
+    for (const k of Object.keys(files)) delete files[k]
+    Object.assign(files, next)
+    await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+    await settle()
+    const drawn: DrawnRow[][] = []
+    for (const at of [bandAt(120), bandAt(80), ON_TERMINAL]) {
+      const d = await $.ui.mount(at)
+      drawn.push(await drawnRows(d))
+      await d.unmount()
+    }
+    return drawn
+  }
+  const marker = { [RUN_MARKER]: `${RUN_SINCE}until review\nyes\n` }
+
+  // No task on show.
+  const empty = { '.git/HEAD': 'ref: refs/heads/main\n' }
+  const bare = await look(empty)
+  expect(await look({ ...empty, ...marker })).toEqual(bare)
+  expect(bare.flat().some(x => x.text === 'engine')).toBe(true)
+
+  // A map session, with a task on show: the band and the pane are the map's.
+  const session = { ...onMap('BUILDING'), '.tasks/.map-sessions/sess-a': 'csv-everywhere\n' }
+  const onTheMap = await look(session)
+  expect(await look({ ...session, ...marker })).toEqual(onTheMap)
+  expect(onTheMap.flat().some(x => x.text === ' MAP ')).toBe(true)
+  expect(onTheMap.flat().some(x => /autopilot|auto ·|▸▸|run stopped/.test(x.text))).toBe(false)
+
+  // The map session over, the task takes the band back, and the run is drawn with it.
+  delete files['.tasks/.map-sessions/sess-a']
+  await $.tool.call({ tool: 'Bash', command: 'bin/quorum-map leave sess-a' })
+  const band = await $.ui.mount(bandAt(120))
+  expect((await runWords(band)).map(x => x.text)).toEqual(['auto · next: end of review'])
+  await expectNoNext(band)
+  await band.unmount()
+})

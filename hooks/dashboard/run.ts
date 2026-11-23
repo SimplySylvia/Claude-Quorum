@@ -1,8 +1,11 @@
 // A /quorum:run's pure model: read the session's marker as bin/quorum-run enter writes it (the start time, then
 // `until STAGE` and `yes` for the run's own flags), say where the run stops next from the task's status and risk
-// and those flags, and name the gate open now from the status alone. No `$` here, so tests can call it directly.
+// and those flags, and name the gate open now from the status alone; then the run's state (going, waiting on the
+// person, or stopped), its words for the band by width, and what gives way on a band's row that doesn't fit them.
+// No `$` here, so tests can call it directly.
 
 import type { RunMarker, RunStage } from '../../types'
+import { cellWidth, cutEnd } from './tree'
 
 // The stages `--until` takes, in the run's order: a stage's index is its place in the run.
 const RUN_STAGES: RunStage[] = ['spec', 'plan', 'build', 'review', 'blind', 'pr']
@@ -60,4 +63,88 @@ export function nextStop(status: string, risk: string, until: RunStage | '', isY
 export function gateNow(status: string): string {
   if (status === 'DRAFT-AWAITING-VISUAL-SIGNOFF') return 'mockup sign-off'
   return status === 'PLANNING' ? 'plan approval' : ''
+}
+
+// What the main session's turn tells of a run, kept in memory by register.tsx: how many of its questions are open,
+// how its last turn ended (null while one runs), and whether the wait after an `answer` end has begun.
+export type RunTurn = { asking: number; ended: 'answer' | 'error' | 'refusal' | 'aborted' | null; isIdle: boolean }
+
+// A run as the band and the pane show it: its state, why it stopped (null unless stopped), where it stops next
+// (nextStop) and the gate open now (gateNow).
+export type RunView = {
+  state: 'going' | 'waiting' | 'stopped'
+  reason: 'ESCALATED' | 'HALTED' | 'error' | 'refusal' | 'aborted' | null
+  stop: { long: string; short: string } | null
+  gate: string
+}
+
+// The run's state. Stopped wins over waiting, and a status reason over a turn reason.
+export function runView(marker: RunMarker, status: string, risk: string, turn: RunTurn): RunView {
+  const rest = { stop: nextStop(status, risk, marker.until, marker.isYes), gate: gateNow(status) }
+  if (status === 'ESCALATED' || status === 'HALTED') return { state: 'stopped', reason: status, ...rest }
+  if (turn.ended === 'error' || turn.ended === 'refusal' || turn.ended === 'aborted') return { state: 'stopped', reason: turn.ended, ...rest }
+  return { state: turn.asking > 0 || turn.isIdle ? 'waiting' : 'going', reason: null, ...rest }
+}
+
+// The run's words for a band of `columns`, longest first, with their look; null when there are none to draw (a
+// going run with no next stop, or a going or waiting run beside a problem under 110 columns). The first form is the
+// width's own: the long one from 110 columns, the middle one from 90, else the short one. A problem comes first,
+// so beside one the words start a size down. A stopped run reads the same at every width.
+export function runForms(view: RunView, columns: number, hasProblem: boolean): { forms: string[]; color: 'claude' | 'warning' | 'error'; isBold: boolean } | null {
+  if (view.state === 'stopped') return { forms: ['run stopped'], color: view.reason === 'aborted' ? 'warning' : 'error', isBold: false }
+  if (hasProblem && columns < 110) return null
+  const first = hasProblem ? 1 : columns >= 110 ? 0 : columns >= 90 ? 1 : 2
+  if (view.state === 'waiting') {
+    const all = view.gate
+      ? [`autopilot · waiting for you: ${view.gate}`, `waiting: ${view.gate}`, `◆ ${view.gate}`]
+      : ['autopilot · waiting for you', 'waiting for you', '◆ waiting']
+    return { forms: all.slice(first), color: 'warning', isBold: true }
+  }
+  if (!view.stop) return null
+  const stop = columns >= 110 ? view.stop.long : view.stop.short
+  return { forms: [`autopilot · next stop: ${stop}`, `auto · next: ${stop}`, `▸▸ ${stop}`].slice(first), color: 'claude', isBold: false }
+}
+
+// The band's row during a run, each top-level item's text as it would be drawn ('' for one not drawn): the status
+// badge, the slug and risk, the stage dots with the stage's name, the progress, file count and review texts, the
+// problem, and the buttons' labels.
+export type RunRow = { badge: string; id: string; rail: string; extras: string[]; problem: string; buttons: string[] }
+
+// Fit the row and the run's words (`forms`, longest first; [] for none) to `columns`: what is drawn of the words and
+// of the problem, and whether the slug, the stage dots and the extras stay. A text counts as its cells, a button as
+// its label plus 2, with 1 between buttons and 2 between items (the buttons are one item). Each step is taken only
+// while the row is still too wide. Going or waiting: the first form that fits whole, else the last form cut at the
+// end down to its first word, else no words; then the slug goes, then the dots, then the problem is cut, and last
+// the extras go. Stopped: the words stay whole, and the problem is cut first. The badge and the buttons always stay,
+// and words that were dropped aren't tried again.
+export function fitRun(columns: number, row: RunRow, forms: string[], isStopped: boolean): { words: string; problem: string; hasId: boolean; hasRail: boolean; hasExtras: boolean } {
+  const buttons = row.buttons.reduce((n, label) => n + cellWidth(label) + 2, 0) + Math.max(0, row.buttons.length - 1)
+  const fit = { words: '', problem: row.problem, hasId: true, hasRail: true, hasExtras: true }
+  // The columns left for `words` and `problem` beside every other item on show, each item 2 from the one before.
+  const room = (words: string, problem: string) => {
+    const texts = [row.badge, fit.hasId ? row.id : '', fit.hasRail ? row.rail : '', ...(fit.hasExtras ? row.extras : []), problem, words].filter(Boolean)
+    const items = texts.length + (row.buttons.length > 0 ? 1 : 0)
+    return columns - texts.reduce((n, text) => n + cellWidth(text), 0) - buttons - 2 * Math.max(0, items - 1)
+  }
+  const isWide = () => room(fit.words, fit.problem) < 0
+  // The problem, cut to what the rest of the row leaves it.
+  const cutProblem = () => {
+    if (!isWide() || fit.problem === '') return
+    const left = room(fit.words, '') - 2
+    fit.problem = left < 2 ? '' : cutEnd(fit.problem, left)
+  }
+  if (isStopped) {
+    fit.words = forms[0] ?? ''
+    cutProblem()
+  } else if (forms.length > 0) {
+    const last = forms[forms.length - 1] ?? ''
+    const left = room('', fit.problem) - 2
+    fit.words = forms.find(form => room(form, fit.problem) >= 0)
+      ?? (left >= cellWidth(last.split(' ')[0] ?? '') + 1 ? cutEnd(last, left) : '')
+  }
+  if (isWide()) fit.hasId = false
+  if (isWide()) fit.hasRail = false
+  if (!isStopped) cutProblem()
+  if (isWide()) fit.hasExtras = false
+  return fit
 }
