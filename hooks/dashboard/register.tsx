@@ -79,6 +79,8 @@ let turnNo = 0
 const RUN_REREAD_MS = 500
 // The one pending re-read; a later turn's end replaces it, and a session start drops it. Kept in memory only.
 let reread: Timer | null = null
+// The turn count (`turnNo`) at the last re-read set or dropped: the end of an earlier turn sets none.
+let rereadTurn = 0
 function clearEdit() {
   flash?.cancel()
   flash = null
@@ -720,10 +722,13 @@ function noteTurnEnd($: EngineInterface, reason: RunTurn['ended'], turn: number)
 
 // After the main session's turn `turn` ended: in a run set the one re-read of the task, RUN_REREAD_MS on, without
 // waiting for it. Only at that re-read does an answered turn start to read as waiting, and only if no turn started
-// since and the run is still there. Never throws.
+// since and the run is still there. A turn's end that gets here after a later turn's end set its re-read, or after a
+// session start dropped it, sets none: nothing is awaited between that check and the write. Never throws.
 async function setReread($: EngineInterface, turn: number, maxRounds: number) {
   try {
     if ((await read($, run)) === null) return
+    if (turn < rereadTurn) return
+    rereadTurn = turn
     reread?.cancel()
     // A superseded timer was cancelled; the guard keeps one that still fires from doing a newer one's work.
     const mine: Timer = $.clock.after(RUN_REREAD_MS, () => {
@@ -763,6 +768,7 @@ export const register: Register = (on, options) => {
     runTurn = { asking: 0, ended: null, isIdle: false }
     reread?.cancel()
     reread = null
+    rereadTurn = turnNo
     clearEdit()
     // A run from before settles only its own record. The first result after a reload only records the ready set;
     // the attempt's time stays, so the 2-minute wait still holds.

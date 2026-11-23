@@ -7075,6 +7075,40 @@ test("what a turn's end left to write never lands on the turn that started since
     expect(await words()).toBe(GOING)
   }
 
+  // The engine answers a turn's end only after the next turn has started and ended with an answer: the late end
+  // leaves the second turn's re-read as it is, so the wait begins at it.
+  gate.isShut = true
+  const overtaken = endTurn($)
+  await reached()
+  gate.isShut = false
+  await startTurn($)
+  await endTurn($)
+  open()
+  await overtaken
+  expect(await words()).toBe(GOING)
+  await clock.advance(REREAD_MS - 1)
+  expect(await words()).toBe(GOING)
+  await clock.advance(1)
+  expect(await words()).toBe(WAITING)
+  await startTurn($)
+
+  // The engine answers a turn's end only after the session has started again: the re-read the start dropped isn't
+  // set again, so the task isn't read a second time.
+  gate.isShut = true
+  const outlived = endTurn($)
+  await reached()
+  gate.isShut = false
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  open()
+  await outlived
+  let isReadAgain = false
+  atRead.next = () => { isReadAgain = true }
+  await clock.advance(10 * REREAD_MS)
+  expect(isReadAgain).toBe(false)
+  atRead.next = null
+  expect(await words()).toBe(GOING)
+  await startTurn($)
+
   // A turn ends with an answer, and its re-read is reading the task when the next turn starts and ends as well:
   // the wait begins at the second turn's own re-read, not at the first's.
   await endTurn($)
