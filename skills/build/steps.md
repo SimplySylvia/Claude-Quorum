@@ -9,7 +9,9 @@ as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers alr
 Use the slug in `<arguments>`, or `quorum-active-task`. Work from the repo root.
 
 **Picking up a sliced build.** If `base_sha` is set and `quorum-state get built_steps` lists any step, an earlier
-build stopped partway: skip to step 3 and build from `quorum-plan next`.
+build stopped partway: do step 1's **A left-over blind marker.** check, then skip to step 3 and build from
+`quorum-plan next`. The check comes first on this path too: the early blind test starts once every step is built, so
+a cut-off one leaves its marker on a task this paragraph picks up.
 
 **Worktree.** If `quorum-state get worktree` prints a path and `quorum-active-task --code` prints another, the
 task's code is in its own git worktree: call `EnterWorktree` with that `path` first, so you and the agents you start

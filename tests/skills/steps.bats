@@ -262,6 +262,35 @@ section_line() { section "$1" "$2" | tr '\n' ' ' | tr -s ' '; }
   grep -F '| `BLIND-TEST` |' "$REPO_ROOT/skills/run/SKILL.md" | grep -qF 'rm -f .tasks/<slug>/.blind-mode-active .tasks/.blind-mode-active'
 }
 
+@test "no sentence sends a stage that starts from BUILDING past the left-over marker check" {
+  # The paragraph only helps on a path that reads it. Each jump that lands after it is pinned here.
+  build="$REPO_ROOT/skills/build/steps.md"
+  # build: a sliced build picked up partway skips sections 1 and 2, and a cut-off early blind test leaves exactly
+  # that state (every step built), so the paragraph that skips names the check, before the skip.
+  pick=$(awk '/^\*\*Picking up a sliced build\.\*\*/ { f = 1 } f && /^$/ { exit } f' "$build" | tr '\n' ' ' | tr -s ' ')
+  [[ "$pick" == *"do step 1's **A left-over blind marker.** check, then skip to step 3"* ]] \
+    || { echo "a sliced build picked up partway skips to the builder without the left-over marker check"; return 1; }
+  # It is the only jump above the paragraph in build, and the other two stages have none above theirs.
+  for f in skills/build/steps.md skills/simplify-diff/steps.md skills/review-loop/steps.md; do
+    at=$(grep -n -m1 -F '**A left-over blind marker.**' "$REPO_ROOT/$f" | cut -d: -f1)
+    jumps=$(head -n "$at" "$REPO_ROOT/$f" | grep -ciE 'skip to|go to (step|section)|start(s)? at|go on to' || true)
+    want=0; [ "$f" = skills/build/steps.md ] && want=1
+    [ "$jumps" -eq "$want" ] || { echo "$f: $jumps jumps above the left-over marker check, expected $want"; return 1; }
+    # No agent is started above it either.
+    if head -n "$at" "$REPO_ROOT/$f" | grep -nE '[Ss]tart (the )?`quorum:'; then
+      echo "$f starts an agent above the left-over marker check"; return 1
+    fi
+  done
+  # blind-test: a BUILDING task is sent to the early run and nothing else of section 0, and the early run has the
+  # check (in its first sub-step, pinned above) before it skips or runs any other section.
+  pre=$(section_line skills/blind-test/steps.md '## 0. Preconditions')
+  [[ "$pre" == *'follow "Early run (from `BUILDING`)" below, and nothing else in this section'* ]]
+  early=$(section skills/blind-test/steps.md '## Early run (from `BUILDING`)')
+  at=$(printf '%s\n' "$early" | grep -n -m1 -F '**A left-over blind marker.**' | cut -d: -f1)
+  first=$(printf '%s\n' "$early" | grep -n -m1 -E 'section [0-9]' | cut -d: -f1)
+  [ -n "$at" ] && [ -n "$first" ] && [ "$at" -lt "$first" ]
+}
+
 @test "the blind-test steps have the early run" {
   steps=skills/blind-test/steps.md
   early=$(section_line "$steps" '## Early run (from `BUILDING`)')
