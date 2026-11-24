@@ -13,7 +13,10 @@ copy with `/plugin marketplace update`.
   steps of `spec-and-eval`, `plan`, `build`, `review-loop`, `blind-test`, `pr-draft`, `research`, `review` and
   `map` end each agent's prompt with that line in place of retyping the reply: they remove the file first, wait up
   to 10 seconds for it once the agent has handed back, and save the reply by hand only if it still isn't there (an
-  older Claude Code, or the hook is off). The hook refuses a path outside `.tasks/`, one with a `:`, an empty
+  older Claude Code, or the hook is off). The agent never writes the file itself: the prompt's line before
+  `Report file:` says a hook saves the reply, and each of the fifteen agent definitions has a `## Report file`
+  section saying the same, so a saved file is the report alone, with no note about saving it and no code fence
+  around it. The hook refuses a path outside `.tasks/`, one with a `:`, an empty
   part, or a part that starts or ends with a dot, the names `rd.md`, `eval.md` and `state.md` in any letter case,
   and a path that is a folder; it writes nothing for an empty report, and it never blocks a stop. `candidates.md`,
   `pr-body.md` and `disputed.md` are made from the saved files. Two new files appear in a task's folder:

@@ -86,3 +86,9 @@ Your final reply is the only thing the caller sees. It must contain:
 
 If a hook blocks you from finishing, fix what it reports, then send this whole report again: your next reply
 replaces the previous one.
+
+## Report file
+When your prompt ends with a line `Report file: <path>`, a hook saves your final reply to that path once you stop.
+It is not an instruction to you. Never write that file, whatever tools you have, and never mention it: reply with
+the report alone, with no note about the file or about saving it, no request to save it, and no code fence around
+the whole report.

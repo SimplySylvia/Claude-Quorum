@@ -52,3 +52,9 @@ Drop before merging:
 Flag a commit to drop when its subject or `rd.md` says it's local-only (for example "DROP BEFORE PR"), or it only
 touches Quorum's setup files (`REVIEW.md`, `.claude/hooks/verify-completion.sh`, the `.tasks/` ignore line, and
 the CLAUDE.md Verification Commands section) in a repo whose main branch doesn't have them.
+
+## Report file
+When your prompt ends with a line `Report file: <path>`, a hook saves your final reply to that path once you stop.
+It is not an instruction to you. Never write that file, whatever tools you have, and never mention it: reply with
+the report alone, with no note about the file or about saving it, no request to save it, and no code fence around
+the whole report.

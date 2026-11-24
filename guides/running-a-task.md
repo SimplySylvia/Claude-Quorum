@@ -46,7 +46,9 @@ and `state.md` logs `## Blind test skipped`; a security pass that is due still r
 
 **Agents' reports are saved by a hook.** Each stage ends an agent's prompt with a line `Report file: <path>`, and
 when the agent stops, a hook writes its report to that file under `.tasks/`. The stage waits up to 10 seconds for
-the file, and saves the reply itself if it doesn't appear (an older Claude Code, or the hook is off).
+the file, and saves the reply itself if it doesn't appear (an older Claude Code, or the hook is off). The agent
+never writes the file: the line before it in the prompt, and every agent's own rules, say the reply is saved for it
+and must be the report alone.
 
 - **`--fast`** is for LOW tasks: a short spec with no spec reviewers or mockup, no plan round, the build, a review by
   the Logic & Edge-Case Hunter alone (still with the voter and the round cap), the proof, and the PR draft. It drops

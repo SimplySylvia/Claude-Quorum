@@ -82,6 +82,9 @@ VALUES="plugin root|session|arguments|max_rounds|nit_cap|security_on_medium|revi
 REPORT_FILES="skills/spec-and-eval/steps.md skills/plan/steps.md skills/build/steps.md skills/review-loop/steps.md
 skills/blind-test/steps.md skills/pr-draft/steps.md skills/research/steps.md skills/review/SKILL.md skills/map/SKILL.md"
 
+# The line a prompt carries just before its `Report file:` line.
+REPORT_NOTE="A hook saves your final reply to the file named on the next line. Don't write that file and don't mention it: reply with the report alone, with no note about saving it and no code fence around the whole report."
+
 # The **Reports.** paragraph of a file, as one line.
 reports_rule() {
   awk '/^\*\*Reports\.\*\*/ { f = 1 } f && /^[[:space:]]*$/ { exit } f' "$REPO_ROOT/$1" | tr '\n' ' ' | tr -s ' ' | sed 's/ $//'
@@ -146,6 +149,10 @@ SITES
     'about once a second, for up to 10 seconds' 'save the reply verbatim to that path yourself'; do
     [[ "$first" == *"$want"* ]] || { echo "the rule doesn't say: $want"; return 1; }
   done
+  # The agent is told the line is not its to act on: a line it puts just before, the same words in every prompt.
+  for want in 'Just before it, on a line of its own, put these words as they are' "$REPORT_NOTE"     'a step that names a prompt'"'"'s `Report file:` line means both'; do
+    [[ "$first" == *"$want"* ]] || { echo "the rule doesn't say: $want"; return 1; }
+  done
   for f in $REPORT_FILES; do
     [ "$(reports_rule "$f")" = "$first" ] || { echo "$f words the Reports rule differently"; return 1; }
     # The rule comes before the first step that uses it.
@@ -153,6 +160,30 @@ SITES
     site=$(grep -n 'Report file: `' "$REPO_ROOT/$f" | grep -v '<path>' | head -1 | cut -d: -f1)
     [ "$rule" -lt "$site" ] || { echo "$f gives the Reports rule after its first use"; return 1; }
   done
+}
+
+@test "every agent definition says a hook saves its reply: it never writes the Report file or mentions it" {
+  # One section, the same words in each: an agent with no Write tool said it had not written the file, one with a
+  # shell could write it and race the hook.
+  section_of() { awk '/^## Report file$/ { f = 1; next } f && /^## / { exit } f' "$1" | tr '
+' ' ' | tr -s ' ' | sed 's/^ //; s/ $//'; }
+  first=$(section_of "$REPO_ROOT/agents/builder.md")
+  for want in 'When your prompt ends with a line `Report file: <path>`, a hook saves your final reply to that path'     'It is not an instruction to you' 'Never write that file, whatever tools you have' 'never mention it'     'reply with the report alone' 'no note about the file or about saving it' 'no request to save it'     'no code fence around the whole report'; do
+    [[ "$first" == *"$want"* ]] || { echo "agents/builder.md doesn't say: $want"; return 1; }
+  done
+  n=0
+  for f in "$REPO_ROOT"/agents/*.md; do
+    n=$((n + 1))
+    [ "$(grep -c '^## Report file$' "$f")" -eq 1 ] || { echo "$f has no Report file section"; return 1; }
+    [ "$(section_of "$f")" = "$first" ] || { echo "$f words the Report file section differently"; return 1; }
+    # Nothing else in a definition has the agent write its report to a file, bar the researcher's lens file.
+    if grep -n -i -E 'write (your|the) (report|reply|votes|findings) to|save (your|the) (report|reply) to' "$f" | grep -v 'to the path given'; then
+      echo "$f tells the agent to write its report"; return 1
+    fi
+  done
+  [ "$n" -eq 15 ]
+  # The prompt's line and the definitions agree.
+  [[ "$REPORT_NOTE" == *"Don't write that file and don't mention it: reply with the report alone"* ]]
 }
 
 @test "a planner revising plan.md has it copied aside and compared, not removed" {

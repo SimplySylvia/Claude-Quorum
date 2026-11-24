@@ -20,10 +20,14 @@ The plan template is `<plugin root>/skills/plan/templates/plan.md`. Keep each ro
 it. Before you start the agent, `rm -f <path>`. Make `Report file: <path>` the last line of its prompt, on a line of
 its own with nothing before it and the path bare (no backticks or quotes, and no `//`); the path is the relative one
 you would save to yourself, under `.tasks/` of the folder you work in (the main working tree, or the task's own
-worktree). The hook runs a second or two after the report reaches you, so when the agent has handed back, wait for
-the file to be there and not empty: check `test -s <path>` about once a second, for up to 10 seconds. If it still
-isn't (an older Claude Code, or the hook is off), save the reply verbatim to that path yourself. An agent you ask
-again without starting it anew saves over the same file: remove the file before you ask, and wait the same way.
+worktree). Just before it, on a line of its own, put these words as they are: "A hook saves your final reply to the
+file named on the next line. Don't write that file and don't mention it: reply with the report alone, with no note
+about saving it and no code fence around the whole report." The two lines go together: a step that names a prompt's
+`Report file:` line means both. The hook runs a second or two after the report reaches you, so when the agent has
+handed back, wait for the file to be there and not empty: check `test -s <path>` about once a second, for up to 10
+seconds. If it still isn't (an older Claude Code, or the hook is off), save the reply verbatim to that path
+yourself. An agent you ask again without starting it anew saves over the same file: remove the file before you ask,
+and wait the same way.
 
 ## 1. Check the status
 
