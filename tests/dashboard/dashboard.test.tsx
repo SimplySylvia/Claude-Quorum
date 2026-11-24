@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { AgentStatus, On, UiNotifyResult } from 'claude-code'
 import type { ElementQuery, Engine, FoundElement } from 'claude-code/testing'
 
 import {
@@ -18,7 +18,7 @@ import {
   MAX_TICKET_DEPTH, isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, openBlockers,
   parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskState, ticketOrder, ticketRow, ticketStatus, ticketSummary, wrapWhole,
 } from '../../hooks/dashboard/map'
-import { fitRun, gateNow, nextStop, runForms, runView } from '../../hooks/dashboard/run'
+import { fitRun, gateNow, nextStop, runForms, runView, stoppedAt, stripControls } from '../../hooks/dashboard/run'
 import type { ChangedFile, FileList, FindingsView, MapStates, MapTaskRun, MapTicket, MapView, TreeFinding } from '../../types'
 import { DEMO_DONE } from './fixtures/demo-done'
 import { DEMO_MAP, DEMO_MAP_TASKS, DEMO_MAP_TICKETS } from './fixtures/demo-map'
@@ -143,8 +143,17 @@ const settle = async () => {
 // `links`: absolute folders that list as symbolic links, as a task's folder in the main tree does once it has a worktree.
 // `o.cwd`: the session's cwd, read on each call (`root` when not given); `o.clock: false` leaves `clock.now` and
 // `clock.every` to the test, so `mock.clock(on)` can drive time (the engine takes one unmatched hook per event).
+// `seen.session`: the session's id, which a test changes for a `/clear` or a resume. `seen.notified`: the text of
+// every `$.ui.notify`, answered as `seen.notify` says: `sent` through a channel that shows the text, `bell` through
+// the one that only rings, `unsent`, `reject` (the hook's `{ deny }`), `throw` (the hook throws), or `held`, which
+// answers only when the test calls the resolver pushed to `seen.held`. `seen.toastMs`: each toast's `timeoutMs`,
+// beside `seen.toasts`; `seen.toastFails` makes the toast's hook throw or deny after recording it. `seen.live`: the
+// ids of the agents the engine's own list (`$.agent.list()`) holds, each `running` and a `quorum:code-reviewer` unless `seen.listedAs` gives that id another status or type; `seen.listed`: how often it was asked; `seen.listFails` makes it refuse to answer.
 function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Record<string, number> = {}, links: string[] = [], o: { cwd?: string; clock?: false } = {}) {
-  const seen = { status: [] as (string | undefined)[], toasts: [] as string[], opened: 0, ticks: 0, live: [] as string[], copied: [] as string[], filled: [] as string[], draft: '', reads: [] as string[], writes: [] as string[] }
+  const seen = {
+    status: [] as (string | undefined)[], toasts: [] as string[], toastMs: [] as (number | undefined)[], notified: [] as string[], session: 'sess-a',
+    notify: 'sent' as 'sent' | 'bell' | 'unsent' | 'reject' | 'throw' | 'held', held: [] as ((answer: UiNotifyResult) => void)[], toastFails: '' as '' | 'throw' | 'deny', opened: 0, ticks: 0, live: [] as string[], listedAs: {} as Record<string, { type?: string; status?: AgentStatus }>, listed: 0, listFails: false, copied: [] as string[], filled: [] as string[], draft: '', reads: [] as string[], writes: [] as string[],
+  }
   // Paths are relative to `root`, or absolute (a worktree's session reads the main working tree's .tasks/).
   const abs = (path: string) => (path.startsWith('/') ? path : `${root}/${path}`)
   // The path the engine asked for, in the POSIX form `files` is keyed by: on Windows it resolves `/repo/x` to
@@ -181,8 +190,8 @@ function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Re
   })
   on('session.root', () => ({ value: root }))
   on('session.cwd', () => ({ value: o.cwd ?? root }))
-  on('session.id', () => ({ value: 'sess-a' }))
-  on('agent.list', () => ({ value: seen.live.map(id => ({ id, description: '', type: 'quorum:code-reviewer', status: 'running' as const, kind: 'local_agent', taskStatus: 'running' as const, label: '', startTime: 0, cwd: o.cwd ?? root, tokenCount: 0, tokenSamples: [0], hasRow: true })) }))
+  on('session.id', () => ({ value: seen.session }))
+  on('agent.list', () => { seen.listed++; if (seen.listFails) return { deny: 'test' }; return { value: seen.live.map(id => ({ id, description: '', type: seen.listedAs[id]?.type ?? 'quorum:code-reviewer', status: seen.listedAs[id]?.status ?? 'running', kind: 'local_agent', taskStatus: 'running' as const, label: '', startTime: 0, cwd: o.cwd ?? root, tokenCount: 0, tokenSamples: [0], hasRow: true })) } })
   // Each period of $.clock.every is one dispatch; refusing the first ends that interval, so this counts intervals.
   if (o.clock !== false) on('clock.every', () => { seen.ticks++; return { deny: 'test' } })
   // A $.clock.after timer fires at once on the fixed clock.
@@ -199,7 +208,21 @@ function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Re
   on('fs.write', (_, e) => { const path = posix(e.path); seen.writes.push(path); files[path] = e.text; return { value: undefined } })
   if (o.clock !== false) on('clock.now', () => ({ value: 1_000 }))
   on('ui.status', (_, e) => { seen.status.push(e.text); return { value: undefined } })
-  on('ui.toast', (_, e) => { seen.toasts.push(e.text); return { value: undefined } })
+  on('ui.toast', (_, e) => {
+    seen.toasts.push(e.text)
+    seen.toastMs.push(e.timeoutMs)
+    if (seen.toastFails === 'throw') throw new Error('toast: test')
+    if (seen.toastFails === 'deny') return { deny: 'test' }
+    return { value: undefined }
+  })
+  on('ui.notify', (_, e) => {
+    seen.notified.push(e.text)
+    if (seen.notify === 'throw') throw new Error('notify: test')
+    if (seen.notify === 'reject') return { deny: 'test' }
+    if (seen.notify === 'held') return new Promise<{ value: UiNotifyResult }>(resolve => { seen.held.push(value => resolve({ value })) })
+    if (seen.notify === 'unsent') return { value: { isSent: false, reason: 'disabled' } }
+    return { value: { isSent: true, channel: seen.notify === 'bell' ? 'terminal_bell' : 'kitty' } }
+  })
   on('ui.open', () => { seen.opened++; return { value: { isPlaced: true } } })
   on('command.register', () => ({ value: { command: 'quorum-dashboard' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -6893,12 +6916,29 @@ function runWorld(on: On, files: Record<string, string>) {
   on('turn.complete', (_, e) => ({ text: e.answer }))
   return { seen, clock }
 }
-// AskUserQuestion calls stay open until the test answers them, oldest first. Registered before world(), so it sits
-// above the world's own tool.call hook.
+// AskUserQuestion calls stay open until the test answers them, oldest first; `count` is how many are open now.
+// Registered before world(), so it sits above the world's own tool.call hook.
 function heldQuestions(on: On) {
   const open: (() => void)[] = []
   on('tool.call', { tool: 'AskUserQuestion' }, () => new Promise<{ result: Record<string, never> }>(resolve => { open.push(() => resolve({ result: {} })) }))
-  return { answer: () => open.shift()?.() }
+  return { answer: () => open.shift()?.(), count: () => open.length }
+}
+// Once `isArmed` is set, the next write of the atom `key` waits for `release`, which is null again once called: a
+// test's way into the middle of a refresh (`run`: between its write of the task and its write of the run) or of a
+// re-read's settling of the agent list (`agents`). `heldReads` holds the next read of the atom the same way.
+const heldWrites = (on: On, key: 'run' | 'agents') => heldState(on, 'state.set', key)
+const heldReads = (on: On, key: 'task') => heldState(on, 'state.get', key)
+function heldState(on: On, event: 'state.get' | 'state.set', key: string) {
+  const hold: { isArmed: boolean; release: (() => void) | null } = { isArmed: false, release: null }
+  const register = on as unknown as (event: string, matcher: unknown, hook: unknown) => void
+  register(event, { plugin: 'quorum', key }, async (_: unknown, e: unknown, next: (e: unknown) => Promise<unknown>) => {
+    if (hold.isArmed) {
+      hold.isArmed = false
+      await new Promise<void>(resolve => { hold.release = () => { hold.release = null; resolve() } })
+    }
+    return next(e)
+  })
+  return hold
 }
 const ask = ($: Engine, agentId?: string) => $.tool.call({
   tool: 'AskUserQuestion',
@@ -7718,42 +7758,1035 @@ test("the band never overflows during a run: the run's words are cut at the end"
   expect(fitRun(86, dotsRow, ['▸▸ PR drafted'], false)).toEqual({ words: '▸▸ PR drafted', problem: '', hasId: false, hasRail: false, hasExtras: true })
 })
 
-test('a run changes no toast and raises no notification', async ($, on) => {
-  const held = heldQuestions(on)
-  let notified = 0
-  on('ui.notify', () => { notified++; return { value: { isSent: false, reason: 'test' } } as never })
-  const files: Record<string, string> = repo('IN_REVIEW')
+// ---- A run's announcements: the channel, a halt or an escalation, the run's end, and the quiet toasts
+
+const HALTED_TEXT = 'export-csv: run stopped · HALTED · see the post-mortem'
+const ESCALATED_TEXT = 'export-csv: run stopped · ESCALATED · fix the checks, then /quorum:run'
+const START = { cwd: '/repo', surface: 'terminal', isInteractive: true } as const
+const ON_MAIN = 'ref: refs/heads/main\n'
+const ON_TASK = 'ref: refs/heads/feat/export-csv\n'
+// A Bash call after which the dashboard reads the task and the marker again.
+const readAgain = ($: Engine) => $.tool.call({ tool: 'Bash', command: 'bin/quorum-state get status' })
+// The Bash call the run skill enters a run with.
+const enterRun = ($: Engine) => $.tool.call({ tool: 'Bash', command: 'bin/quorum-run enter sess-a' })
+type Seen = ReturnType<typeof world>
+const forget = (seen: Seen) => { seen.notified.length = 0; seen.toasts.length = 0; seen.toastMs.length = 0 }
+
+test("an announcement is a notification, or a toast when it wasn't sent", async ($, on) => {
+  const files = inRun('IN_REVIEW')
   const { seen, clock } = runWorld(on, files)
-  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  // A status change a Bash call brings, a question asked and answered, and one a turn's re-read finds.
-  const changes = async () => {
-    seen.toasts.length = 0
-    files[STATE_MD] = state('IN_REVIEW')
-    await $.tool.call({ tool: 'Bash', command: 'bin/quorum-state set status IN_REVIEW' })
+  await $.session.start(START)
+  // A change to HALTED in a run, with the notification answered as `mode` says.
+  const halt = async (mode: Seen['notify']) => {
+    files[STATE_MD] = calm('IN_REVIEW')
+    await readAgain($)
+    await clock.settle()
+    forget(seen)
+    seen.notify = mode
+    files[STATE_MD] = calm('HALTED')
+    await readAgain($)
+    await clock.settle()
+  }
+  // Sent through a channel that shows the text: the notification alone.
+  await halt('sent')
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+  // Through the bell (no text shown), not sent, rejected, and with a hook that throws: the same text as a toast
+  // that stays 15 seconds, once, and the Bash call that found the halt has resolved.
+  for (const mode of ['bell', 'unsent', 'reject', 'throw'] as const) {
+    await halt(mode)
+    expect({ mode, notified: seen.notified }).toEqual({ mode, notified: [HALTED_TEXT] })
+    expect({ mode, toasts: seen.toasts }).toEqual({ mode, toasts: [HALTED_TEXT] })
+    expect({ mode, toastMs: seen.toastMs }).toEqual({ mode, toastMs: [15000] })
+  }
+  // An answer that comes after the session moved on to its next turn: one toast, then.
+  await halt('held')
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+  await startTurn($)
+  await clock.settle()
+  expect(seen.toasts).toEqual([])
+  expect(seen.held.length).toBe(1)
+  seen.held[0]?.({ isSent: false, reason: 'disabled' })
+  await clock.settle()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([HALTED_TEXT])
+  expect(seen.toastMs).toEqual([15000])
+})
+
+const WAITING_PLAN = 'export-csv: waiting for you · plan approval'
+const WAITING_NO_GATE = 'export-csv: the run is waiting for you'
+// A Quorum agent as a stage of a run starts one: in the background, so the main session's turn ends while it works.
+const RESEARCHER_BG = { prompt: 'Research the task', description: 'researcher', subagentType: 'quorum:researcher', parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: true, fork: false } as const
+// What one question dialog announces: read while the dialog is still open, and unchanged once it is answered.
+async function dialog($: Engine, seen: Seen, clock: { settle: () => Promise<void> }, held: ReturnType<typeof heldQuestions>, agentId?: string) {
+  forget(seen)
+  const asked = ask($, agentId)
+  await clock.settle()
+  const announced = [...seen.notified]
+  expect(held.count()).toBe(1)
+  held.answer()
+  await asked
+  await clock.settle()
+  expect(seen.notified).toEqual(announced)
+  return announced
+}
+
+test('no hook waits for a notification to settle', async ($, on) => {
+  const held = heldQuestions(on)
+  const files = inRun('PLANNING')
+  const { seen, clock } = runWorld(on, files)
+  let redraws = 0
+  on('ui.invalidate', (_, e, next) => { redraws++; return next(e) })
+  await $.session.start(START)
+  const words = async () => (await bandRow($, 140)).words
+  // The three paths that announce, each reached to its end: a question's call, a turn's end, and the re-read.
+  const paths = async () => {
+    files[STATE_MD] = calm('PLANNING')
+    await readAgain($)
     await startTurn($)
-    files[STATE_MD] = state('CONVERGED')
-    await $.tool.call({ tool: 'Bash', command: 'bin/quorum-state set status CONVERGED' })
+    await clock.settle()
+    forget(seen)
+    // The dialog: announced, and the call went on to the dialog, which is answered and returns.
     const asked = ask($)
     await clock.settle()
+    expect(seen.notified).toEqual([WAITING_PLAN])
+    expect(held.count()).toBe(1)
     held.answer()
     await asked
-    await endTurn($)
-    files[STATE_MD] = state('HALTED')
-    await clock.advance(REREAD_MS)
-    await $.tool.call({ tool: 'Bash', command: 'bin/quorum-state get status' })
+    // The turn's end, whose refresh finds the escalation: it returns.
+    files[STATE_MD] = calm('ESCALATED')
+    let isEnded = false
+    const ended = endTurn($).then(() => { isEnded = true })
+    await clock.settle()
+    expect(isEnded).toBe(true)
+    await ended
+    expect(seen.notified).toEqual([WAITING_PLAN, ESCALATED_TEXT])
+    expect(await words()).toBe('run stopped')
+    // The re-read's timer, in a turn of its own: the wait is announced, and the redraw after it is made.
+    files[STATE_MD] = calm('PLANNING')
+    await readAgain($)
     await startTurn($)
-    await endTurn($, 'error')
+    await endTurn($)
+    await clock.settle()
+    const before = redraws
     await clock.advance(REREAD_MS)
+    expect(seen.notified).toEqual([WAITING_PLAN, ESCALATED_TEXT, WAITING_PLAN])
+    expect(redraws).toBe(before + 1)
+    expect(await words()).toBe('autopilot · waiting for you: plan approval')
+  }
+  // A notification that never settles.
+  seen.notify = 'held'
+  await paths()
+  expect(seen.held.length).toBe(3)
+  expect(seen.toasts).toEqual([])
+  // One that rejects (the hook's `{ deny }`), and one whose hook throws: each text is a toast.
+  for (const mode of ['reject', 'throw'] as const) {
+    seen.notify = mode
+    await paths()
+    await clock.settle()
+    expect({ mode, toasts: seen.toasts }).toEqual({ mode, toasts: [WAITING_PLAN, ESCALATED_TEXT, WAITING_PLAN] })
+    expect({ mode, toastMs: seen.toastMs }).toEqual({ mode, toastMs: [15000, 15000, 15000] })
+  }
+  // A toast that fails, by a hook that throws and by one that denies: each was tried, and nothing came of it.
+  seen.notify = 'unsent'
+  for (const fails of ['throw', 'deny'] as const) {
+    seen.toastFails = fails
+    await paths()
+    await clock.settle()
+    expect({ fails, toasts: seen.toasts }).toEqual({ fails, toasts: [WAITING_PLAN, ESCALATED_TEXT, WAITING_PLAN] })
+  }
+})
+
+test('a question dialog in a run is announced once, with its gate', async ($, on) => {
+  const held = heldQuestions(on)
+  const files = inRun('PLANNING')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  await startTurn($)
+  const to = async (status: string) => {
+    files[STATE_MD] = calm(status)
+    await readAgain($)
+    await clock.settle()
+  }
+  // The gate of the task on show, or the words with no gate; each before the dialog is answered.
+  expect(await dialog($, seen, clock, held)).toEqual([WAITING_PLAN])
+  await to('DRAFT-AWAITING-VISUAL-SIGNOFF')
+  expect(await dialog($, seen, clock, held)).toEqual(['export-csv: waiting for you · mockup sign-off'])
+  await to('BUILDING')
+  expect(await dialog($, seen, clock, held)).toEqual([WAITING_NO_GATE])
+  expect(seen.toasts).toEqual([])
+  // Two calls open at once: one announcement each.
+  forget(seen)
+  const first = ask($)
+  const second = ask($)
+  await clock.settle()
+  expect(seen.notified).toEqual([WAITING_NO_GATE, WAITING_NO_GATE])
+  expect(held.count()).toBe(2)
+  held.answer()
+  held.answer()
+  await first
+  await second
+  // A sub-agent's call announces nothing.
+  expect(await dialog($, seen, clock, held, 'b1')).toEqual([])
+
+  // The run's task no longer on show: its slug, and no gate (a task off show has none).
+  await to('PLANNING')
+  await $.session.start(START)
+  await startTurn($)
+  files['.git/HEAD'] = ON_MAIN
+  await readAgain($)
+  expect(await dialog($, seen, clock, held)).toEqual([WAITING_NO_GATE])
+  // No task on show and none shown before: no prefix.
+  await $.session.start(START)
+  await startTurn($)
+  expect(await dialog($, seen, clock, held)).toEqual(['the run is waiting for you'])
+  // A task that went off show during the quiet start is not the run's task once the quiet start has ended either,
+  // whether it was the run's task before the run was entered again or is first read at the entering read: the run
+  // has none until one comes on show.
+  files['.git/HEAD'] = ON_TASK
+  await readAgain($)
+  expect(await dialog($, seen, clock, held)).toEqual([WAITING_PLAN])
+  await enterRun($)
+  files['.git/HEAD'] = ON_MAIN
+  await readAgain($)
+  await startTurn($)
+  expect(await dialog($, seen, clock, held)).toEqual(['the run is waiting for you'])
+  files['.git/HEAD'] = ON_TASK
+  await readAgain($)
+  expect(await dialog($, seen, clock, held)).toEqual([WAITING_PLAN])
+  files['.git/HEAD'] = ON_MAIN
+  await $.session.start(START)
+  await startTurn($)
+  // Under another session id with no read since (a /clear): the marker last read is another session's.
+  seen.session = 'sess-b'
+  expect(await dialog($, seen, clock, held)).toEqual([])
+})
+
+test('a turn that ends on a question is announced when the run starts to wait', async ($, on) => {
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.tool_use_id }))
+  const files = inRun('PLANNING')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  // Nothing at the turn's end, and one announcement at the re-read.
+  await startTurn($)
+  await endTurn($)
+  await clock.settle()
+  expect(seen.notified).toEqual([])
+  await clock.advance(REREAD_MS - 1)
+  expect(seen.notified).toEqual([])
+  await clock.advance(1)
+  await clock.settle()
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  await clock.advance(10 * REREAD_MS)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  expect(seen.toasts).toEqual([])
+
+  // The run's task no longer on show: its slug, and no gate.
+  forget(seen)
+  await $.session.start(START)
+  files['.git/HEAD'] = ON_MAIN
+  await readAgain($)
+  await startTurn($)
+  await endTurn($)
+  await clock.advance(REREAD_MS)
+  await clock.settle()
+  expect(seen.notified).toEqual([WAITING_NO_GATE])
+
+  // A turn that started before the re-read: the run goes on, and nothing is announced.
+  forget(seen)
+  files['.git/HEAD'] = ON_TASK
+  await readAgain($)
+  await startTurn($)
+  await endTurn($)
+  await clock.advance(REREAD_MS - 1)
+  await startTurn($)
+  await clock.advance(10 * REREAD_MS)
+  await clock.settle()
+  expect(seen.notified).toEqual([])
+
+  // The marker gone before the re-read: the run's end alone.
+  await endTurn($)
+  delete files[RUN_MARKER]
+  await clock.advance(REREAD_MS)
+  await clock.settle()
+  expect(seen.notified).toEqual(['export-csv: run ended · PLANNING'])
+
+  // A Quorum agent still running at the re-read: the run is going, and nothing is announced.
+  files[RUN_MARKER] = RUN_SINCE
+  await readAgain($)
+  await startTurn($)
+  seen.live.push('r1')
+  await $.agent.spawn({ tool_use_id: 'r1', ...RESEARCHER_BG })
+  forget(seen)
+  await endTurn($)
+  await clock.advance(10 * REREAD_MS)
+  await clock.settle()
+  expect(seen.notified).toEqual([])
+  expect(seen.toasts).toEqual([])
+})
+
+test('the opening questions of a run are not announced', async ($, on) => {
+  const held = heldQuestions(on)
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.tool_use_id }))
+  const spawn = (id: string, subagentType: string) =>
+    $.agent.spawn({ tool_use_id: id, prompt: 'Build step 1', description: id, subagentType, parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: false, fork: false })
+  const files = inRun('PLANNING')
+  delete files[RUN_MARKER]
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  const asked = () => dialog($, seen, clock, held)
+  // A run entered from none, in a turn of its own: the marker comes, and `by` is the Bash call that finds it.
+  const enter = async (by = enterRun) => {
+    delete files[RUN_MARKER]
+    await readAgain($)
+    await startTurn($)
+    files[RUN_MARKER] = RUN_SINCE
+    await by($)
+    await clock.settle()
+  }
+  // A turn that ends on a plain-text question, and its re-read.
+  const endOnQuestion = async () => {
+    forget(seen)
+    await endTurn($)
+    await clock.advance(REREAD_MS)
+    await clock.settle()
+    return [...seen.notified]
+  }
+
+  // The quiet start: a dialog and a plain-text end announce nothing, whether `quorum-run enter` or another read
+  // found the marker. A dialog in the next main-session turn is announced, and so is that turn's end.
+  for (const by of [enterRun, readAgain]) {
+    await enter(by)
+    expect(await asked()).toEqual([])
+    expect(await endOnQuestion()).toEqual([])
+    await startTurn($)
+    expect(await asked()).toEqual([WAITING_PLAN])
+    expect(await endOnQuestion()).toEqual([WAITING_PLAN])
+  }
+
+  // An agent that isn't Quorum's and a sub-agent's turn leave it quiet; a Quorum agent's start ends it, in the
+  // same turn.
+  await enter()
+  await spawn('a1', 'general-purpose')
+  expect(await asked()).toEqual([])
+  await startTurn($, 'b1')
+  expect(await asked()).toEqual([])
+  await spawn('a2', 'quorum:builder')
+  expect(await asked()).toEqual([WAITING_PLAN])
+  await endTurn($, 'answer', 'a2')
+  // The task on show changing status ends it.
+  await enter()
+  expect(await asked()).toEqual([])
+  files[STATE_MD] = calm('BUILDING')
+  await readAgain($)
+  expect(await asked()).toEqual([WAITING_NO_GATE])
+  files[STATE_MD] = calm('PLANNING')
+  // A new task coming on show ends it.
+  files['.git/HEAD'] = ON_MAIN
+  await enter()
+  expect(await asked()).toEqual([])
+  files['.git/HEAD'] = ON_TASK
+  await readAgain($)
+  expect(await asked()).toEqual([WAITING_PLAN])
+  // The task going off show with none in its place doesn't.
+  await enter()
+  files['.git/HEAD'] = ON_MAIN
+  await readAgain($)
+  expect(await asked()).toEqual([])
+  files['.git/HEAD'] = ON_TASK
+  await readAgain($)
+  expect(await asked()).toEqual([WAITING_PLAN])
+
+  // Another task replacing the one on show ends it, in the same status.
+  files['.tasks/quote-cells/state.md'] = calm('PLANNING').replace('slug: export-csv', 'slug: quote-cells')
+  await enter()
+  expect(await asked()).toEqual([])
+  files['.git/HEAD'] = 'ref: refs/heads/feat/quote-cells\n'
+  await readAgain($)
+  expect(await asked()).toEqual(['quote-cells: waiting for you · plan approval'])
+  files['.git/HEAD'] = ON_TASK
+  delete files['.tasks/quote-cells/state.md']
+  // A change that the read entering the run finds was made before the run: it doesn't end the quiet start.
+  await enter(async engine => {
+    files[STATE_MD] = calm('BUILDING')
+    return enterRun(engine)
+  })
+  expect(await asked()).toEqual([])
+  files[STATE_MD] = calm('PLANNING')
+  await readAgain($)
+
+  // `quorum-run enter` over a marker that never went (a run continued) quiets again.
+  await startTurn($)
+  expect(await asked()).toEqual([WAITING_PLAN])
+  await enterRun($)
+  expect(await asked()).toEqual([])
+  // A session that starts with the marker there has entered no run: its first dialog is announced.
+  await $.session.start(START)
+  expect(await asked()).toEqual([WAITING_PLAN])
+  // And so is the first one after a read under a new session id, its marker there (a resume): the quiet start
+  // of the id before is forgotten.
+  await startTurn($)
+  await enterRun($)
+  expect(await asked()).toEqual([])
+  files['.tasks/.run-sessions/sess-b'] = RUN_SINCE
+  seen.session = 'sess-b'
+  await readAgain($)
+  expect(await asked()).toEqual([WAITING_PLAN])
+})
+
+test('an escalation wins over a waiting message', async ($, on) => {
+  const files = inRun('BUILDING')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  // ESCALATED written before the turn's end: the end's refresh announces it, and the re-read adds no wait.
+  await startTurn($)
+  files[STATE_MD] = calm('ESCALATED')
+  await endTurn($)
+  await clock.settle()
+  expect(seen.notified).toEqual([ESCALATED_TEXT])
+  await clock.advance(REREAD_MS)
+  await clock.settle()
+  expect(seen.notified).toEqual([ESCALATED_TEXT])
+  // Written between the end and the re-read: the re-read's refresh announces it, alone.
+  files[STATE_MD] = calm('BUILDING')
+  await readAgain($)
+  await clock.settle()
+  forget(seen)
+  await startTurn($)
+  await endTurn($)
+  await clock.settle()
+  expect(seen.notified).toEqual([])
+  files[STATE_MD] = calm('ESCALATED')
+  await clock.advance(REREAD_MS)
+  await clock.settle()
+  expect(seen.notified).toEqual([ESCALATED_TEXT])
+  expect(seen.toasts).toEqual([])
+})
+
+test('a halt or an escalation in a run is announced once, with no status toast', async ($, on) => {
+  // The task's file calls `atRead.next` once, the next time the dashboard reads its files: the test's way into the
+  // middle of a refresh.
+  const atRead: { next: (() => void) | null } = { next: null }
+  const md = { text: calm('IN_REVIEW') }
+  const files = inRun('IN_REVIEW')
+  Object.defineProperty(files, STATE_MD, { enumerable: true, get: () => { const act = atRead.next; atRead.next = null; act?.(); return md.text } })
+  // Armed, it lets a second refresh reach its own writes while the first is between its two.
+  const hold = heldWrites(on, 'run')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  const to = async (status: string) => {
+    md.text = calm(status)
+    await readAgain($)
+    await clock.settle()
+  }
+
+  // Both messages word for word, each once, and no status toast; a second refresh adds nothing.
+  await to('HALTED')
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  await to('HALTED')
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  // A task that escalates, recovers and escalates again is announced twice.
+  await to('IN_REVIEW')
+  await to('ESCALATED')
+  await to('ESCALATED')
+  await to('IN_REVIEW')
+  await to('ESCALATED')
+  expect(seen.notified).toEqual([HALTED_TEXT, ESCALATED_TEXT, ESCALATED_TEXT])
+  expect(seen.toasts).toEqual([])
+
+  // Two refreshes that overlap over one change: one of them sees the edge.
+  await to('IN_REVIEW')
+  forget(seen)
+  md.text = calm('HALTED')
+  await Promise.all([readAgain($), readAgain($)])
+  await clock.settle()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+  // The same with the second started from inside the first's read of the task.
+  await to('IN_REVIEW')
+  forget(seen)
+  md.text = calm('ESCALATED')
+  const inside: Promise<unknown>[] = []
+  atRead.next = () => { inside.push(readAgain($)) }
+  await readAgain($)
+  expect(inside.length).toBe(1)
+  await Promise.all(inside)
+  await clock.settle()
+  expect(seen.notified).toEqual([ESCALATED_TEXT])
+  expect(seen.toasts).toEqual([])
+  // Two overlapping refreshes that find the halt and the marker gone: the halt alone, and no run's end.
+  await to('IN_REVIEW')
+  forget(seen)
+  md.text = calm('HALTED')
+  delete files[RUN_MARKER]
+  await Promise.all([readAgain($), readAgain($)])
+  await clock.settle()
+  await readAgain($)
+  await clock.settle()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+
+  // A session start under the same id that finds both: the read before counts for the halt, and only the run's
+  // end is silent there.
+  files[RUN_MARKER] = RUN_SINCE
+  await to('IN_REVIEW')
+  forget(seen)
+  md.text = calm('HALTED')
+  delete files[RUN_MARKER]
+  await $.session.start(START)
+  await clock.settle()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+
+  // A halt found at the read that first finds the marker: in a run at this read, though not at the one before.
+  await to('IN_REVIEW')
+  forget(seen)
+  md.text = calm('HALTED')
+  files[RUN_MARKER] = RUN_SINCE
+  await readAgain($)
+  await clock.settle()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+
+  // Two overlapping refreshes that find the halt and the marker gone, the first held between its write of the
+  // task and its write of the marker until the second has gone as far as it can: the second waits its turn, so
+  // the first still reads the marker of the read before, and the halt is announced, with no status toast.
+  await to('IN_REVIEW')
+  forget(seen)
+  md.text = calm('HALTED')
+  delete files[RUN_MARKER]
+  hold.isArmed = true
+  const both = Promise.all([readAgain($), readAgain($)])
+  await clock.settle()
+  expect(hold.release).not.toBeNull()
+  hold.release?.()
+  await both
+  await clock.settle()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+
+  // Another task that comes on show already HALTED, in place of this one: another slug is no edge, so nothing is
+  // announced and no toast is raised.
+  files[RUN_MARKER] = RUN_SINCE
+  await to('IN_REVIEW')
+  forget(seen)
+  files['.tasks/quote-cells/state.md'] = calm('HALTED').replace('slug: export-csv', 'slug: quote-cells')
+  files['.git/HEAD'] = 'ref: refs/heads/feat/quote-cells\n'
+  await readAgain($)
+  await clock.settle()
+  expect(seen.notified).toEqual([])
+  expect(seen.toasts).toEqual([])
+})
+
+test('the marker going after a halt or an escalation is silent', async ($, on) => {
+  const files = inRun('IN_REVIEW')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  const to = async (status: string) => {
+    files[STATE_MD] = calm(status)
+    await readAgain($)
+    await clock.settle()
+  }
+  const leave = async () => {
+    delete files[RUN_MARKER]
+    await readAgain($)
+    await clock.settle()
+  }
+
+  // The run's own leave after a halt, the halted task taken off show first: nothing after the halt's message.
+  await to('HALTED')
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  files['.git/HEAD'] = ON_MAIN
+  await readAgain($)
+  await leave()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+
+  // An escalated run's marker, removed by hand later.
+  files['.git/HEAD'] = ON_TASK
+  files[RUN_MARKER] = RUN_SINCE
+  await to('IN_REVIEW')
+  forget(seen)
+  await to('ESCALATED')
+  await readAgain($)
+  await leave()
+  expect(seen.notified).toEqual([ESCALATED_TEXT])
+
+  // A session that starts with the task already ESCALATED: no edge to announce, and the marker's removal is
+  // silent too, from the status alone.
+  forget(seen)
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  await clock.settle()
+  await leave()
+  expect(seen.notified).toEqual([])
+
+  // A task that escalated and went back to IN_REVIEW: its run's end is announced.
+  files[RUN_MARKER] = RUN_SINCE
+  await to('IN_REVIEW')
+  await to('ESCALATED')
+  await to('IN_REVIEW')
+  await leave()
+  expect(seen.notified).toEqual([ESCALATED_TEXT, 'export-csv: run ended · IN_REVIEW'])
+  expect(seen.toasts).toEqual([])
+})
+
+test('a turn that dies in a run is announced, an interrupt is not', async ($, on) => {
+  const ERROR = 'export-csv: run stopped · API error · /quorum:run continues it'
+  const REFUSED = 'export-csv: run stopped · refused · /quorum:run continues it'
+  const files = inRun('BUILDING')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  // What a turn's end announces, its re-read included: a dead turn's end is told once.
+  const ends = async (reason: 'answer' | 'error' | 'refusal' | 'aborted', agentId?: string) => {
+    forget(seen)
+    await endTurn($, reason, agentId)
+    await clock.settle()
+    await clock.advance(REREAD_MS)
+    await clock.settle()
+    return [...seen.notified]
+  }
+  const again = async () => {
+    await readAgain($)
+    await clock.settle()
+  }
+
+  // An API error and a refusal, each with the run's task's slug.
+  await startTurn($)
+  expect(await ends('error')).toEqual([ERROR])
+  await startTurn($)
+  expect(await ends('refusal')).toEqual([REFUSED])
+  // An interrupt, and a sub-agent's turn that dies: nothing.
+  await startTurn($)
+  expect(await ends('aborted')).toEqual([])
+  await startTurn($)
+  await startTurn($, 'b1')
+  expect(await ends('error', 'b1')).toEqual([])
+  expect(await ends('refusal', 'b1')).toEqual([])
+
+  // During the quiet start too: right after the run was entered, and entered again over a marker that never went.
+  delete files[RUN_MARKER]
+  await again()
+  files[RUN_MARKER] = RUN_SINCE
+  await enterRun($)
+  expect(await ends('error')).toEqual([ERROR])
+  await enterRun($)
+  expect(await ends('refusal')).toEqual([REFUSED])
+
+  // The run's task no longer on show: its slug still.
+  files[STATE_MD] = calm('PLANNING')
+  await $.session.start(START)
+  files['.git/HEAD'] = ON_MAIN
+  await again()
+  await startTurn($)
+  expect(await ends('error')).toEqual([ERROR])
+  // No task on show and none shown before: no prefix.
+  await $.session.start(START)
+  await startTurn($)
+  expect(await ends('error')).toEqual(['run stopped · API error · /quorum:run continues it'])
+  expect(await ends('refusal')).toEqual(['run stopped · refused · /quorum:run continues it'])
+
+  // A task that is HALTED or ESCALATED: its own message was the announcement, and the dead turn adds none.
+  files['.git/HEAD'] = ON_TASK
+  for (const [status, text] of [['HALTED', HALTED_TEXT], ['ESCALATED', ESCALATED_TEXT]] as const) {
+    files[STATE_MD] = calm('BUILDING')
+    await $.session.start(START)
+    await startTurn($)
+    forget(seen)
+    files[STATE_MD] = calm(status)
+    await again()
+    expect(seen.notified).toEqual([text])
+    expect(await ends('error')).toEqual([])
+    expect(await ends('refusal')).toEqual([])
+    // Found at the dying turn's own refresh: the halt or the escalation alone.
+    files[STATE_MD] = calm('BUILDING')
+    await again()
+    await startTurn($)
+    files[STATE_MD] = calm(status)
+    expect(await ends('error')).toEqual([text])
+    // A session that starts with the task already stuck: no edge, and still nothing for the dead turn.
+    await $.session.start(START)
+    await startTurn($)
+    expect(await ends('error')).toEqual([])
+  }
+  expect(seen.toasts).toEqual([])
+})
+
+test("the run's end is announced with the task's status", async ($, on) => {
+  const ENDED = 'export-csv: run ended · AWAITING-HUMAN'
+  const files = inRun('AWAITING-HUMAN')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  const again = async () => {
+    await readAgain($)
+    await clock.settle()
+  }
+  const leave = async () => {
+    delete files[RUN_MARKER]
+    await again()
+  }
+
+  // The marker goes with the task on show; the read after it announces nothing more.
+  await leave()
+  expect(seen.notified).toEqual([ENDED])
+  await again()
+  expect(seen.notified).toEqual([ENDED])
+
+  // The task taken off show before the marker went (off its branch, a finished task): the last task shown, with
+  // its last status.
+  forget(seen)
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  files['.git/HEAD'] = ON_MAIN
+  await again()
+  await leave()
+  expect(seen.notified).toEqual([ENDED])
+
+  // A run with no task.
+  forget(seen)
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  await leave()
+  expect(seen.notified).toEqual(['run ended'])
+
+  // A run whose only task went off show during the quiet start (one the person chose not to continue).
+  forget(seen)
+  files['.git/HEAD'] = ON_TASK
+  await again()
+  files[RUN_MARKER] = RUN_SINCE
+  await enterRun($)
+  files['.git/HEAD'] = ON_MAIN
+  await again()
+  await leave()
+  expect(seen.notified).toEqual(['run ended'])
+
+  // The same once the quiet start has ended (the next turn started): still no run's task, though the task was the
+  // run's before the run was entered again over its marker.
+  forget(seen)
+  files['.git/HEAD'] = ON_TASK
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  await enterRun($)
+  files['.git/HEAD'] = ON_MAIN
+  await again()
+  await startTurn($)
+  await leave()
+  expect(seen.notified).toEqual(['run ended'])
+
+  // A task read on show only during the quiet start and taken off show after it ended (a turn started, with no
+  // read between) is the run's task, with the status it was last read with: found off show at a read of its own,
+  // and at the read that finds the marker gone.
+  for (const isOneRead of [false, true]) {
+    forget(seen)
+    files['.git/HEAD'] = ON_TASK
+    await again()
+    files[RUN_MARKER] = RUN_SINCE
+    await enterRun($)
+    await startTurn($)
+    files['.git/HEAD'] = ON_MAIN
+    if (!isOneRead) await again()
+    await leave()
+    expect({ isOneRead, notified: seen.notified }).toEqual({ isOneRead, notified: [ENDED] })
+  }
+
+  // A run that begins and ends inside its quiet start.
+  forget(seen)
+  files['.git/HEAD'] = ON_TASK
+  await again()
+  files[RUN_MARKER] = RUN_SINCE
+  await enterRun($)
+  await leave()
+  expect(seen.notified).toEqual([ENDED])
+
+  // The read at a session start that finds the marker gone is no run ending, and neither is the one after it.
+  forget(seen)
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  delete files[RUN_MARKER]
+  await $.session.start(START)
+  await clock.settle()
+  await again()
+  expect(seen.notified).toEqual([])
+
+  // A /clear after the run left: the session goes on under a new id with no session start.
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  delete files[RUN_MARKER]
+  seen.session = 'sess-b'
+  await again()
+  await again()
+  expect(seen.notified).toEqual([])
+  expect(seen.toasts).toEqual([])
+
+  // A /clear straight from a read in a run, whose marker is still there: the first read under the new id counts
+  // no read before, so a halt it finds is the toast of a session with no run, and no run has ended.
+  seen.session = 'sess-a'
+  files[RUN_MARKER] = RUN_SINCE
+  files[STATE_MD] = calm('PLANNING')
+  await $.session.start(START)
+  await clock.settle()
+  forget(seen)
+  seen.session = 'sess-b'
+  files[STATE_MD] = calm('HALTED')
+  await again()
+  expect(seen.toasts).toEqual(['export-csv: HALTED after the round cap; see the post-mortem'])
+  expect(seen.toastMs).toEqual([undefined])
+  expect(seen.notified).toEqual([])
+
+  // A start read forgets the run's task: one that went off show before it is not named when the run ends.
+  seen.session = 'sess-a'
+  files[STATE_MD] = calm('PLANNING')
+  await $.session.start(START)
+  await clock.settle()
+  forget(seen)
+  files['.git/HEAD'] = ON_MAIN
+  await $.session.start(START)
+  await leave()
+  expect(seen.notified).toEqual(['run ended'])
+  expect(seen.toasts).toEqual([])
+
+  // Where it stopped, in this order: `PR drafted` once the task's pr.md exists, whatever the status; `plan approved`
+  // for BUILDING before the build started (state.md has no base_sha, or a null one), or `spec written` for such a
+  // task on the fast path (`fast: true`: it has no plan); else the status. Each with the task on show, and with it
+  // taken off show before the marker went.
+  const NO_BASE = calm('BUILDING').replace('base_sha: abc123\n', '')
+  const fast = (text: string) => text.replace('risk: MEDIUM\n', 'risk: MEDIUM\nfast: true\n')
+  expect(fast(NO_BASE)).toContain('fast: true')
+  const PR_MD = '.tasks/export-csv/pr.md'
+  expect(NO_BASE).not.toContain('base_sha')
+  const stateReads = () => seen.reads.filter(path => path === `/repo/${STATE_MD}`).length
+  const stops: [text: string, hasPr: boolean, where: string][] = [
+    [NO_BASE, false, 'plan approved'],
+    [calm('BUILDING').replace('base_sha: abc123', 'base_sha: null'), false, 'plan approved'],
+    [calm('BUILDING'), false, 'BUILDING'],
+    [calm('PLANNING').replace('base_sha: abc123\n', ''), false, 'PLANNING'],
+    [fast(NO_BASE), false, 'spec written'],
+    [fast(calm('BUILDING').replace('base_sha: abc123', 'base_sha: null')), false, 'spec written'],
+    [fast(calm('BUILDING')), false, 'BUILDING'],
+    [NO_BASE.replace('risk: MEDIUM\n', 'risk: MEDIUM\nfast: false\n'), false, 'plan approved'],
+    [fast(NO_BASE), true, 'PR drafted'],
+    [NO_BASE, true, 'PR drafted'],
+    [calm('READY'), true, 'PR drafted'],
+    [calm('AWAITING-HUMAN'), true, 'PR drafted'],
+  ]
+  for (const [text, hasPr, where] of stops) {
+    for (const isShown of [true, false]) {
+      files['.git/HEAD'] = ON_TASK
+      files[STATE_MD] = text
+      delete files[PR_MD]
+      if (hasPr) files[PR_MD] = '# Export customers as CSV\n'
+      files[RUN_MARKER] = RUN_SINCE
+      await $.session.start(START)
+      await clock.settle()
+      forget(seen)
+      if (!isShown) {
+        files['.git/HEAD'] = ON_MAIN
+        await again()
+      }
+      const before = stateReads()
+      await leave()
+      expect({ where, isShown, notified: seen.notified }).toEqual({ where, isShown, notified: [`export-csv: run ended · ${where}`] })
+      // A read of a task on show checks that its state.md exists and reads it; only for a BUILDING task is it read
+      // once more, for its base_sha.
+      if (isShown) expect({ where, reads: stateReads() - before }).toEqual({ where, reads: text.includes('status: BUILDING') ? 3 : 2 })
+    }
+  }
+  // The rule alone: pr.md first, then BUILDING with no base_sha (`spec written` on the fast path), and no other
+  // status reads `plan approved` or `spec written`.
+  expect(stoppedAt('BUILDING', false, false, false)).toBe('plan approved')
+  expect(stoppedAt('BUILDING', false, false, true)).toBe('spec written')
+  expect(stoppedAt('BUILDING', false, true, false)).toBe('BUILDING')
+  expect(stoppedAt('BUILDING', false, true, true)).toBe('BUILDING')
+  expect(stoppedAt('PLANNING', false, false, false)).toBe('PLANNING')
+  expect(stoppedAt('IN_REVIEW', false, false, true)).toBe('IN_REVIEW')
+  expect(stoppedAt('HALTED', true, false, false)).toBe('PR drafted')
+  expect(stoppedAt('BUILDING', true, false, true)).toBe('PR drafted')
+  // The build starts while the run goes on: the end reads the status once state.md has a base_sha.
+  files['.git/HEAD'] = ON_TASK
+  files[STATE_MD] = NO_BASE
+  delete files[PR_MD]
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  files[STATE_MD] = calm('BUILDING')
+  await again()
+  forget(seen)
+  await leave()
+  expect(seen.notified).toEqual(['export-csv: run ended · BUILDING'])
+  // A task read on show only during the quiet start, and found off show at the read that finds the marker gone:
+  // where it stopped as that one read found it.
+  files[STATE_MD] = NO_BASE
+  await again()
+  files[RUN_MARKER] = RUN_SINCE
+  await enterRun($)
+  await startTurn($)
+  files['.git/HEAD'] = ON_MAIN
+  forget(seen)
+  await leave()
+  expect(seen.notified).toEqual(['export-csv: run ended · plan approved'])
+  // A halted task whose pr.md exists: still silent, by its status.
+  files['.git/HEAD'] = ON_TASK
+  files[STATE_MD] = calm('HALTED')
+  files[PR_MD] = '# Export customers as CSV\n'
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  await clock.settle()
+  forget(seen)
+  await leave()
+  expect(seen.notified).toEqual([])
+  expect(seen.toasts).toEqual([])
+})
+
+test('one moment gets one message', async ($, on) => {
+  const files = inRun('BUILDING')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  const reread = async () => {
+    await clock.settle()
+    await clock.advance(REREAD_MS)
+    await clock.settle()
+  }
+  const back = async (status: string) => {
+    files[STATE_MD] = calm(status)
+    files[RUN_MARKER] = RUN_SINCE
+    await $.session.start(START)
+    await clock.settle()
+    forget(seen)
+    await startTurn($)
+  }
+
+  // A turn that dies at the refresh that finds the marker gone: the run's end only, and the re-read adds nothing.
+  await startTurn($)
+  delete files[RUN_MARKER]
+  await endTurn($, 'error')
+  await clock.settle()
+  expect(seen.notified).toEqual(['export-csv: run ended · BUILDING'])
+  await reread()
+  expect(seen.notified).toEqual(['export-csv: run ended · BUILDING'])
+
+  // The same for a refusal.
+  await back('BUILDING')
+  delete files[RUN_MARKER]
+  await endTurn($, 'refusal')
+  await reread()
+  expect(seen.notified).toEqual(['export-csv: run ended · BUILDING'])
+
+  // A turn that ends on a question as its run ends: no waiting message at the re-read, whether the turn's end or
+  // the re-read finds the marker gone.
+  await back('PLANNING')
+  delete files[RUN_MARKER]
+  await endTurn($)
+  await reread()
+  expect(seen.notified).toEqual(['export-csv: run ended · PLANNING'])
+  await back('PLANNING')
+  await endTurn($)
+  await clock.settle()
+  expect(seen.notified).toEqual([])
+  delete files[RUN_MARKER]
+  await reread()
+  expect(seen.notified).toEqual(['export-csv: run ended · PLANNING'])
+
+  // One refresh that finds both the status changed to HALTED and the marker gone: the halt only.
+  await back('IN_REVIEW')
+  files[STATE_MD] = calm('HALTED')
+  delete files[RUN_MARKER]
+  await readAgain($)
+  await clock.settle()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+
+  // The same found by a dying turn's refresh: still the halt only.
+  await back('IN_REVIEW')
+  files[STATE_MD] = calm('HALTED')
+  delete files[RUN_MARKER]
+  await endTurn($, 'error')
+  await reread()
+  expect(seen.notified).toEqual([HALTED_TEXT])
+  expect(seen.toasts).toEqual([])
+})
+
+test('in a run the quiet toasts say what the run does next', async ($, on) => {
+  const files = inRun('IN_REVIEW')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  // The toasts a change from `from` to `status` raises, under a marker with `until` ('' for none).
+  const toasts = async (status: string, until: string, o: { risk?: string; from?: string } = {}) => {
+    const md = (s: string) => calm(s).replace('risk: MEDIUM', `risk: ${o.risk ?? 'MEDIUM'}`)
+    files[RUN_MARKER] = until ? `${RUN_SINCE}until ${until}\n` : RUN_SINCE
+    files[STATE_MD] = md(o.from ?? 'IN_REVIEW')
+    await readAgain($)
+    await clock.settle()
+    seen.toasts.length = 0
+    files[STATE_MD] = md(status)
+    await readAgain($)
+    await clock.settle()
     return [...seen.toasts]
   }
-  const outside = await changes()
-  expect(outside).toEqual(['export-csv: review converged', 'export-csv: HALTED after the round cap; see the post-mortem'])
-  // In a run, through its going, waiting and stopped states: the same toasts.
-  files[RUN_MARKER] = RUN_SINCE
-  await $.tool.call({ tool: 'Bash', command: 'bin/quorum-run enter sess-a' })
-  expect(await changes()).toEqual(outside)
-  expect((await bandRow($, 140)).words).toBe('run stopped')
-  expect(notified).toBe(0)
+  // Each row of the table: the full toast with no `until` and with one past the status, the status alone with
+  // the row's `until`, and the full toast under the other rows' `until`.
+  for (const until of ['', 'pr', 'blind']) expect({ until, toasts: await toasts('CONVERGED', until) }).toEqual({ until, toasts: ['export-csv: CONVERGED · blind test next'] })
+  expect(await toasts('CONVERGED', 'review')).toEqual(['export-csv: CONVERGED'])
+  for (const until of ['', 'pr', 'blind']) expect({ until, toasts: await toasts('READY', until) }).toEqual({ until, toasts: ['export-csv: READY · drafting the PR'] })
+  expect(await toasts('READY', 'review')).toEqual(['export-csv: READY'])
+  for (const until of ['', 'pr', 'review']) expect({ until, toasts: await toasts('AWAITING-HUMAN', until) }).toEqual({ until, toasts: ['export-csv: AWAITING-HUMAN · drafting the PR'] })
+  expect(await toasts('AWAITING-HUMAN', 'blind')).toEqual(['export-csv: AWAITING-HUMAN'])
+  // A LOW task has no blind test: its review goes on to the proof whatever `until` says, and stops at READY.
+  for (const until of ['', 'review']) expect({ until, toasts: await toasts('CONVERGED', until, { risk: 'LOW' }) }).toEqual({ until, toasts: ['export-csv: CONVERGED · final proof next'] })
+  expect(await toasts('READY', 'review', { risk: 'LOW', from: 'CONVERGED' })).toEqual(['export-csv: READY'])
+  // Every one a toast of the default length, and none a notification.
+  expect(seen.toastMs.length).toBeGreaterThan(0)
+  expect(seen.toastMs.filter(ms => ms !== undefined)).toEqual([])
+  expect(seen.notified).toEqual([])
+})
+
+test('outside a run the toasts read as before and nothing is announced', async ($, on) => {
+  const held = heldQuestions(on)
+  const files: Record<string, string> = repo('IN_REVIEW')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  const to = async (status: string) => {
+    files[STATE_MD] = calm(status)
+    await readAgain($)
+    await clock.settle()
+  }
+  // The five status toasts, word for word, each of the default length.
+  for (const status of ['CONVERGED', 'HALTED', 'ESCALATED', 'READY', 'AWAITING-HUMAN']) {
+    await to('IN_REVIEW')
+    await to(status)
+  }
+  expect(seen.toasts).toEqual([
+    'export-csv: review converged',
+    'export-csv: HALTED after the round cap; see the post-mortem',
+    'export-csv: ESCALATED: the Stop-hook checks failed 3 times',
+    'export-csv: READY for /quorum:pr-draft',
+    'export-csv: waiting for your review',
+  ])
+  expect(seen.toastMs).toEqual([undefined, undefined, undefined, undefined, undefined])
+  // A question, a turn that dies with its re-read, and a status change: no notification.
+  await to('IN_REVIEW')
+  await startTurn($)
+  const asked = ask($)
+  await clock.settle()
+  held.answer()
+  await asked
+  await endTurn($, 'error')
+  await clock.advance(REREAD_MS)
+  await to('HALTED')
+  expect(seen.notified).toEqual([])
+})
+
+test('a message is sent without control characters', async ($, on) => {
+  // The status is free text in state.md: here it holds an ESC and a BEL.
+  const files = inRun('READY')
+  files[STATE_MD] = calm('READY').replace('status: READY', 'status: REA\u001bDY\u0007')
+  const { seen, clock } = runWorld(on, files)
+  seen.notify = 'unsent'
+  await $.session.start(START)
+  delete files[RUN_MARKER]
+  await readAgain($)
+  await clock.settle()
+  // The text given to the notification, and to the toast that stands in for it, has neither.
+  expect(seen.notified).toEqual(['export-csv: run ended · READY'])
+  expect(seen.toasts).toEqual(seen.notified)
+  expect(stripControls('a\u001b\u0007\u007f\u0085b')).toBe('ab')
 })
 
 // ---- The Run card, and the Now card during a run
@@ -8086,4 +9119,378 @@ test('no state of the run is told by color alone', async ($, on) => {
       expect(s.card).toContain('Run · stopped')
     }
   }
+})
+
+test('a run whose agents are still working is going, not waiting', async ($, on) => {
+  const held = heldQuestions(on)
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.tool_use_id }))
+  // Armed, it holds a re-read at its refresh: the test's way into the middle of one.
+  const hold = heldWrites(on, 'run')
+  // Armed, it holds a re-read where it settles the agent list against the engine's.
+  const settling = heldWrites(on, 'agents')
+  // Armed, it holds a re-read at its read of the task, after its refresh and its first look at whether it is due.
+  const reading = heldReads(on, 'task')
+  const files = inRun('PLANNING')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  // An agent the engine runs is on its own list (`seen.live`), with its type, from its start to its end.
+  const spawn = (id: string, subagentType: string = RESEARCHER_BG.subagentType) => {
+    seen.live.push(id)
+    seen.listedAs[id] = { type: subagentType }
+    return $.agent.spawn({ tool_use_id: id, ...RESEARCHER_BG, subagentType })
+  }
+  const endAgent = (id: string, reason: 'answer' | 'error' | 'aborted' = 'answer') => {
+    seen.live = seen.live.filter(live => live !== id)
+    return endTurn($, reason, id)
+  }
+  // The run as the band (140 columns), the Run card's last row and the Now card's run lines read.
+  const reads = async () => {
+    const d = await $.ui.mount(paneAt(44))
+    const now = (await d.findAll({ type: 'Box' })).filter(b => /^now-run:\d+$/.test(b.key ?? '')).map(b => b.text)
+    await d.unmount()
+    return { band: (await bandRow($, 140)).words, card: (await runCard($)).rows[2], now }
+  }
+  const GOING = { band: 'autopilot · next stop: plan approval', card: 'next stop: plan approval', now: ['the run goes on by itself', 'next stop: plan approval'] }
+  const WAITING = { band: 'autopilot · waiting for you: plan approval', card: 'waiting for you: plan approval', now: ['waiting for you: plan approval'] }
+  // How many times the task's state.md was asked for: more with every refresh.
+  const taskReads = () => seen.reads.filter(path => path === `/repo/${STATE_MD}`).length
+  // A main-session turn that starts `ids` in the background and ends with them running, read after its re-read.
+  const turnWith = async (...ids: string[]) => {
+    await startTurn($)
+    for (const id of ids) await spawn(id)
+    forget(seen)
+    await endTurn($)
+    await clock.advance(REREAD_MS)
+    await clock.settle()
+  }
+  const later = async (ms: number) => {
+    await clock.advance(ms)
+    await clock.settle()
+  }
+  expect(await reads()).toEqual(GOING)
+
+  // The turn ends with its agent at work: going everywhere after the re-read, and nothing is announced, however
+  // long the agent takes.
+  await turnWith('r1')
+  expect(await reads()).toEqual(GOING)
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  expect(seen.toasts).toEqual([])
+  // The agent ends with no turn started since: the task is read once more, as after a turn's end, and the run then
+  // reads as waiting, announced once.
+  await endAgent('r1')
+  await later(REREAD_MS - 1)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await later(1)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  await later(20 * REREAD_MS)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  expect(seen.toasts).toEqual([])
+
+  // Two agents: only after the second ends.
+  await turnWith('s1', 's2')
+  await endAgent('s1')
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await endAgent('s2')
+  await later(REREAD_MS)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+
+  // The agent's report starts the next turn: started before the agent ended, and started after it within the
+  // re-read's delay, the run goes on and nothing is announced.
+  await turnWith('p1')
+  await startTurn($)
+  await endAgent('p1')
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await endTurn($)
+  await later(REREAD_MS)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  await turnWith('p2')
+  await endAgent('p2')
+  await later(REREAD_MS - 1)
+  await startTurn($)
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+
+  // An agent that ends in a turn still running, and one that ends after a turn that died, set no read.
+  await spawn('f1')
+  await later(20 * REREAD_MS)
+  let before = taskReads()
+  await endAgent('f1')
+  await later(20 * REREAD_MS)
+  expect(taskReads()).toBe(before)
+  await spawn('f2')
+  await endTurn($, 'error')
+  await later(20 * REREAD_MS)
+  forget(seen)
+  before = taskReads()
+  await endAgent('f2')
+  await later(20 * REREAD_MS)
+  expect(taskReads()).toBe(before)
+  expect(seen.notified).toEqual([])
+
+  // A dialog opened while an agent runs is announced, and reads as waiting until it is answered.
+  await startTurn($)
+  await spawn('d1')
+  forget(seen)
+  const asked = ask($)
+  await clock.settle()
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  held.answer()
+  await asked
+  expect(await reads()).toEqual(GOING)
+  await endAgent('d1')
+  await later(20 * REREAD_MS)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+
+  // An agent that isn't Quorum's, still running at the re-read (the engine's list holds it), doesn't hold the wait
+  // back, and its end sets no read and announces nothing more.
+  await startTurn($)
+  await spawn('g1', 'general-purpose')
+  forget(seen)
+  await endTurn($)
+  await later(REREAD_MS)
+  expect(seen.live).toEqual(['g1'])
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  before = taskReads()
+  await endAgent('g1')
+  await later(20 * REREAD_MS)
+  expect(taskReads()).toBe(before)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  // One that ends before the turn's re-read doesn't put that re-read off.
+  await startTurn($)
+  await spawn('g2', 'general-purpose')
+  forget(seen)
+  await endTurn($)
+  await later(100)
+  await endAgent('g2')
+  await later(REREAD_MS - 100)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  await later(20 * REREAD_MS)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+
+  // A last agent that ends with an error or an interrupt starts the wait as one that ends with an answer does.
+  for (const reason of ['error', 'aborted'] as const) {
+    await turnWith(`x-${reason}`)
+    await endAgent(`x-${reason}`, reason)
+    await later(REREAD_MS - 1)
+    expect({ reason, ...(await reads()) }).toEqual({ reason, ...GOING })
+    expect(seen.notified).toEqual([])
+    await later(1)
+    expect({ reason, ...(await reads()) }).toEqual({ reason, ...WAITING })
+    expect(seen.notified).toEqual([WAITING_PLAN])
+    await later(20 * REREAD_MS)
+    expect(seen.notified).toEqual([WAITING_PLAN])
+  }
+
+  // An agent that ends before the turn's re-read: one message, RUN_REREAD_MS after the agent's end.
+  await startTurn($)
+  await spawn('q1')
+  forget(seen)
+  await endTurn($)
+  await later(100)
+  await endAgent('q1')
+  await later(REREAD_MS - 1)
+  expect(seen.notified).toEqual([])
+  await later(20 * REREAD_MS)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+
+  // An agent that ends while the turn's re-read is reading: that re-read starts no wait and leaves it to the one
+  // the agent's end set, RUN_REREAD_MS after that end (the turn the agent's report starts comes first).
+  await startTurn($)
+  await spawn('h1')
+  forget(seen)
+  await endTurn($)
+  hold.isArmed = true
+  await later(REREAD_MS)
+  expect(hold.release).not.toBeNull()
+  await endAgent('h1')
+  hold.release?.()
+  await later(REREAD_MS - 1)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await later(1)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  await later(20 * REREAD_MS)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  // The same with the agent's report starting a turn within the delay: the run goes on, and nothing is announced.
+  await startTurn($)
+  await spawn('h2')
+  forget(seen)
+  await endTurn($)
+  hold.isArmed = true
+  await later(REREAD_MS)
+  expect(hold.release).not.toBeNull()
+  await endAgent('h2')
+  hold.release?.()
+  await later(REREAD_MS - 1)
+  await startTurn($)
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+
+  // A newer re-read's timer firing while the turn's re-read, which found it pending, reads on: that re-read still
+  // starts no wait, and the newer one finds the other agent at work, so the run is going until that agent ends.
+  await startTurn($)
+  await spawn('k1')
+  await spawn('k2')
+  forget(seen)
+  await endTurn($)
+  hold.isArmed = true
+  await later(REREAD_MS)
+  expect(hold.release).not.toBeNull()
+  await endAgent('k1')
+  reading.isArmed = true
+  hold.release?.()
+  await clock.settle()
+  expect(reading.release).not.toBeNull()
+  await later(REREAD_MS)
+  reading.release?.()
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await endAgent('k2')
+  await later(REREAD_MS)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+
+  // An agent the engine's list holds as not yet ended, whatever it says it is doing (not started, waiting on an
+  // Agent call of its own, between turns), is at work: the run is going until that agent's own end.
+  for (const status of ['pending', 'waiting', 'idle'] as const) {
+    await startTurn($)
+    await spawn(`w-${status}`)
+    seen.listedAs[`w-${status}`] = { type: RESEARCHER_BG.subagentType, status }
+    forget(seen)
+    await endTurn($)
+    await later(20 * REREAD_MS)
+    expect({ status, ...(await reads()) }).toEqual({ status, ...GOING })
+    expect(seen.notified).toEqual([])
+    await endAgent(`w-${status}`)
+    await later(REREAD_MS)
+    expect({ status, ...(await reads()) }).toEqual({ status, ...WAITING })
+    expect(seen.notified).toEqual([WAITING_PLAN])
+  }
+  // One the engine's list holds as ended, whose end never reached the dashboard, doesn't hold the wait back.
+  for (const status of ['completed', 'failed', 'killed'] as const) {
+    await startTurn($)
+    await spawn(`e-${status}`)
+    seen.listedAs[`e-${status}`] = { type: RESEARCHER_BG.subagentType, status }
+    forget(seen)
+    await endTurn($)
+    await later(REREAD_MS)
+    expect({ status, ...(await reads()) }).toEqual({ status, ...WAITING })
+    expect(seen.notified).toEqual([WAITING_PLAN])
+  }
+
+  // An unended agent the engine no longer runs (its end never reached the dashboard) doesn't hold the wait back:
+  // the re-read that would start the wait asks the engine's own list, and the wait starts there. That agent's end,
+  // should it come late, announces nothing more.
+  await spawn('z1')
+  seen.live = []
+  forget(seen)
+  let listed = seen.listed
+  await endTurn($)
+  await later(REREAD_MS - 1)
+  expect(seen.notified).toEqual([])
+  expect(seen.listed).toBe(listed)
+  await later(1)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  expect(seen.listed).toBe(listed + 1)
+  await endTurn($, 'answer', 'z1')
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  // With another the engine still runs, the run is going until that one ends.
+  await startTurn($)
+  await spawn('z2')
+  await spawn('z3')
+  seen.live = ['z3']
+  forget(seen)
+  await endTurn($)
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await endAgent('z3')
+  await later(REREAD_MS)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  // The engine's list refusing to answer: the dashboard's own list stands, so the run is going while it holds a
+  // running agent, and waits once that agent has ended.
+  await startTurn($)
+  await spawn('z6')
+  seen.listFails = true
+  forget(seen)
+  listed = seen.listed
+  await endTurn($)
+  await later(20 * REREAD_MS)
+  expect(seen.listed).toBe(listed + 1)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await endAgent('z6')
+  await later(REREAD_MS)
+  expect(seen.listed).toBe(listed + 2)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  seen.listFails = false
+  // A re-read that starts no wait (a turn started before it) doesn't ask the engine.
+  await startTurn($)
+  await spawn('z4')
+  seen.live = []
+  forget(seen)
+  await endTurn($)
+  await later(REREAD_MS - 1)
+  await startTurn($)
+  listed = seen.listed
+  await later(20 * REREAD_MS)
+  expect(seen.listed).toBe(listed)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  // A turn that starts while the re-read asks the engine: no wait is started.
+  await spawn('z5')
+  seen.live = []
+  await endTurn($)
+  settling.isArmed = true
+  await later(REREAD_MS)
+  expect(settling.release).not.toBeNull()
+  await startTurn($)
+  settling.release?.()
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await endTurn($)
+  await later(REREAD_MS)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+
+  // The marker gone when the last agent ends: the run's end alone.
+  await turnWith('m1')
+  delete files[RUN_MARKER]
+  listed = seen.listed
+  await endAgent('m1')
+  await later(20 * REREAD_MS)
+  expect(seen.notified).toEqual(['export-csv: run ended · PLANNING'])
+  expect(seen.listed).toBe(listed)
+
+  // The task ESCALATED when the last agent ends: the escalation's message alone.
+  files[RUN_MARKER] = RUN_SINCE
+  await readAgain($)
+  await turnWith('e1')
+  files[STATE_MD] = calm('ESCALATED')
+  await endAgent('e1')
+  await later(20 * REREAD_MS)
+  expect(seen.notified).toEqual([ESCALATED_TEXT])
+  expect(seen.toasts).toEqual([])
+  expect((await reads()).band).toBe('run stopped')
 })

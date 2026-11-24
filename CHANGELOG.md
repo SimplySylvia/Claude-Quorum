@@ -13,8 +13,9 @@ copy with `/plugin marketplace update`.
   `▸▸ …`; `waiting: …`, `◆ …`). A problem still comes first: beside one the words drop a size, to the short form
   (`▸▸ …`, `◆ …`) under 110 columns. On a band that doesn't fit the words step down, then the slug and the stage
   dots give way for a form that fits whole, or else for the shortest form cut at the end, and the words go only
-  when not even that can be drawn; they never wrap onto a second row. Nothing of the run shows with no task on show
-  or in a map session.
+  when not even that can be drawn; they never wrap onto a second row. A run whose turn ended while its Quorum
+  agents are still at work reads as going, not waiting, until the last of them has ended. Nothing of the run shows
+  with no task on show or in a map session.
 - **The Run card.** During a run it's the first card of the task's pane: `Run · autopilot · since 14:02`, how the run
   was started (`started with --until review --yes`, or `stops only where you must decide`), and the next stop, what
   the run waits on, or why it stopped. A stopped run's first row reads `Run · stopped · started 14:02`, so the time
@@ -26,6 +27,25 @@ copy with `/plugin marketplace update`.
   since `/quorum:run` stops again until its checks pass). Next carries the flags the run was started with
   (`/quorum:run --until review --yes`), so the run you continue stops where the first one would have. A `HALTED`
   task keeps its own Next and reads `HALTED · see the post-mortem`.
+- **The dashboard announces a run's stops.** A `/quorum:run` you've looked away from tells you when it needs you or
+  has stopped, once for each: a question (`csv-export: waiting for you · plan approval`, or
+  `csv-export: the run is waiting for you` where no gate is open), a halt or an escalation
+  (`csv-export: run stopped · HALTED · see the post-mortem`,
+  `… run stopped · ESCALATED · fix the checks, then /quorum:run`), a turn that dies
+  (`… run stopped · API error · /quorum:run continues it`, or `refused`), and the run's end
+  (`csv-export: run ended · AWAITING-HUMAN`, with where it stopped: `PR drafted` once `pr.md` exists,
+  `plan approved` for a `BUILDING` task whose build hasn't started, or `spec written` for one on the fast path,
+  else the status). A turn that ends while the
+  run's Quorum agents are at work isn't a question: it's announced only if the last agent ends and no turn
+  starts. Each is a notification through Claude Code's own notification setting;
+  there is no Quorum setting for it. When it can't be sent the same text is a toast that stays 15 seconds, and on a
+  channel that only rings a bell you get the bell and the toast. The run's opening questions, an interrupt (Esc)
+  and a sub-agent's question aren't announced, and nothing is outside a run. See
+  [Announcements](guides/dashboard.md#announcements).
+- **In a run the quiet toasts say what the run does next.** `csv-export: CONVERGED · blind test next` (`final proof
+  next` for a LOW task), `csv-export: READY · drafting the PR` and `csv-export: AWAITING-HUMAN · drafting the PR`,
+  or the status alone (`csv-export: READY`) where `--until` stops the run there. A halt or an escalation in a run
+  is announced and raises no status toast. Outside a run the toasts read as before.
 - **An escalated run keeps its marker.** `/quorum:run` no longer runs `quorum-run leave` when the task is
   `ESCALATED`, so the band still reads `run stopped` and the Run card still shows when you come back after the
   run's turn has ended. The marker goes when `/quorum:run` is run again and that run ends on anything but an
