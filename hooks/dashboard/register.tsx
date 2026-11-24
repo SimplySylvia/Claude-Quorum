@@ -768,9 +768,13 @@ function keepTicking($: EngineInterface, all: QuorumAgent[]) {
 
 // Mark agents the engine no longer runs as finished, and answer the list as settled: after a reload or resume, so
 // none ticks forever, and at the re-read that would start a run's wait, so one whose end the dashboard never saw
-// doesn't keep the run reading as going.
+// doesn't keep the run reading as going. An agent the engine lists is still at work unless its `status` is one of
+// the three AgentStatus gives as ended (`completed`, `failed`, `killed`): `pending`, `running`, `waiting` (held
+// mid-turn, as on an Agent call of its own) and `idle` all count as live, and so would a status a later engine adds.
+// `status`, not `taskStatus`: its type names the ended ones outright, and `taskStatus` has `paused`, which it
+// doesn't place on either side. Counting too many as live only puts the wait off until the agent's own end.
 async function settleAgents($: EngineInterface): Promise<QuorumAgent[]> {
-  const live = new Set((await $.agent.list()).filter(a => a.status === 'pending' || a.status === 'running').map(a => a.id))
+  const live = new Set((await $.agent.list()).filter(a => a.status !== 'completed' && a.status !== 'failed' && a.status !== 'killed').map(a => a.id))
   const now = await $.clock.now()
   const all = await update($, agents, list => list.map(a => (a.endedAt === null && !live.has(a.id) ? { ...a, endedAt: now } : a)))
   keepTicking($, all)
@@ -884,11 +888,14 @@ async function setReread($: EngineInterface, turn: number, maxRounds: number) {
           // this one read): that one starts it, RUN_REREAD_MS after the agent's end.
           const isDue = () => reread === null && turn === turnNo && runTurn.ended === 'answer' && !runTurn.isIdle
           // Only a re-read that would start the wait asks the engine which agents it still runs (with no answer,
-          // the list as it is). That awaits, so the run and the task are read after it, and the turn is checked again.
-          const isWorking = isDue() && (await read($, run)) !== null && (await settleAgents($).catch(() => read($, agents))).some(a => a.endedAt === null)
+          // the list as it is). That awaits, so the run and the task are read after it, and the turn is checked again:
+          // the wait needs both answers, since one not due at first never asked about the agents, and a newer
+          // re-read's timer may fire while this one reads on.
+          const wasDue = isDue()
+          const isWorking = wasDue && (await read($, run)) !== null && (await settleAgents($).catch(() => read($, agents))).some(a => a.endedAt === null)
           const isInRun = (await read($, run)) !== null
           const t = await read($, task)
-          if (isDue() && isInRun && !isWorking) {
+          if (wasDue && isDue() && isInRun && !isWorking) {
             runTurn = { ...runTurn, isIdle: true }
             const mine = runTaskOf(t)
             if (!isQuiet && !(mine && isStuck(mine.status))) announce($, waitingText(mine?.slug ?? '', t ? gateNow(t.status) : ''))

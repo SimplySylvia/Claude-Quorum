@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import type { On, UiNotifyResult } from 'claude-code'
+import type { AgentStatus, On, UiNotifyResult } from 'claude-code'
 import type { ElementQuery, Engine, FoundElement } from 'claude-code/testing'
 
 import {
@@ -148,11 +148,11 @@ const settle = async () => {
 // the one that only rings, `unsent`, `reject` (the hook's `{ deny }`), `throw` (the hook throws), or `held`, which
 // answers only when the test calls the resolver pushed to `seen.held`. `seen.toastMs`: each toast's `timeoutMs`,
 // beside `seen.toasts`; `seen.toastFails` makes the toast's hook throw or deny after recording it. `seen.live`: the
-// ids of the agents the engine's own list (`$.agent.list()`) holds as running; `seen.listed`: how often it was asked; `seen.listFails` makes it refuse to answer.
+// ids of the agents the engine's own list (`$.agent.list()`) holds, each `running` and a `quorum:code-reviewer` unless `seen.listedAs` gives that id another status or type; `seen.listed`: how often it was asked; `seen.listFails` makes it refuse to answer.
 function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Record<string, number> = {}, links: string[] = [], o: { cwd?: string; clock?: false } = {}) {
   const seen = {
     status: [] as (string | undefined)[], toasts: [] as string[], toastMs: [] as (number | undefined)[], notified: [] as string[], session: 'sess-a',
-    notify: 'sent' as 'sent' | 'bell' | 'unsent' | 'reject' | 'throw' | 'held', held: [] as ((answer: UiNotifyResult) => void)[], toastFails: '' as '' | 'throw' | 'deny', opened: 0, ticks: 0, live: [] as string[], listed: 0, listFails: false, copied: [] as string[], filled: [] as string[], draft: '', reads: [] as string[], writes: [] as string[],
+    notify: 'sent' as 'sent' | 'bell' | 'unsent' | 'reject' | 'throw' | 'held', held: [] as ((answer: UiNotifyResult) => void)[], toastFails: '' as '' | 'throw' | 'deny', opened: 0, ticks: 0, live: [] as string[], listedAs: {} as Record<string, { type?: string; status?: AgentStatus }>, listed: 0, listFails: false, copied: [] as string[], filled: [] as string[], draft: '', reads: [] as string[], writes: [] as string[],
   }
   // Paths are relative to `root`, or absolute (a worktree's session reads the main working tree's .tasks/).
   const abs = (path: string) => (path.startsWith('/') ? path : `${root}/${path}`)
@@ -191,7 +191,7 @@ function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Re
   on('session.root', () => ({ value: root }))
   on('session.cwd', () => ({ value: o.cwd ?? root }))
   on('session.id', () => ({ value: seen.session }))
-  on('agent.list', () => { seen.listed++; if (seen.listFails) return { deny: 'test' }; return { value: seen.live.map(id => ({ id, description: '', type: 'quorum:code-reviewer', status: 'running' as const, kind: 'local_agent', taskStatus: 'running' as const, label: '', startTime: 0, cwd: o.cwd ?? root, tokenCount: 0, tokenSamples: [0], hasRow: true })) } })
+  on('agent.list', () => { seen.listed++; if (seen.listFails) return { deny: 'test' }; return { value: seen.live.map(id => ({ id, description: '', type: seen.listedAs[id]?.type ?? 'quorum:code-reviewer', status: seen.listedAs[id]?.status ?? 'running', kind: 'local_agent', taskStatus: 'running' as const, label: '', startTime: 0, cwd: o.cwd ?? root, tokenCount: 0, tokenSamples: [0], hasRow: true })) } })
   // Each period of $.clock.every is one dispatch; refusing the first ends that interval, so this counts intervals.
   if (o.clock !== false) on('clock.every', () => { seen.ticks++; return { deny: 'test' } })
   // A $.clock.after timer fires at once on the fixed clock.
@@ -6925,11 +6925,13 @@ function heldQuestions(on: On) {
 }
 // Once `isArmed` is set, the next write of the atom `key` waits for `release`, which is null again once called: a
 // test's way into the middle of a refresh (`run`: between its write of the task and its write of the run) or of a
-// re-read's settling of the agent list (`agents`).
-function heldWrites(on: On, key: 'run' | 'agents') {
+// re-read's settling of the agent list (`agents`). `heldReads` holds the next read of the atom the same way.
+const heldWrites = (on: On, key: 'run' | 'agents') => heldState(on, 'state.set', key)
+const heldReads = (on: On, key: 'task') => heldState(on, 'state.get', key)
+function heldState(on: On, event: 'state.get' | 'state.set', key: string) {
   const hold: { isArmed: boolean; release: (() => void) | null } = { isArmed: false, release: null }
   const register = on as unknown as (event: string, matcher: unknown, hook: unknown) => void
-  register('state.set', { plugin: 'quorum', key }, async (_: unknown, e: unknown, next: (e: unknown) => Promise<unknown>) => {
+  register(event, { plugin: 'quorum', key }, async (_: unknown, e: unknown, next: (e: unknown) => Promise<unknown>) => {
     if (hold.isArmed) {
       hold.isArmed = false
       await new Promise<void>(resolve => { hold.release = () => { hold.release = null; resolve() } })
@@ -6938,7 +6940,7 @@ function heldWrites(on: On, key: 'run' | 'agents') {
   })
   return hold
 }
-const ask =($: Engine, agentId?: string) => $.tool.call({
+const ask = ($: Engine, agentId?: string) => $.tool.call({
   tool: 'AskUserQuestion',
   questions: [{ question: 'Approve the plan?', header: 'Plan', options: [{ label: 'Yes', description: 'Approve it' }, { label: 'No', description: 'Revise it' }], multiSelect: false }],
   ...(agentId ? { agentId } : {}),
@@ -9126,12 +9128,15 @@ test('a run whose agents are still working is going, not waiting', async ($, on)
   const hold = heldWrites(on, 'run')
   // Armed, it holds a re-read where it settles the agent list against the engine's.
   const settling = heldWrites(on, 'agents')
+  // Armed, it holds a re-read at its read of the task, after its refresh and its first look at whether it is due.
+  const reading = heldReads(on, 'task')
   const files = inRun('PLANNING')
   const { seen, clock } = runWorld(on, files)
   await $.session.start(START)
-  // An agent the engine runs is on its own list (`seen.live`) from its start to its end.
+  // An agent the engine runs is on its own list (`seen.live`), with its type, from its start to its end.
   const spawn = (id: string, subagentType: string = RESEARCHER_BG.subagentType) => {
     seen.live.push(id)
+    seen.listedAs[id] = { type: subagentType }
     return $.agent.spawn({ tool_use_id: id, ...RESEARCHER_BG, subagentType })
   }
   const endAgent = (id: string, reason: 'answer' | 'error' | 'aborted' = 'answer') => {
@@ -9335,6 +9340,59 @@ test('a run whose agents are still working is going, not waiting', async ($, on)
   await later(20 * REREAD_MS)
   expect(await reads()).toEqual(GOING)
   expect(seen.notified).toEqual([])
+
+  // A newer re-read's timer firing while the turn's re-read, which found it pending, reads on: that re-read still
+  // starts no wait, and the newer one finds the other agent at work, so the run is going until that agent ends.
+  await startTurn($)
+  await spawn('k1')
+  await spawn('k2')
+  forget(seen)
+  await endTurn($)
+  hold.isArmed = true
+  await later(REREAD_MS)
+  expect(hold.release).not.toBeNull()
+  await endAgent('k1')
+  reading.isArmed = true
+  hold.release?.()
+  await clock.settle()
+  expect(reading.release).not.toBeNull()
+  await later(REREAD_MS)
+  reading.release?.()
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await endAgent('k2')
+  await later(REREAD_MS)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+
+  // An agent the engine's list holds as not yet ended, whatever it says it is doing (not started, waiting on an
+  // Agent call of its own, between turns), is at work: the run is going until that agent's own end.
+  for (const status of ['pending', 'waiting', 'idle'] as const) {
+    await startTurn($)
+    await spawn(`w-${status}`)
+    seen.listedAs[`w-${status}`] = { type: RESEARCHER_BG.subagentType, status }
+    forget(seen)
+    await endTurn($)
+    await later(20 * REREAD_MS)
+    expect({ status, ...(await reads()) }).toEqual({ status, ...GOING })
+    expect(seen.notified).toEqual([])
+    await endAgent(`w-${status}`)
+    await later(REREAD_MS)
+    expect({ status, ...(await reads()) }).toEqual({ status, ...WAITING })
+    expect(seen.notified).toEqual([WAITING_PLAN])
+  }
+  // One the engine's list holds as ended, whose end never reached the dashboard, doesn't hold the wait back.
+  for (const status of ['completed', 'failed', 'killed'] as const) {
+    await startTurn($)
+    await spawn(`e-${status}`)
+    seen.listedAs[`e-${status}`] = { type: RESEARCHER_BG.subagentType, status }
+    forget(seen)
+    await endTurn($)
+    await later(REREAD_MS)
+    expect({ status, ...(await reads()) }).toEqual({ status, ...WAITING })
+    expect(seen.notified).toEqual([WAITING_PLAN])
+  }
 
   // An unended agent the engine no longer runs (its end never reached the dashboard) doesn't hold the wait back:
   // the re-read that would start the wait asks the engine's own list, and the wait starts there. That agent's end,
