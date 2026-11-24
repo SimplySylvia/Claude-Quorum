@@ -46,7 +46,7 @@ again without starting it anew saves over the same file: remove the file before 
 
 4. **Save and show.** Report file: `.tasks/<slug>/pr.md`. Make the description alone (everything after the `---`
    line) from that saved file with a command, not from the reply:
-   `sed '1,/^---$/d' .tasks/<slug>/pr.md > .tasks/<slug>/pr-body.md`, both by that relative path. Check that both are there
+   `sed '1,/^---$/d' .tasks/<slug>/pr.md > .tasks/<slug>/pr-body.md`. Check that both are there
 (`ls .tasks/<slug>/pr.md .tasks/<slug>/pr-body.md`) before going on. Show the reply.
 5. **Next steps for the user,** without running them:
    - If commits are listed under "Drop before merging", give the exact command to remove them (for example
