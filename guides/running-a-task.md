@@ -11,7 +11,7 @@ decide:
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/run-dark.svg">
-    <img src="../assets/run-light.svg" alt="/quorum:run: spec, plan, build, simplify, review loop, blind test, and PR draft, in order, with arrows between them. It stops to ask at the spec (one proposal of slug, tier, research, and docs, plus the models the first time in a repo; --yes accepts all but a HIGH tier; then a follow-up round only if your answers open new questions) and at the plan (mockup sign-off for UI work, then plan approval with the plan's open questions; --yes approves a clean plan except for HIGH), and after the PR draft for your review of MEDIUM and HIGH tasks; it never pushes or opens the PR. It stops if the review loop halts after the round cap or the blind test's fixes don't converge. Blind-test blockers go back to the review loop. LOW tasks skip the blind test and end READY. --until stops after a stage, and running it again continues from the task's status. --fast takes a LOW task through with no spec reviewers, no plan stage, and one reviewer; --worktree builds the task in its own git worktree; --bug reproduces the bug first and is done only when the proof shows it fixed; --deep-research runs lensed researchers in parallel and checks every claim against its source; --map starts the next ready task of a cleared map." width="880">
+    <img src="../assets/run-light.svg" alt="/quorum:run: spec, plan, build, simplify, the early blind test (MEDIUM and HIGH tasks), review loop, blind test, and PR draft, in order, with arrows between them. It stops to ask at the spec (one proposal of slug, tier, research, and docs, plus the models the first time in a repo; --yes accepts all but a HIGH tier; then a follow-up round only if your answers open new questions) and at the plan (mockup sign-off for UI work, then plan approval with the plan's open questions; --yes approves a clean plan except for HIGH), and after the PR draft for your review of MEDIUM and HIGH tasks; it never pushes or opens the PR. It stops if the review loop halts after the round cap or the blind test's fixes don't converge. The early blind test's blockers go to the review loop, to be fixed before review round 1, and the later blind test's blockers go back to it. LOW tasks skip both blind tests and end READY. --until stops after a stage, and running it again continues from the task's status. --fast takes a LOW task through with no spec reviewers, no plan stage, and one reviewer; --worktree builds the task in its own git worktree; --bug reproduces the bug first and is done only when the proof shows it fixed; --deep-research runs lensed researchers in parallel and checks every claim against its source; --map starts the next ready task of a cleared map." width="880">
   </picture>
 </p>
 
@@ -28,8 +28,27 @@ decide:
 
 It never pushes, opens, or merges the PR: it ends with the draft and the commands to run. `--until <stage>`
 (`spec`, `plan`, `build`, `review`, `blind`, or `pr`) stops it earlier, and running it again without a request
-picks up from the task's status, so you can mix it with the single-stage commands. Between stages it prints one
-line per stage; agents' full replies stay in `.tasks/<slug>/`.
+picks up from the task's status, so you can mix it with the single-stage commands. `--until build` stops after the
+simplify pass, before the early blind test. Between stages it prints one line per stage; agents' full replies stay
+in `.tasks/<slug>/`.
+
+**A blind user tries the build before review.** For a MEDIUM or HIGH task, the early blind test runs after the
+build and the simplify pass, before review round 1, so the reviewers read a change that already works. It runs the
+blind user and the friction triage only: the security pass and the live accessibility check wait for the blind test
+after review. Its files are `blind/early-<n>.md` and `blind/early-triage-<n>.md` (and `blind/server-early-<n>.log`
+when the app is a server). The review loop first fixes its blockers and the friction the change caused, and
+round 1 then reviews the build and that fix together. The early blind test never halts the task. After the review
+converges, the blind user runs again, unless all of these hold: the early run was clean (the blind user reported a
+result, and nothing was sent to the review loop), every file changed since then is a test file (or none changed; a
+Markdown file never counts as a test file), and the task is not a UI change. The later blind user is then skipped,
+and `state.md` logs `## Blind test skipped`; a security pass that is due still runs, and reports to
+`blind/security-skipped.md`.
+
+**Agents' reports are saved by a hook.** Each stage ends an agent's prompt with a line `Report file: <path>`, and
+when the agent stops, a hook writes its report to that file under `.tasks/`. The stage waits up to 10 seconds for
+the file, and saves the reply itself if it doesn't appear (an older Claude Code, or the hook is off). The agent
+never writes the file: the line before it in the prompt, and every agent's own rules, say the reply is saved for it
+and must be the report alone.
 
 - **`--fast`** is for LOW tasks: a short spec with no spec reviewers or mockup, no plan round, the build, a review by
   the Logic & Edge-Case Hunter alone (still with the voter and the round cap), the proof, and the PR draft. It drops
@@ -52,8 +71,9 @@ Each stage is also a command of its own, for when you want to stop between them 
 /quorum:plan                   # plan.md: files, reuse, tests, docs, a11y; reviewed, then you approve it
 /quorum:build                  # first build on feat/<slug>, following the plan
 /quorum:simplify-diff          # strip debug code and needless abstractions, re-run checks
+/quorum:blind-test             # MEDIUM/HIGH, the early blind test: a user test with no source access, before review
 /quorum:review-loop            # fresh reviewers check the code against the plan → voter → builder, up to 3 rounds
-/quorum:blind-test             # MEDIUM/HIGH: security pass, then a user test with no source access
+/quorum:blind-test             # MEDIUM/HIGH, after review: security pass, then the user test again, unless skipped
 /quorum:pr-draft               # READY / AWAITING-HUMAN: PR description from the spec and proof
 ```
 

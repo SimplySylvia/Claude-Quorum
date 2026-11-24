@@ -16,6 +16,19 @@ another, the task's branch is checked out in its own git worktree: call `EnterWo
 the writer reads that branch and the push commands run from it. There, run one simple command per Bash call:
 Claude Code refuses a command it can't show stays inside the worktree.
 
+**Reports.** Where a step says `Report file: <path>`, a hook saves that agent's report there, so you don't retype
+it. Before you start the agent, `rm -f <path>`. Make `Report file: <path>` the last line of its prompt, on a line of
+its own with nothing before it and the path bare (no backticks or quotes, and no `//`); the path is the relative one
+you would save to yourself, under `.tasks/` of the folder you work in (the main working tree, or the task's own
+worktree). Just before it, on a line of its own, put these words as they are: "A hook saves your final reply to the
+file named on the next line. Don't write that file and don't mention it: reply with the report alone, with no note
+about saving it and no code fence around the whole report." The two lines go together: a step that names a prompt's
+`Report file:` line means both. The hook runs a second or two after the report reaches you, so when the agent has
+handed back, wait for the file to be there and not empty: check `test -s <path>` about once a second, for up to 10
+seconds. If it still isn't (an older Claude Code, or the hook is off), save the reply verbatim to that path
+yourself. An agent you ask again without starting it anew saves over the same file: remove the file before you ask,
+and wait the same way.
+
 1. **Check the status.** `quorum-state --task <slug> get status` must be `READY` or `AWAITING-HUMAN`. Otherwise
    say which command comes next (`pipeline-laws` has the stage map) and stop.
 2. **Check the proof.** `.tasks/<slug>/proof-final.md` must exist with no failed check: `Result: ALL PASS`, or
@@ -30,12 +43,19 @@ Claude Code refuses a command it can't show stays inside the worktree.
 
    > Task `<slug>`. Base commit `<quorum-state get base_sha>`. Draft the PR title and description, and list any
    > commits that must not ship. Read `CLAUDE.md`, `.tasks/<slug>/rd.md`, `state.md`, `proof-final.md`, and
-   > `.tasks/<slug>/blind/` if it exists. <With skipped checks: "These checks were skipped, not passed: <ids and
-   > reasons>. List them as not run.">
+   > `.tasks/<slug>/blind/` if it exists. Files named `blind/early-*` are from the early blind test, which ran
+   > before review: its blockers were fixed before round 1, so cite it as an early check, not as a test of the final
+   > code. If `state.md` logs `## Blind test skipped`, there is no blind-user report on the final code: say so.
+   > <With skipped checks: "These checks were skipped, not passed: <ids and reasons>. List them as not run.">
 
-4. **Save and show.** Save its reply verbatim to `.tasks/<slug>/pr.md`, and the description alone (everything
-   after the `---` line) to `.tasks/<slug>/pr-body.md`, both by that relative path. Check that both are there
-(`ls .tasks/<slug>/pr.md .tasks/<slug>/pr-body.md`) before going on. Show the reply.
+4. **Save and show.** Report file: `.tasks/<slug>/pr.md`. Make the description alone (everything after the `---`
+   line) from that saved file with a command, not from the reply:
+   `sed '1,/^---$/d' .tasks/<slug>/pr.md > .tasks/<slug>/pr-body.md`.
+   Check that both are there and not empty (`test -s .tasks/<slug>/pr.md`, then `test -s .tasks/<slug>/pr-body.md`)
+   before going on. An empty `pr-body.md` means the saved reply has no line that is `---` alone (a trailing space,
+   or no such line): don't go on with an empty description, since `gh pr create --body-file` would open a PR without
+   one. Ask the PR writer again for its format, with `---` alone on the line before the description (remove `pr.md`
+   first, as **Reports.** says), and run the command again. Show the reply.
 5. **Next steps for the user,** without running them:
    - If commits are listed under "Drop before merging", give the exact command to remove them (for example
      `git rebase --onto <sha> <sha>^`, or an interactive rebase they run themselves), and say to rerun the fast

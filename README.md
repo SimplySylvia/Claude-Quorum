@@ -5,9 +5,9 @@
 # Quorum
 
 **Quorum checks Claude Code's work at every stage, with separate agents that have to agree. The spec and the plan
-are reviewed before any code exists, fresh-context reviewers check the code against them, a blind user tries the
-result, and nothing counts as done without proof. Take a task from spec to pull request, review any diff, or map an
-effort too big for one task.**
+are reviewed before any code exists, a blind user tries the build before fresh-context reviewers check the code
+against them, and nothing counts as done without proof. Take a task from spec to pull request, review any diff, or
+map an effort too big for one task.**
 
 <p>
   <a href="https://code.claude.com/docs/en/plugins-reference"><img src="https://img.shields.io/badge/Claude_Code-plugin-D97757?logo=claude&logoColor=white" alt="Claude Code plugin"></a>
@@ -60,7 +60,7 @@ Then, in the repo you want to protect:
 
 ```
 /quorum:init-pipeline                            # once: CLAUDE.md, REVIEW.md, verify-completion.sh, .tasks/
-/quorum:run Add a CSV export to the sales report # spec → plan → build → review → blind test → PR draft
+/quorum:run Add a CSV export to the sales report # spec → plan → build → blind test → review → blind test → PR draft
 ```
 
 `/quorum:run` stops only where you must decide, and running it again continues where the task stopped. It never
@@ -79,13 +79,14 @@ pushes or opens the PR.
 ## How it works
 
 A task moves through stages, and each stage catches what the others miss: the spec is reviewed, then the plan, then
-the build is proven and reviewed in rounds, a blind user tries it, and you review the PR. Each band below is a
-command, and the chips are the agents it starts. No agent sees the conversation that produced the code.
+the build is proven, a blind user tries it before the reviewers read it (the early blind test, for MEDIUM and HIGH
+tasks), the code is reviewed in rounds, a blind user tries the reviewed code, and you review the PR. Each band
+below is a command, and the chips are the agents it starts. No agent sees the conversation that produced the code.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/agent-map-dark.svg">
-    <img src="assets/agent-map-light.svg" alt="Agent map. Bootstrap writes CLAUDE.md's Verification Commands, REVIEW.md, and the check script. Spec and eval: researcher (MEDIUM/HIGH), then the spec, linted and every check tried once, then two spec reviewers in parallel; --bug reproduces the bug first, and --deep-research uses lensed researchers instead. Plan: the planner writes plan.md, the same reviewers as the review loop check it in plan mode, the voter drops false alarms, the planner revises up to twice, and you approve it. Build: builder, test first and with the checks locked, then prover; with --worktree, in the task's own git worktree, and for a plan of 4 or more steps, a builder per step. Review loop: up to six reviewers in parallel by tier and by what changed, then the verifier-voter; surviving IMPORTANT findings go to the builder and back into review, and after round 3 the task halts for a redesign. Security and blind test (MEDIUM/HIGH): security reviewer, blind user, live accessibility check, friction triager, prover; blockers go back to the review loop. Human gate: pr-writer, citing each requirement's verdict, then you review and merge. Apart from the stages, review any diff with /quorum:review: the review loop's reviewers by tier, plus security for HIGH, then the verifier-voter, one round, with no task needed; --fix hands the kept findings to the builder, and --comment posts them as a GitHub review after you approve. Research a question, also apart from the stages, with /quorum:research: researchers through four lenses (repo, docs, alternatives, counter) in parallel, then quorum-research-check, the source-verifier, and research.md with viability and candidate tasks, creating no task. Map a large effort, also apart from the stages, with /quorum:map: grilling rounds for the destination and then breadth-first, a researcher per research ticket (deep research for weighty ones), quorum-map check, and tasks.md once the map is cleared; then one ticket per run, with a facts-only researcher before a code question and the spec-reviewer's decision check before it's recorded, where only you answer grilling and prototype tickets; then the map-mode reviewers (architecture, patterns, security for HIGH) and the verifier-voter on the breakdown, and spec-and-eval --from-map for each task once its blockers merge. The band notes that it plans only: a hook blocks building. A last line notes that /quorum:run follows stages 1 to 8 in order by itself, stopping only where you decide." width="880">
+    <img src="assets/agent-map-light.svg" alt="Agent map. Bootstrap writes CLAUDE.md's Verification Commands, REVIEW.md, and the check script. Spec and eval: researcher (MEDIUM/HIGH), then the spec, linted and every check tried once, then two spec reviewers in parallel; --bug reproduces the bug first, and --deep-research uses lensed researchers instead. Plan: the planner writes plan.md, the same reviewers as the review loop check it in plan mode, the voter drops false alarms, the planner revises up to twice, and you approve it. Build: builder, test first and with the checks locked, then prover; with --worktree, in the task's own git worktree, and for a plan of 4 or more steps, a builder per step. From the build to the review loop, a MEDIUM or HIGH task gets the early blind test first. Review loop: up to six reviewers in parallel by tier and by what changed, then the verifier-voter; surviving IMPORTANT findings go to the builder and back into review, and after round 3 the task halts for a redesign. Security and blind test (MEDIUM/HIGH): security reviewer, blind user, live accessibility check, friction triager, prover; blockers go back to the review loop; its early run, before review, is the blind user and the triage only. Human gate: pr-writer, citing each requirement's verdict, then you review and merge. Apart from the stages, review any diff with /quorum:review: the review loop's reviewers by tier, plus security for HIGH, then the verifier-voter, one round, with no task needed; --fix hands the kept findings to the builder, and --comment posts them as a GitHub review after you approve. Research a question, also apart from the stages, with /quorum:research: researchers through four lenses (repo, docs, alternatives, counter) in parallel, then quorum-research-check, the source-verifier, and research.md with viability and candidate tasks, creating no task. Map a large effort, also apart from the stages, with /quorum:map: grilling rounds for the destination and then breadth-first, a researcher per research ticket (deep research for weighty ones), quorum-map check, and tasks.md once the map is cleared; then one ticket per run, with a facts-only researcher before a code question and the spec-reviewer's decision check before it's recorded, where only you answer grilling and prototype tickets; then the map-mode reviewers (architecture, patterns, security for HIGH) and the verifier-voter on the breakdown, and spec-and-eval --from-map for each task once its blockers merge. The band notes that it plans only: a hook blocks building. A last line notes that /quorum:run follows stages 1 to 8 in order by itself, stopping only where you decide." width="880">
   </picture>
 </p>
 
@@ -117,7 +118,8 @@ Every option, agent, and setting is in the [Reference](guides/reference.md).
 - **Every requirement gets a verdict,** with the `file:line` that does the work.
 - **Secrets stay out.** Reading credential files and committing what looks like a key are blocked.
 - **Maps don't build.** A map session can only write its own plans.
-- **Quiet outside a task.** Apart from the secret guard, the hooks do nothing unless a task is running.
+- **Quiet outside a task.** Apart from the secret guard and the report hook, which only saves an agent's report to
+  the file its prompt names, the hooks do nothing unless a task is running.
 
 The full list, and what the guards don't catch, is in [Guardrails and known limits](guides/guardrails.md).
 

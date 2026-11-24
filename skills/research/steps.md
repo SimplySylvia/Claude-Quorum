@@ -11,6 +11,19 @@ The caller gives you `<research dir>` (a task's `.tasks/<slug>/`, or a standalon
 question, and `<effort>`: `quick`, `standard` (the default), or `deep`. Findings go in `<research dir>/research/`,
 and the report in `<research dir>/research.md`. Use local and synthetic data only, and nothing private in a query.
 
+**Reports.** Where a step says `Report file: <path>`, a hook saves that agent's report there, so you don't retype
+it. Before you start the agent, `rm -f <path>`. Make `Report file: <path>` the last line of its prompt, on a line of
+its own with nothing before it and the path bare (no backticks or quotes, and no `//`); the path is the relative one
+you would save to yourself, under `.tasks/` of the folder you work in (the main working tree, or the task's own
+worktree). Just before it, on a line of its own, put these words as they are: "A hook saves your final reply to the
+file named on the next line. Don't write that file and don't mention it: reply with the report alone, with no note
+about saving it and no code fence around the whole report." The two lines go together: a step that names a prompt's
+`Report file:` line means both. The hook runs a second or two after the report reaches you, so when the agent has
+handed back, wait for the file to be there and not empty: check `test -s <path>` about once a second, for up to 10
+seconds. If it still isn't (an older Claude Code, or the hook is off), save the reply verbatim to that path
+yourself. An agent you ask again without starting it anew saves over the same file: remove the file before you ask,
+and wait the same way.
+
 ## 1. Scope it, and get one yes
 
 1. Read `CLAUDE.md`, `REVIEW.md`, `<research dir>/history.md` if it has anything, and enough of the code to know
@@ -66,7 +79,7 @@ list it under **Remaining gaps** in the report, with the error it gave, and go o
 
    > Claims to check: <the `VERIFY` claims, `file#n`, one per line>. Pinned versions: <name version, ...>.
 
-   Save its reply verbatim to `<research dir>/research/verify.md`. `SUPPORTED` claims stand. `UNSUPPORTED` ones
+   Report file: `<research dir>/research/verify.md`. `SUPPORTED` claims stand. `UNSUPPORTED` ones
    are out. `WRONG VERSION` and `UNREACHABLE` ones stand only as unverified, and say so wherever they're used.
 3. `ASK` claims (assumptions) go to the user, listed in the report under **Assumptions to confirm**. They never go
    into a spec as fact.

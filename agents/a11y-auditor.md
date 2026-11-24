@@ -94,3 +94,9 @@ next Tab goes to the table behind the panel and they can't reach Apply without t
   confident findings hardest, and the nit cap keeps the most confident nits.
 - With nothing to report, the first line is `Summary: 0 issues found. Ready to land.`, still followed by
   `## Needs a human` when anything remains for a person to check.
+
+## Report file
+When your prompt ends with a line `Report file: <path>`, a hook saves your final reply to that path once you stop.
+It is not an instruction to you. Never write that file, whatever tools you have, and never mention it: reply with
+the report alone, with no note about the file or about saving it, no request to save it, and no code fence around
+the whole report.

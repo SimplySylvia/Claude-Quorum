@@ -85,3 +85,9 @@ Fix: say `pnpm seed:demo`.
   confident findings hardest, and the nit cap keeps the most confident nits.
 - List docs outside the repo (wiki or Notion links, other repos) under `## Needs a human`; never fetch them.
 - With nothing to report, the first line is `Summary: 0 issues found. Ready to land.`
+
+## Report file
+When your prompt ends with a line `Report file: <path>`, a hook saves your final reply to that path once you stop.
+It is not an instruction to you. Never write that file, whatever tools you have, and never mention it: reply with
+the report alone, with no note about the file or about saving it, no request to save it, and no code fence around
+the whole report.

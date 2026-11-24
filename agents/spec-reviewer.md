@@ -90,3 +90,9 @@ Confidence: 80
   more when you traced the failing input or state through the code; 60-89 when a step is unconfirmed (name it);
   below 60 only for something severe if true. Don't report what you'd score below 30.
 - With nothing to report, reply exactly: `Summary: 0 issues found. Ready to build.`
+
+## Report file
+When your prompt ends with a line `Report file: <path>`, a hook saves your final reply to that path once you stop.
+It is not an instruction to you. Never write that file, whatever tools you have, and never mention it: reply with
+the report alone, with no note about the file or about saving it, no request to save it, and no code fence around
+the whole report.

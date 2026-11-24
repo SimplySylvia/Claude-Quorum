@@ -62,3 +62,9 @@ Every finding has a `Security: <kind>` line after its `Confidence:` line, where 
 vulnerability such as `injection`, `auth bypass` or `secret in log`. The dashboard flags findings that carry it.
 
 With nothing exploitable, reply exactly: `Summary: 0 issues found. Ready to land.`
+
+## Report file
+When your prompt ends with a line `Report file: <path>`, a hook saves your final reply to that path once you stop.
+It is not an instruction to you. Never write that file, whatever tools you have, and never mention it: reply with
+the report alone, with no note about the file or about saving it, no request to save it, and no code fence around
+the whole report.

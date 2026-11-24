@@ -16,6 +16,11 @@ claude plugin test .                          # the dashboard's tests in tests/d
 
 CI runs all four on every push and pull request: bats and shellcheck on Linux and on macOS (system bash 3.2).
 
+`hooks/save-report.sh` runs on `SubagentStop` and saves an agent's report to the file the last `Report file:` line
+of its prompt names, under `.tasks/`; `tests/hooks/save-report.bats` feeds it inputs and agent transcripts in the
+shape Claude Code gives. A step that starts an agent whose report is kept names the file that way, and waits up to
+10 seconds for it before saving the reply by hand.
+
 **Windows note.** Run the checks under Git Bash, with `shellcheck` and `jq` installed and on its `PATH`. CI doesn't
 run on Windows, and the bats suites aren't run there. `.gitattributes` keeps every text file LF on every platform,
 whatever `core.autocrlf` says, because `shellcheck` and `claude plugin validate` reject CRLF. A clone made before

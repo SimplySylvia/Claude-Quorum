@@ -48,7 +48,10 @@ finished with its PR open.</sub>
       test stage shows for that run: the blind user and friction triage (each `no report` when its file is
       missing), and the accessibility and security reports when they were written. An amber row opens by itself,
       and a press's choice is kept per task. A LOW task, a task with no blind run, and the Blind test stage itself
-      show no such row.
+      show no such row. Nor does a task whose later blind user was skipped: the early blind test is not counted
+      as a run, and the dashboard doesn't show its files. During the early blind test the task is still
+      `BUILDING`, so the pane shows the Build stage; after it the title reads `Code review, round 0 of 3` until
+      round 1 starts, which is after the fix when the early run found blockers.
   - **Folding sections:** Requirements, Checks, Review rounds (the plan's rounds and the code's, side by side), Spend
     (tokens and models used, the models the task chose, and a warning when an agent ran on another), Other tasks,
     and Other agents. A section with a problem opens by itself.

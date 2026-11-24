@@ -91,7 +91,7 @@ says stop, after the stage `--until` names, or after 12 stages in one run (then 
 | `DRAFT-AWAITING-VISUAL-SIGNOFF`, `PLANNING` | `plan` | the slug, plus `--yes` as given unless the risk is HIGH | `plan` |
 | `BUILDING`, `base_sha` not set | `build` | the slug, plus `--worktree` as given | `build` |
 | `BUILDING`, `base_sha` set, and `quorum-plan next` prints a step (a sliced build that stopped partway) | `build` | the slug | `build` |
-| `BUILDING`, `base_sha` set, every step built | `simplify-diff`, then `review-loop` | none | `build` (before the review loop) |
+| `BUILDING`, `base_sha` set, every step built | first `rm -f .tasks/<slug>/.blind-mode-active` and stop any server a cut-off early blind test left running; then `simplify-diff`; then, for a MEDIUM or HIGH task, `blind-test` (its early blind test: the status is still `BUILDING`); then `review-loop`. A LOW or fast-path task goes from `simplify-diff` to `review-loop` | none | `build` (after `simplify-diff`, before the early blind test) |
 | `IN_REVIEW` | `review-loop` | none | `review` |
 | `CONVERGED` | `blind-test` | none | `blind` |
 | `BLIND-TEST` | an earlier blind test was cut off: `rm -f .tasks/<slug>/.blind-mode-active .tasks/.blind-mode-active`, stop any server it left running, `quorum-state set status CONVERGED`, say so, and follow `blind-test` | none | `blind` |
@@ -119,7 +119,8 @@ says stop, after the stage `--until` names, or after 12 stages in one run (then 
   loop, which reaches that stage by its status. A stage's steps that say "stop" end that stage, not the run, unless
   the status didn't change (a precondition failed): then stop the run, say why, and what fixes it, and run
   `quorum-run leave` (section 4).
-- **Keep the chat short.** Agents' replies go to the files the steps name, verbatim, as always. In the chat, show a
+- **Keep the chat short.** Agents' reports go to the files the steps name: the hook saves them, and you save one by hand only where
+  a step finds its file missing. In the chat, show a
   gate's content in full (the research options, the spec review, the plan, the summary before human review), and
   for everything else one line per stage: what ran and its result, for example
   `▸ Review round 1: 1 IMPORTANT kept (Unescaped CSV fields) → builder`.

@@ -1,6 +1,6 @@
 ---
 name: review-loop
-description: Run Quorum's review loop on the active task. Fresh-context reviewers audit only the new lines, a verifier-voter drops false alarms, and the builder fixes each surviving Pattern Category everywhere it appears, for up to max_rounds rounds. Ends CONVERGED (LOW tasks get their final summary) or HALTED with a post-mortem. Run after /quorum:build and /quorum:simplify-diff, and again after /quorum:blind-test finds problems.
+description: Run Quorum's review loop on the active task. Fresh-context reviewers audit only the new lines, a verifier-voter drops false alarms, and the builder fixes each surviving Pattern Category everywhere it appears, for up to max_rounds rounds. Ends CONVERGED (LOW tasks get their final summary) or HALTED with a post-mortem. Run after /quorum:build and /quorum:simplify-diff (for MEDIUM or HIGH, after the early blind test, whose blockers it fixes before round 1), and again after /quorum:blind-test finds problems.
 disable-model-invocation: true
 argument-hint: "[--models]"
 ---

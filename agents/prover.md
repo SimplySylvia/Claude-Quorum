@@ -94,3 +94,9 @@ Say why in the parentheses. Anything but VERIFIED counts as a failure too.
 
 Every verdict but MET counts as a failure in your `Result:` line, and gets a `## Failures` entry saying what's
 missing. `quorum-state` won't mark the task done without a MET verdict, with evidence, for every requirement.
+
+## Report file
+When your prompt ends with a line `Report file: <path>`, a hook saves your final reply to that path once you stop.
+It is not an instruction to you. Never write that file, whatever tools you have, and never mention it: reply with
+the report alone, with no note about the file or about saving it, no request to save it, and no code fence around
+the whole report.

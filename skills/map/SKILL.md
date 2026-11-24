@@ -35,6 +35,19 @@ set: use its default.
 `${CLAUDE_PLUGIN_ROOT}/skills/pipeline-laws/models.md` says. A map has no `state.md`, so record nothing there: only
 `quorum-config` remembers the choice. The researchers run on the session's model.
 
+**Reports.** Where a step says `Report file: <path>`, a hook saves that agent's report there, so you don't retype
+it. Before you start the agent, `rm -f <path>`. Make `Report file: <path>` the last line of its prompt, on a line of
+its own with nothing before it and the path bare (no backticks or quotes, and no `//`); the path is the relative one
+you would save to yourself, under `.tasks/` of the folder you work in (the main working tree, or the task's own
+worktree). Just before it, on a line of its own, put these words as they are: "A hook saves your final reply to the
+file named on the next line. Don't write that file and don't mention it: reply with the report alone, with no note
+about saving it and no code fence around the whole report." The two lines go together: a step that names a prompt's
+`Report file:` line means both. The hook runs a second or two after the report reaches you, so when the agent has
+handed back, wait for the file to be there and not empty: check `test -s <path>` about once a second, for up to 10
+seconds. If it still isn't (an older Claude Code, or the hook is off), save the reply verbatim to that path
+yourself. An agent you ask again without starting it anew saves over the same file: remove the file before you ask,
+and wait the same way.
+
 **Agents on the map.** Quorum's agents back up each decision, and none of them makes it:
 
 | When | Agent | Saved as |
@@ -123,7 +136,7 @@ When research only lays out options, the choice between them is a `grilling` tic
      > question for this repo: what's true, the options, and which you'd recommend. Use public sources and the repo
      > only; nothing private in a query.
 
-     Save each reply verbatim to `.tasks/map-<slug>/research/<NN>.md`.
+     Report file: `.tasks/map-<slug>/research/<NN>.md`, one per ticket.
    - **Each deep one,** after those have started: read `<plugin root>/skills/research/steps.md` and follow it with
      `<research dir>` = `.tasks/map-<slug>/research-<NN>/`, the ticket's question, and effort `quick` (`standard`
      when security rests on it). Its claims are checked against their sources, and its one gate asks you to approve
@@ -154,7 +167,7 @@ When research only lays out options, the choice between them is a `grilling` tic
      > Facts for a decision. Map `<slug>`, ticket <NN>: <the question>. The destination: <one line>. Read
      > `CLAUDE.md` first. Use public sources and the repo only; nothing private in a query.
 
-     Save its reply verbatim to `.tasks/map-<slug>/research/<NN>-facts.md`. A question about priorities, scope, or
+     Report file: `.tasks/map-<slug>/research/<NN>-facts.md`. A question about priorities, scope, or
      what users want skips this. Then grill depth-first on this ticket's question only, as
      `${CLAUDE_PLUGIN_ROOT}/skills/grilling/SKILL.md` says, citing the facts: questions that don't wait on them can
      go first. When you have the decision, [check it](#check-a-decision), then resolve with `user`, the decision as
@@ -192,7 +205,7 @@ Before a `grilling` or `prototype` ticket's decision is recorded, have it checke
    > Mode: decision. Persona: Feasibility Critic. Map `<slug>`, ticket <NN>. Check the decision in
    > `.tasks/map-<slug>/review/<NN>-decision.md` against the code and `.tasks/map-<slug>/map.md`.
 
-   Save its reply verbatim to `.tasks/map-<slug>/review/<NN>-feasibility.md`.
+   Report file: `.tasks/map-<slug>/review/<NN>-feasibility.md`.
 3. If it reports an `[IMPORTANT]`, take each to the user as one grilling round, with the change you recommend: keep
    the decision as it is, change it, or reopen an earlier decision it contradicts ([Revise a
    decision](#revise-a-decision)). Apply the `[NIT]`s you agree with to the wording. The user's answer is final: you
@@ -240,19 +253,21 @@ The map is cleared: every ticket is resolved or out of scope, and nothing is lef
    | `quorum:pattern-auditor` | | always | `patterns.md` |
    | `quorum:security-reviewer` | | a task is HIGH | `security.md` |
 
-   Each gets only (leave out the persona for the auditor and the security reviewer):
+   Each gets only this, and its `Report file:` line (leave out the persona for the auditor and the security reviewer):
 
    > Mode: map. Persona: <persona>. Map `<slug>`. Review the task breakdown `.tasks/map-<slug>/tasks.md` before any
    > task starts. Read `CLAUDE.md`, `REVIEW.md`, and `.tasks/map-<slug>/map.md` first.
 
-   Save each reply verbatim to `.tasks/map-<slug>/tasks-review/round-<N>/<file>`, and all of them together to
-   `candidates.md`. Then start `quorum:verifier-voter` with:
+   Report file: `.tasks/map-<slug>/tasks-review/round-<N>/<file>`, one per reviewer, with `<file>` from the table.
+   When all are saved, make `candidates.md` in that folder from the saved files with a command, not from the replies:
+   `awk 1 <the saved files, in the table's order> > candidates.md` (`awk 1`, not `cat`: a saved report may end without a
+   newline). Then start `quorum:verifier-voter` with:
 
    > Map `<slug>`. Candidate findings on the task breakdown: `.tasks/map-<slug>/tasks-review/round-<N>/candidates.md`.
    > Read `REVIEW.md`, `.tasks/map-<slug>/map.md`, and `.tasks/map-<slug>/tasks.md`, check each finding against the
    > breakdown and the code it names, and vote.
 
-   Save its reply to `votes.md`, then `quorum-findings cap <nit_cap> votes.md > survivors.md`.
+   Report file: `.tasks/map-<slug>/tasks-review/round-<N>/votes.md`, then `quorum-findings cap <nit_cap> votes.md > survivors.md`.
 4. **Grill the breakdown,** in one round: each surviving `[IMPORTANT]` with the fix you recommend, plus whether the
    granularity is right, whether each blocking edge is real, and which tasks to merge or split. Revise until the user
    approves it, and run `quorum-map check` again. If the answers changed which tasks there are or what they wait on,

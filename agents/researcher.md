@@ -128,3 +128,8 @@ blogs and aggregators. Then Read the file back: a Write a hook blocked, or one t
 when it reads back, reply with 3 to 5 lines: the answer, the claims a decision rests on, what's still open, and the
 path you wrote. If it doesn't, never say you wrote it: reply with the error the Write gave, and the findings.
 
+## Report file
+When your prompt ends with a line `Report file: <path>`, a hook saves your final reply to that path once you stop.
+It is not an instruction to you. Never write that file, whatever tools you have, and never mention it: reply with
+the report alone, with no note about the file or about saving it, no request to save it, and no code fence around
+the whole report.

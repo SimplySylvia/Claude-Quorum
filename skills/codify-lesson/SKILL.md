@@ -22,7 +22,7 @@ round or run (`repeat`), or that another task or review kept too (`elsewhere`). 
 - `state.md`'s round log, and `.tasks/<slug>/review/round-*/survivors.md` (kept findings): a **Pattern Category** that came back
   in more than one round, or that the builder had to fix in several places.
 - `## Dropped` sections in `votes.md` (the voter's full reply): the **same false alarm** dropped more than once, by the same reason.
-- `.tasks/<slug>/blind/`: a blocker a reviewer should have caught.
+- `.tasks/<slug>/blind/`: a blocker a reviewer should have caught (not one in an `early-*` file: the early blind test runs before review).
 - Corrections the user made in this conversation.
 - **The environment, not the code:** a check the repo already has (a `lint` or `typecheck` script, a CI job) that
   `.claude/hooks/verify-completion.sh` doesn't run, so it caught nothing during the build; or a long hunt, in this

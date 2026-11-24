@@ -9,7 +9,9 @@ as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers alr
 Use the slug in `<arguments>`, or `quorum-active-task`. Work from the repo root.
 
 **Picking up a sliced build.** If `base_sha` is set and `quorum-state get built_steps` lists any step, an earlier
-build stopped partway: skip to step 3 and build from `quorum-plan next`.
+build stopped partway: do step 1's **A left-over blind marker.** check, then skip to step 3 and build from
+`quorum-plan next`. The check comes first on this path too: the early blind test starts once every step is built, so
+a cut-off one leaves its marker on a task this paragraph picks up.
 
 **Worktree.** If `quorum-state get worktree` prints a path and `quorum-active-task --code` prints another, the
 task's code is in its own git worktree: call `EnterWorktree` with that `path` first, so you and the agents you start
@@ -20,12 +22,30 @@ variables in a git command: Claude Code refuses a command it can't show stays in
 unfinished as `INTERRUPTED`, and removes a `--fix` marker it left, which would otherwise point this task's builder
 at the review. If it prints ids, mention them in one line.
 
+**Reports.** Where a step says `Report file: <path>`, a hook saves that agent's report there, so you don't retype
+it. Before you start the agent, `rm -f <path>`. Make `Report file: <path>` the last line of its prompt, on a line of
+its own with nothing before it and the path bare (no backticks or quotes, and no `//`); the path is the relative one
+you would save to yourself, under `.tasks/` of the folder you work in (the main working tree, or the task's own
+worktree). Just before it, on a line of its own, put these words as they are: "A hook saves your final reply to the
+file named on the next line. Don't write that file and don't mention it: reply with the report alone, with no note
+about saving it and no code fence around the whole report." The two lines go together: a step that names a prompt's
+`Report file:` line means both. The hook runs a second or two after the report reaches you, so when the agent has
+handed back, wait for the file to be there and not empty: check `test -s <path>` about once a second, for up to 10
+seconds. If it still isn't (an older Claude Code, or the hook is off), save the reply verbatim to that path
+yourself. An agent you ask again without starting it anew saves over the same file: remove the file before you ask,
+and wait the same way.
+
 ## 1. Check the status
 
 `quorum-state get status` must be `BUILDING`, and `quorum-state get plan_approved` must be set (`/quorum:plan`
 records it when the user approves `plan.md`), unless `quorum-state get fast` is `true`: a fast-path task has no plan.
 Otherwise say what the status is and which command comes next (see
 the `pipeline-laws` skill's stage map), then stop.
+
+**A left-over blind marker.** If `.tasks/<slug>/.blind-mode-active` is there, a blind test of this task was cut off:
+`rm -f .tasks/<slug>/.blind-mode-active`, stop any server it left running, and say so in one line. While it is there
+the source guard keeps this session and its agents from reading the code. If you know a blind test of this task is
+running in another session right now, leave the marker and stop instead: two stages can't work on one task at once.
 
 ## 2. Branch
 
@@ -103,7 +123,7 @@ printed to stderr, if it printed one. Then start `quorum:prover`:
 > those whose Passes when starts with `Final proof only.`: the final proof runs those, so report each with Result
 > `SKIPPED` and Evidence `final proof only`. Read `CLAUDE.md` first.
 
-Save its reply verbatim to `.tasks/<slug>/proof-build.md` and show it. If any row fails, say which, and offer to
+Report file: `.tasks/<slug>/proof-build.md`, and show it. If any row fails, say which, and offer to
 start the builder again with the failures.
 
-The next steps are `/quorum:simplify-diff`, then `/quorum:review-loop`.
+The next steps are `/quorum:simplify-diff`, then `/quorum:review-loop`; for a MEDIUM or HIGH task the early blind test (`/quorum:blind-test`) comes first, between the two.

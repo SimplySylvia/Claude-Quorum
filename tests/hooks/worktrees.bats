@@ -73,3 +73,29 @@ hook() {
   [ "$("$BIN/quorum-state" --task demo get pr)" = "https://github.com/acme/app/pull/7" ]
   [ -z "$("$BIN/quorum-state" --task other get pr)" ]
 }
+
+# report_stop CWD PATH: a reviewer whose prompt ends in "Report file: PATH" stops in CWD, having handed back "the report".
+report_stop() {
+  local t="$BATS_TEST_TMPDIR/agent.jsonl"
+  jq --binary -cn --arg p "Review the diff."$'\n'"Report file: $2" '{type: "user", message: {role: "user", content: $p}}' > "$t"
+  jq --binary -cn '{type: "assistant", message: {role: "assistant", content: [{type: "tool_use", name: "SubagentHandback", input: {message: "the report"}}]}}' >> "$t"
+  hook save-report.sh SubagentStop "$1" "$(jq -n --arg t "$t" '{agent_type: "quorum:code-reviewer", agent_transcript_path: $t}')"
+}
+
+@test "a report from a task's worktree is saved under that worktree's .tasks" {
+  # A /quorum:review run from the worktree keeps its folder in the worktree's .tasks/, not the main tree's.
+  run report_stop "$WT" .tasks/review-1/out.md
+  [ "$status" -eq 0 ]; [ -z "$output" ]
+  [ "$(cat "$WT/.tasks/review-1/out.md")" = "the report" ]
+  [ ! -e "$MAIN/.tasks/review-1" ]
+}
+
+@test "a report for a task linked into its worktree is written through the link" {
+  # The main tree's .tasks/demo is a link into the worktree: the path check reads the path as written, so a
+  # session in the main tree saves a report for that task.
+  [ -L "$MAIN/.tasks/demo" ] || skip "ln -s made no link here (Git Bash copies the folder)"
+  run report_stop "$MAIN" .tasks/demo/review/out.md
+  [ "$status" -eq 0 ]; [ -z "$output" ]
+  [ "$(cat "$WT/.tasks/demo/review/out.md")" = "the report" ]
+  [ "$(cat "$MAIN/.tasks/demo/review/out.md")" = "the report" ]
+}

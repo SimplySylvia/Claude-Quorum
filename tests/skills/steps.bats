@@ -77,3 +77,280 @@ VALUES="plugin root|session|arguments|max_rounds|nit_cap|security_on_medium|revi
   done
   cleanup_repo
 }
+
+# The nine files whose steps have an agent's report saved by hooks/save-report.sh.
+REPORT_FILES="skills/spec-and-eval/steps.md skills/plan/steps.md skills/build/steps.md skills/review-loop/steps.md
+skills/blind-test/steps.md skills/pr-draft/steps.md skills/research/steps.md skills/review/SKILL.md skills/map/SKILL.md"
+
+# The line a prompt carries just before its `Report file:` line.
+REPORT_NOTE="A hook saves your final reply to the file named on the next line. Don't write that file and don't mention it: reply with the report alone, with no note about saving it and no code fence around the whole report."
+
+# The **Reports.** paragraph of a file, as one line.
+reports_rule() {
+  awk '/^\*\*Reports\.\*\*/ { f = 1 } f && /^[[:space:]]*$/ { exit } f' "$REPO_ROOT/$1" | tr '\n' ' ' | tr -s ' ' | sed 's/ $//'
+}
+
+# A file without its **Reports.** paragraph: what its steps say.
+reports_sites() {
+  awk '/^\*\*Reports\.\*\*/ { f = 1 } f && /^[[:space:]]*$/ { f = 0 } !f' "$REPO_ROOT/$1"
+}
+
+@test "each of the nine files that save a report names its Report file" {
+  # One line per save site: the file, then the line its step must hold.
+  while IFS='|' read -r f want; do
+    [ -n "$f" ] || continue
+    reports_sites "$f" | grep -qF -- "$want" || { echo "$f has no: $want"; return 1; }
+  done <<'SITES'
+skills/spec-and-eval/steps.md|Report file: `.tasks/<slug>/research.md`
+skills/spec-and-eval/steps.md|Report file: `.tasks/<slug>/spec-review/feasibility.md`
+skills/spec-and-eval/steps.md|Report file: `.tasks/<slug>/spec-review/improver.md`
+skills/plan/steps.md|Report file: `.tasks/<slug>/plan.md`. Then `quorum-validate
+skills/plan/steps.md|Report file: `.tasks/<slug>/plan-review/round-<N>/<file>`
+skills/plan/steps.md|Report file: `.tasks/<slug>/plan-review/round-<N>/votes.md`
+skills/build/steps.md|Report file: `.tasks/<slug>/proof-build.md`
+skills/review-loop/steps.md|Report file: `.tasks/<slug>/review/round-<N>/<file>`
+skills/review-loop/steps.md|Report file: `.tasks/<slug>/review/round-<N>/votes.md`
+skills/review-loop/steps.md|Report file: `.tasks/<slug>/review/builder.md`
+skills/review-loop/steps.md|Report file: `.tasks/<slug>/review/round-<N>/disputes.md`
+skills/review-loop/steps.md|Report file: `.tasks/<slug>/proof-final.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/security-<run>.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/blind-<run>.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/a11y-<run>.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/triage-<run>.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/proof-final.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/early-<n>.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/early-triage-<n>.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/security-skipped.md`
+skills/pr-draft/steps.md|Report file: `.tasks/<slug>/pr.md`
+skills/research/steps.md|Report file: `<research dir>/research/verify.md`
+skills/review/SKILL.md|Report file: `.tasks/<id>/run-<N>/<file>`
+skills/review/SKILL.md|Report file: `.tasks/<id>/run-<N>/votes.md`
+skills/map/SKILL.md|Report file: `.tasks/map-<slug>/research/<NN>.md`
+skills/map/SKILL.md|Report file: `.tasks/map-<slug>/research/<NN>-facts.md`
+skills/map/SKILL.md|Report file: `.tasks/map-<slug>/review/<NN>-feasibility.md`
+skills/map/SKILL.md|Report file: `.tasks/map-<slug>/tasks-review/round-<N>/<file>`
+skills/map/SKILL.md|Report file: `.tasks/map-<slug>/tasks-review/round-<N>/votes.md`
+SITES
+  # No step still has the orchestrator save a reply itself: outside the rule, nothing is saved "verbatim", and
+  # every `Report file:` a step writes names a path (the rule's own `<path>` is not counted above or here).
+  for f in $REPORT_FILES; do
+    if reports_sites "$f" | grep -n -i 'verbatim'; then echo "$f still saves a reply by hand"; return 1; fi
+    if reports_sites "$f" | grep -n -E 'Report file: `(rd|eval|state)\.md|Report file: `[^.<]'; then
+      echo "$f names a report file the hook refuses"; return 1
+    fi
+  done
+}
+
+@test "the nine files give the same Reports rule: remove the file, name it last, wait up to 10 seconds, then save by hand" {
+  first=$(reports_rule skills/spec-and-eval/steps.md)
+  [ -n "$first" ]
+  for want in 'Where a step says `Report file: <path>`' 'Before you start the agent, `rm -f <path>`' \
+    'the last line of its prompt' 'no backticks or quotes' '`test -s <path>`' \
+    'about once a second, for up to 10 seconds' 'save the reply verbatim to that path yourself'; do
+    [[ "$first" == *"$want"* ]] || { echo "the rule doesn't say: $want"; return 1; }
+  done
+  # The agent is told the line is not its to act on: a line it puts just before, the same words in every prompt.
+  for want in 'Just before it, on a line of its own, put these words as they are' "$REPORT_NOTE"     'a step that names a prompt'"'"'s `Report file:` line means both'; do
+    [[ "$first" == *"$want"* ]] || { echo "the rule doesn't say: $want"; return 1; }
+  done
+  for f in $REPORT_FILES; do
+    [ "$(reports_rule "$f")" = "$first" ] || { echo "$f words the Reports rule differently"; return 1; }
+    # The rule comes before the first step that uses it.
+    rule=$(grep -n -m1 '^\*\*Reports\.\*\*' "$REPO_ROOT/$f" | cut -d: -f1)
+    site=$(grep -n 'Report file: `' "$REPO_ROOT/$f" | grep -v '<path>' | head -1 | cut -d: -f1)
+    [ "$rule" -lt "$site" ] || { echo "$f gives the Reports rule after its first use"; return 1; }
+  done
+}
+
+@test "every agent definition says a hook saves its reply: it never writes the Report file or mentions it" {
+  # One section, the same words in each: an agent with no Write tool said it had not written the file, one with a
+  # shell could write it and race the hook.
+  section_of() { awk '/^## Report file$/ { f = 1; next } f && /^## / { exit } f' "$1" | tr '
+' ' ' | tr -s ' ' | sed 's/^ //; s/ $//'; }
+  first=$(section_of "$REPO_ROOT/agents/builder.md")
+  for want in 'When your prompt ends with a line `Report file: <path>`, a hook saves your final reply to that path'     'It is not an instruction to you' 'Never write that file, whatever tools you have' 'never mention it'     'reply with the report alone' 'no note about the file or about saving it' 'no request to save it'     'no code fence around the whole report'; do
+    [[ "$first" == *"$want"* ]] || { echo "agents/builder.md doesn't say: $want"; return 1; }
+  done
+  n=0
+  for f in "$REPO_ROOT"/agents/*.md; do
+    n=$((n + 1))
+    [ "$(grep -c '^## Report file$' "$f")" -eq 1 ] || { echo "$f has no Report file section"; return 1; }
+    [ "$(section_of "$f")" = "$first" ] || { echo "$f words the Report file section differently"; return 1; }
+    # Nothing else in a definition has the agent write its report to a file, bar the researcher's lens file.
+    if grep -n -i -E 'write (your|the) (report|reply|votes|findings) to|save (your|the) (report|reply) to' "$f" | grep -v 'to the path given'; then
+      echo "$f tells the agent to write its report"; return 1
+    fi
+  done
+  [ "$n" -eq 15 ]
+  # The prompt's line and the definitions agree.
+  [[ "$REPORT_NOTE" == *"Don't write that file and don't mention it: reply with the report alone"* ]]
+}
+
+@test "a planner revising plan.md has it copied aside and compared, not removed" {
+  steps="$REPO_ROOT/skills/plan/steps.md"
+  # Both revise sites: after a quorum-validate ERROR, and after a review round.
+  [ "$(grep -c "Don't remove \`plan.md\` here" "$steps")" -eq 2 ]
+  [ "$(grep -c 'cp .tasks/<slug>/plan.md .tasks/<slug>/plan-prev.md' "$steps")" -eq 2 ]
+  [ "$(grep -c 'cmp -s .tasks/<slug>/plan.md .tasks/<slug>/plan-prev.md' "$steps")" -eq 2 ]
+  [ "$(grep -c 'Report file: `.tasks/<slug>/plan.md`' "$steps")" -eq 3 ]
+}
+
+@test "files derived from a report are made from the saved file, and a bare prompt keeps its Report file line" {
+  for f in skills/review-loop/steps.md skills/plan/steps.md skills/review/SKILL.md skills/map/SKILL.md; do
+    grep -E 'candidates\.md' "$REPO_ROOT/$f" | grep -q '`awk 1 ' || { echo "$f doesn't make candidates.md with a command"; return 1; }
+  done
+  grep -F 'pr-body.md' "$REPO_ROOT/skills/pr-draft/steps.md" | grep -qF "sed '1,/^---\$/d' .tasks/<slug>/pr.md > .tasks/<slug>/pr-body.md"
+  # An empty pr-body.md (a reply with no `---` line) fails the check, and the step says what to do then.
+  save=$(grep -n -m1 -F '**Save and show.**' "$REPO_ROOT/skills/pr-draft/steps.md" | cut -d: -f1)
+  save=$(awk -v n="$save" 'NR > n && /^5\. / { exit } NR >= n' "$REPO_ROOT/skills/pr-draft/steps.md" | tr '\n' ' ' | tr -s ' ')
+  for want in '`test -s .tasks/<slug>/pr.md`' '`test -s .tasks/<slug>/pr-body.md`' \
+    'An empty `pr-body.md` means the saved reply has no line that is `---` alone' "don't go on with an empty description"; do
+    [[ "$save" == *"$want"* ]] || { echo "the PR draft's save step doesn't say: $want"; return 1; }
+  done
+  grep -F 'disputed.md' "$REPO_ROOT/skills/review-loop/steps.md" | grep -qF '**Disputed** section of `.tasks/<slug>/review/builder.md`'
+  for f in skills/review-loop/steps.md skills/blind-test/steps.md; do
+    grep -qF 'only this, and its `Report file:` line' "$REPO_ROOT/$f" || { echo "$f: a bare prompt loses its Report file line"; return 1; }
+  done
+  grep -qF "Agents' reports go to the files the steps name: the hook saves them" "$REPO_ROOT/skills/run/SKILL.md"
+}
+
+# One section of a file: from the line that starts with $2 to the line before the next "## " heading.
+section() {
+  awk -v h="$2" 'index($0, h) == 1 { f = 1; print; next } f && /^## / { exit } f' "$REPO_ROOT/$1"
+}
+
+# The same, as one line with single spaces, so a pinned sentence may wrap anywhere.
+section_line() { section "$1" "$2" | tr '\n' ' ' | tr -s ' '; }
+
+@test "a built MEDIUM or HIGH task goes to simplify-diff, the early blind test, then review-loop" {
+  row=$(grep -F '| `BUILDING`, `base_sha` set, every step built |' "$REPO_ROOT/skills/run/SKILL.md")
+  [ "$(printf '%s\n' "$row" | wc -l | tr -d ' ')" -eq 1 ]
+  stage=$(printf '%s' "$row" | awk -F '|' '{ print $3 }')
+  until=$(printf '%s' "$row" | awk -F '|' '{ print $5 }')
+  # The left-over marker goes first, then the three stages in this order.
+  [[ "$stage" == *'rm -f .tasks/<slug>/.blind-mode-active'*'stop any server'*'`simplify-diff`'*'MEDIUM or HIGH'*'`blind-test`'*'early blind test'*'`review-loop`'* ]]
+  [[ "$stage" == *'A LOW or fast-path task goes from `simplify-diff` to `review-loop`'* ]]
+  [[ "$until" == *'`build` (after `simplify-diff`, before the early blind test)'* ]]
+  # The other rows keep their stage and their --until name.
+  grep -qF '| `IN_REVIEW` | `review-loop` | none | `review` |' "$REPO_ROOT/skills/run/SKILL.md"
+  grep -qF '| `CONVERGED` | `blind-test` | none | `blind` |' "$REPO_ROOT/skills/run/SKILL.md"
+  # The stage commands' own next-step lines say the same.
+  for f in skills/build/steps.md skills/simplify-diff/steps.md skills/pipeline-laws/SKILL.md; do
+    grep -qF '`/quorum:review-loop`; for a MEDIUM or HIGH task the early blind test (`/quorum:blind-test`) comes first' "$REPO_ROOT/$f" \
+      || { echo "$f doesn't put the early blind test before the review loop"; return 1; }
+  done
+  grep -F '| `BUILDING` |' "$REPO_ROOT/skills/pipeline-laws/SKILL.md" | grep -qF 'early blind test'
+  for s in blind-test review-loop; do
+    grep '^description:' "$REPO_ROOT/skills/$s/SKILL.md" | grep -qi 'early' || { echo "$s/SKILL.md's description doesn't name the early run"; return 1; }
+  done
+}
+
+@test "every stage that starts from BUILDING removes a blind marker a cut-off blind test left" {
+  # A cut-off early run leaves the marker with the status still BUILDING, which four stages accept by hand. The
+  # run table's row (pinned above) covers /quorum:run only, so each of them says the same words, before it reads
+  # the code or starts an agent.
+  marker='**A left-over blind marker.** If `.tasks/<slug>/.blind-mode-active` is there, a blind test of this task was cut off: `rm -f .tasks/<slug>/.blind-mode-active`, stop any server it left running, and say so in one line. While it is there the source guard keeps this session and its agents from reading the code. If you know a blind test of this task is running in another session right now, leave the marker and stop instead: two stages can'"'"'t work on one task at once.'
+  [[ "$(section_line skills/build/steps.md '## 1. Check the status')" == *"$marker"* ]] || { echo "build's status check doesn't remove a left-over marker"; return 1; }
+  [[ "$(section_line skills/review-loop/steps.md '## 0. Preconditions')" == *"$marker"* ]] || { echo "review-loop's preconditions don't remove a left-over marker"; return 1; }
+  # simplify-diff has no sections: the words sit in step 1, before the step that reads the change.
+  simplify=$(awk '/^1\. / { f = 1 } /^2\. / { f = 0 } f' "$REPO_ROOT/skills/simplify-diff/steps.md" | tr '\n' ' ' | tr -s ' ')
+  [[ "$simplify" == *"$marker"* ]] || { echo "simplify-diff's step 1 doesn't remove a left-over marker"; return 1; }
+  # The early run removes it before it turns blind mode on again (section 2), in its first sub-step.
+  early=$(section skills/blind-test/steps.md '## Early run (from `BUILDING`)' | awk '/^1\. / { f = 1 } /^2\. / { f = 0 } f' | tr '\n' ' ' | tr -s ' ')
+  [[ "$early" == *"$marker"* ]] || { echo "the early run's first sub-step doesn't remove a left-over marker"; return 1; }
+  # A status no stage starts from by hand is still the run table's to recover.
+  grep -F '| `BLIND-TEST` |' "$REPO_ROOT/skills/run/SKILL.md" | grep -qF 'rm -f .tasks/<slug>/.blind-mode-active .tasks/.blind-mode-active'
+}
+
+@test "no sentence sends a stage that starts from BUILDING past the left-over marker check" {
+  # The paragraph only helps on a path that reads it. Each jump that lands after it is pinned here.
+  build="$REPO_ROOT/skills/build/steps.md"
+  # build: a sliced build picked up partway skips sections 1 and 2, and a cut-off early blind test leaves exactly
+  # that state (every step built), so the paragraph that skips names the check, before the skip.
+  pick=$(awk '/^\*\*Picking up a sliced build\.\*\*/ { f = 1 } f && /^$/ { exit } f' "$build" | tr '\n' ' ' | tr -s ' ')
+  [[ "$pick" == *"do step 1's **A left-over blind marker.** check, then skip to step 3"* ]] \
+    || { echo "a sliced build picked up partway skips to the builder without the left-over marker check"; return 1; }
+  # It is the only jump above the paragraph in build, and the other two stages have none above theirs.
+  for f in skills/build/steps.md skills/simplify-diff/steps.md skills/review-loop/steps.md; do
+    at=$(grep -n -m1 -F '**A left-over blind marker.**' "$REPO_ROOT/$f" | cut -d: -f1)
+    jumps=$(head -n "$at" "$REPO_ROOT/$f" | grep -ciE 'skip to|go to (step|section)|start(s)? at|go on to' || true)
+    want=0; [ "$f" = skills/build/steps.md ] && want=1
+    [ "$jumps" -eq "$want" ] || { echo "$f: $jumps jumps above the left-over marker check, expected $want"; return 1; }
+    # No agent is started above it either.
+    if head -n "$at" "$REPO_ROOT/$f" | grep -nE '[Ss]tart (the )?`quorum:'; then
+      echo "$f starts an agent above the left-over marker check"; return 1
+    fi
+  done
+  # blind-test: a BUILDING task is sent to the early run and nothing else of section 0, and the early run has the
+  # check (in its first sub-step, pinned above) before it skips or runs any other section.
+  pre=$(section_line skills/blind-test/steps.md '## 0. Preconditions')
+  [[ "$pre" == *'follow "Early run (from `BUILDING`)" below, and nothing else in this section'* ]]
+  early=$(section skills/blind-test/steps.md '## Early run (from `BUILDING`)')
+  at=$(printf '%s\n' "$early" | grep -n -m1 -F '**A left-over blind marker.**' | cut -d: -f1)
+  first=$(printf '%s\n' "$early" | grep -n -m1 -E 'section [0-9]' | cut -d: -f1)
+  [ -n "$at" ] && [ -n "$first" ] && [ "$at" -lt "$first" ]
+}
+
+@test "the blind-test steps have the early run" {
+  steps=skills/blind-test/steps.md
+  early=$(section_line "$steps" '## Early run (from `BUILDING`)')
+  [ -n "$early" ]
+  for want in 'quorum-state set early_blind_sha' 'quorum-state set early_blind clean' 'quorum-state set early_blind blocked' \
+    'blind/early-<n>.md' 'blind/early-triage-<n>.md' 'blind/server-early-<n>.log' 'blind/early-[0-9]*.md' \
+    "Don't set \`BLIND-TEST\` and don't touch \`blind_runs\`" 'to `pending_findings`' 'has a `Result:` line' \
+    'every `CAUSED` item of the triage' 'only when nothing was pushed and the blind user returned a report' \
+    '## Early blind test <n>' 'quorum-state set status IN_REVIEW' '/quorum:review-loop'; do
+    [[ "$early" == *"$want"* ]] || { echo "the early run doesn't say: $want"; return 1; }
+  done
+  # It runs the blind user and the triage only: no security pass, no live accessibility pass, no counted run.
+  [[ "$early" == *'Skip the security pass (section 1) and the live accessibility pass'* ]]
+  if printf '%s\n' "$early" | grep -E 'incr blind_runs|set status (BLIND-TEST|HALTED|AWAITING-HUMAN)'; then
+    echo "the early run counts a run, or sets a status other than IN_REVIEW"; return 1
+  fi
+  # The readers of blind/ are told what an early file is.
+  grep -qF 'Files named `blind/early-*` are from the early blind test' "$REPO_ROOT/skills/pr-draft/steps.md"
+  grep -qF 'If `state.md` logs `## Blind test skipped`' "$REPO_ROOT/skills/pr-draft/steps.md"
+  grep -qF 'suggest no lesson for those' "$REPO_ROOT/$steps"
+  grep -F '.tasks/<slug>/blind/' "$REPO_ROOT/skills/codify-lesson/SKILL.md" | grep -qF 'not one in an `early-*` file'
+}
+
+@test "the early run starts when the build is done, sliced or not" {
+  pre=$(section_line skills/blind-test/steps.md '## 0. Preconditions')
+  [[ "$pre" == *'`quorum-plan sliced` fails (one builder built the whole plan), or `quorum-plan next` prints nothing (every step of a sliced plan is built)'* ]]
+  for want in '`BUILDING`' '`base_sha` set' 'a MEDIUM or HIGH risk' '`quorum-state get fast` not `true`' '`CONVERGED`' \
+    'say which command comes next and stop'; do
+    [[ "$pre" == *"$want"* ]] || { echo "section 0 doesn't say: $want"; return 1; }
+  done
+}
+
+@test "the later run skips the blind user only after a clean early run with nothing but test paths changed, and doesn't count it" {
+  steps="$REPO_ROOT/skills/blind-test/steps.md"
+  pre=$(section_line skills/blind-test/steps.md '## 0. Preconditions')
+  skip=${pre#*'**Skipping the blind user.**'}
+  [ "$skip" != "$pre" ]
+  for want in '`quorum-state get early_blind` is `clean`' '`git diff --name-only <early_blind_sha>..HEAD` succeeds' \
+    'every path it prints is a test path' 'the task is not a UI change' 'Markdown is never a test path' \
+    '`test`, `tests`, `__tests__`, `e2e`, `cypress` or `spec`' '`.test.` or `.spec.` or ends in `.bats`' \
+    '**A skipped run is not counted.**' 'Leave the status `CONVERGED` and `blind_runs` as they are' \
+    '## Blind test skipped' "section 4's halt doesn't apply"; do
+    [[ "$skip" == *"$want"* ]] || { echo "the skip rule doesn't say: $want"; return 1; }
+  done
+  # The skip is decided before the run is counted or the status set.
+  at=$(grep -n -m1 -F '**Skipping the blind user.**' "$steps" | cut -d: -f1)
+  set_at=$(grep -n -m1 -F 'quorum-state set status BLIND-TEST' "$steps" | cut -d: -f1)
+  incr_at=$(grep -n -m1 -F 'quorum-state incr blind_runs' "$steps" | cut -d: -f1)
+  [ "$at" -lt "$set_at" ]
+  [ "$at" -lt "$incr_at" ]
+  # The summary after a skip takes the early run's report and triage.
+  [[ "$(section_line skills/blind-test/steps.md '## 5. Stage 8 summary')" == *'After a skipped run the blind report is `blind/early-<n>.md` and the triage is `blind/early-triage-<n>.md`'* ]]
+}
+
+@test "pending findings record no round while round is 0" {
+  one=$(section skills/review-loop/steps.md '## 1. Pending findings first')
+  # One record in the section, and its step carries the condition.
+  [ "$(printf '%s\n' "$one" | grep -c 'quorum-branch record')" -eq 1 ]
+  step=$(printf '%s\n' "$one" | awk '/^2\. / { f = 1 } /^3\. / { f = 0 } f' | tr '\n' ' ' | tr -s ' ')
+  [[ "$step" == *'`quorum-branch record`'*'but only when `quorum-state get round` is above 0'* ]]
+  [[ "$step" == *'At round 0'*'record nothing, so round 1 reviews `base_sha..HEAD`'* ]]
+  [[ "$one" == *'the early run or the later one'* ]]
+}
