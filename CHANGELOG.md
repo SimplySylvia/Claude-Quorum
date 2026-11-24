@@ -34,7 +34,8 @@ copy with `/plugin marketplace update`.
   `… run stopped · ESCALATED · fix the checks, then /quorum:run`), a turn that dies
   (`… run stopped · API error · /quorum:run continues it`, or `refused`), and the run's end
   (`csv-export: run ended · AWAITING-HUMAN`, with where it stopped: `PR drafted` once `pr.md` exists,
-  `plan approved` for a `BUILDING` task whose build hasn't started, else the status). A turn that ends while the
+  `plan approved` for a `BUILDING` task whose build hasn't started, or `spec written` for one on the fast path,
+  else the status). A turn that ends while the
   run's Quorum agents are at work isn't a question: it's announced only if the last agent ends and no turn
   starts. Each is a notification through Claude Code's own notification setting;
   there is no Quorum setting for it. When it can't be sent the same text is a toast that stays 15 seconds, and on a

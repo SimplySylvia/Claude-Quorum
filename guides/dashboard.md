@@ -86,7 +86,8 @@ While this session is in a `/quorum:run`, from the run's start until it ends, th
 run's stops are [announced](#announcements). A run is in one of three states:
 
 - **Going:** the run is working, and starts the next stage itself. A run whose turn ended while its Quorum agents
-  are still at work in the background is going too, until the last of them has ended.
+  are still at work in the background is going too, until the last of them has ended. An agent Claude Code no
+  longer runs counts as ended when the wait would start, even if the dashboard never saw its end.
 - **Waiting:** the run asked you a question, or its turn ended with no Quorum agent at work and it's your move. An
   open question reads as waiting whether agents are at work or not. After a turn's end, or after the last agent's
   when the turn ended first, the dashboard takes about half a second to say so, while it reads the task again; a
@@ -222,7 +223,7 @@ is announced once, with the task's slug in front:
 | The task escalates | `csv-export: run stopped · ESCALATED · fix the checks, then /quorum:run` |
 | The run's turn dies on an API error | `csv-export: run stopped · API error · /quorum:run continues it` |
 | The run's turn is refused | `csv-export: run stopped · refused · /quorum:run continues it` |
-| The run ends | `csv-export: run ended · AWAITING-HUMAN`, with where it stopped: `PR drafted`, `plan approved`, or the task's status |
+| The run ends | `csv-export: run ended · AWAITING-HUMAN`, with where it stopped: `PR drafted`, `plan approved`, `spec written`, or the task's status |
 
 - **A question** is announced when its dialog opens, once for each dialog, and names the gate of the task on show.
   A turn that ends with the run still there, as on a question in plain text, is announced with the same words when
@@ -239,7 +240,8 @@ is announced once, with the task's slug in front:
   `quorum-run leave`. It is then the only message: a turn that dies as the run ends gets no message of its own.
   It says where the run stopped: `run ended · PR drafted` once the task's `pr.md` exists, whatever the status;
   `run ended · plan approved` for a `BUILDING` task whose build hasn't started (its `state.md` has no `base_sha`),
-  as after `--until plan`; otherwise the task's status.
+  as after `--until plan`, or `run ended · spec written` for such a task on the fast path, which has no plan (as
+  after `--fast … --until spec`); otherwise the task's status.
 - **The slug** is the task on show's. With none on show it is the last task the run showed, with the status it had
   and where it had stopped as last read then: the stages take a finished task off show before the run ends, and the
   run's-end message still names it.

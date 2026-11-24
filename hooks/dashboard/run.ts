@@ -134,11 +134,13 @@ export function stoppedText(slug: string, reason: Exclude<NonNullable<RunView['r
   return withSlug(slug, `run stopped · ${stopRow(reason)}`)
 }
 
-// Where a run stopped, for its end's announcement: `PR drafted` once the task's pr.md exists, `plan approved` for a
-// BUILDING task whose build hasn't started (its state.md has no base_sha), else the status.
-export function stoppedAt(status: string, isPrDrafted: boolean, hasBase: boolean): string {
+// Where a run stopped, for its end's announcement: `PR drafted` once the task's pr.md exists; for a BUILDING task
+// whose build hasn't started (its state.md has no base_sha) `plan approved`, or `spec written` on the fast path,
+// which has no plan; else the status.
+export function stoppedAt(status: string, isPrDrafted: boolean, hasBase: boolean, isFast: boolean): string {
   if (isPrDrafted) return 'PR drafted'
-  return status === 'BUILDING' && !hasBase ? 'plan approved' : status
+  if (status !== 'BUILDING' || hasBase) return status
+  return isFast ? 'spec written' : 'plan approved'
 }
 
 // The announcement of a run's end, with where its task stopped (stoppedAt); `run ended` for a run with no task.

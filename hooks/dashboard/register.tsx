@@ -84,7 +84,7 @@ let runSession: string | null = null
 // The end of the last refresh's write-and-decide section: the next one starts after it. Memory only.
 let deciding: Promise<unknown> = Promise.resolve()
 // The task `t` as a run's task, `hasBase` saying whether its state.md has a base_sha.
-const shownAs = (t: Snapshot, hasBase: boolean): RunTask => ({ slug: t.slug, status: t.status, where: stoppedAt(t.status, t.prDrafted, hasBase) })
+const shownAs = (t: Snapshot, hasBase: boolean): RunTask => ({ slug: t.slug, status: t.status, where: stoppedAt(t.status, t.prDrafted, hasBase, t.isFast) })
 // The run's task: the task on show, else the last one shown since the quiet start ended; null for none. Only the
 // run's end reads `where`, and it gives `hasBase`.
 const runTaskOf = (t: Snapshot | null, hasBase = true): RunTask | null => (t ? shownAs(t, hasBase) : isQuiet ? null : lastShown)
@@ -111,7 +111,8 @@ let turnNo = 0
 // The delay is the larger of the two, rounded up to 500 ms. Should a blocked stop ever end a turn with `answer`,
 // the `turn.start` that follows within the delay keeps the run from reading as waiting (requirement 10).
 const RUN_REREAD_MS = 500
-// The one pending re-read; a later turn's end replaces it, and a session start drops it. Kept in memory only.
+// The one pending re-read; a later turn's end, or a Quorum agent's, replaces it, and a session start drops it. Kept
+// in memory only.
 let reread: Timer | null = null
 // The turn count (`turnNo`) at the last re-read set or dropped: the end of an earlier turn sets none.
 let rereadTurn = 0
@@ -765,12 +766,15 @@ function keepTicking($: EngineInterface, all: QuorumAgent[]) {
   }
 }
 
-// After a reload or resume, mark agents the engine no longer runs as finished, so none ticks forever.
-async function settleAgents($: EngineInterface) {
+// Mark agents the engine no longer runs as finished, and answer the list as settled: after a reload or resume, so
+// none ticks forever, and at the re-read that would start a run's wait, so one whose end the dashboard never saw
+// doesn't keep the run reading as going.
+async function settleAgents($: EngineInterface): Promise<QuorumAgent[]> {
   const live = new Set((await $.agent.list()).filter(a => a.status === 'pending' || a.status === 'running').map(a => a.id))
   const now = await $.clock.now()
   const all = await update($, agents, list => list.map(a => (a.endedAt === null && !live.has(a.id) ? { ...a, endedAt: now } : a)))
   keepTicking($, all)
+  return all
 }
 
 // Record a successful Edit, Write or NotebookEdit of a file of the task, in Build or review, as its current edit:
@@ -855,7 +859,10 @@ function noteTurnEnd($: EngineInterface, reason: RunTurn['ended'], turn: number)
 // After the main session's turn `turn` ended, or after a Quorum agent ended once `turn` had ended with an answer:
 // in a run set the one re-read of the task, RUN_REREAD_MS on, without waiting for it (a re-read still pending is
 // replaced). Only at that re-read does an answered turn start to read as waiting, and only if no turn started
-// since, the run is still there, and no Quorum agent is running: until its agents have ended the run is going. The
+// since, the run is still there, and no Quorum agent is running: until its agents have ended the run is going. An
+// unended agent the engine's own list no longer holds counts as ended there (settleAgents): its end never reached
+// the dashboard. A re-read that finds a newer one pending once it has read (an agent ended meanwhile) starts no
+// wait and leaves it to that one. The
 // wait starts once for a turn, and is announced there, once, after the quiet start and unless the run's
 // task is HALTED or ESCALATED (that was announced, or is at this read): nothing is awaited between the turn check
 // and the write and the announcement. A turn's end that gets here after a later turn's end set its re-read, or after
@@ -873,10 +880,15 @@ async function setReread($: EngineInterface, turn: number, maxRounds: number) {
       void (async () => {
         try {
           await refresh($, maxRounds)
+          // Whether this re-read may start the wait. Not with a newer re-read pending (a Quorum agent ended while
+          // this one read): that one starts it, RUN_REREAD_MS after the agent's end.
+          const isDue = () => reread === null && turn === turnNo && runTurn.ended === 'answer' && !runTurn.isIdle
+          // Only a re-read that would start the wait asks the engine which agents it still runs (with no answer,
+          // the list as it is). That awaits, so the run and the task are read after it, and the turn is checked again.
+          const isWorking = isDue() && (await read($, run)) !== null && (await settleAgents($).catch(() => read($, agents))).some(a => a.endedAt === null)
           const isInRun = (await read($, run)) !== null
           const t = await read($, task)
-          const isWorking = (await read($, agents)).some(a => a.endedAt === null)
-          if (turn === turnNo && runTurn.ended === 'answer' && !runTurn.isIdle && isInRun && !isWorking) {
+          if (isDue() && isInRun && !isWorking) {
             runTurn = { ...runTurn, isIdle: true }
             const mine = runTaskOf(t)
             if (!isQuiet && !(mine && isStuck(mine.status))) announce($, waitingText(mine?.slug ?? '', t ? gateNow(t.status) : ''))

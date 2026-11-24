@@ -147,11 +147,12 @@ const settle = async () => {
 // every `$.ui.notify`, answered as `seen.notify` says: `sent` through a channel that shows the text, `bell` through
 // the one that only rings, `unsent`, `reject` (the hook's `{ deny }`), `throw` (the hook throws), or `held`, which
 // answers only when the test calls the resolver pushed to `seen.held`. `seen.toastMs`: each toast's `timeoutMs`,
-// beside `seen.toasts`; `seen.toastFails` makes the toast's hook throw or deny after recording it.
+// beside `seen.toasts`; `seen.toastFails` makes the toast's hook throw or deny after recording it. `seen.live`: the
+// ids of the agents the engine's own list (`$.agent.list()`) holds as running; `seen.listed`: how often it was asked; `seen.listFails` makes it refuse to answer.
 function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Record<string, number> = {}, links: string[] = [], o: { cwd?: string; clock?: false } = {}) {
   const seen = {
     status: [] as (string | undefined)[], toasts: [] as string[], toastMs: [] as (number | undefined)[], notified: [] as string[], session: 'sess-a',
-    notify: 'sent' as 'sent' | 'bell' | 'unsent' | 'reject' | 'throw' | 'held', held: [] as ((answer: UiNotifyResult) => void)[], toastFails: '' as '' | 'throw' | 'deny', opened: 0, ticks: 0, live: [] as string[], copied: [] as string[], filled: [] as string[], draft: '', reads: [] as string[], writes: [] as string[],
+    notify: 'sent' as 'sent' | 'bell' | 'unsent' | 'reject' | 'throw' | 'held', held: [] as ((answer: UiNotifyResult) => void)[], toastFails: '' as '' | 'throw' | 'deny', opened: 0, ticks: 0, live: [] as string[], listed: 0, listFails: false, copied: [] as string[], filled: [] as string[], draft: '', reads: [] as string[], writes: [] as string[],
   }
   // Paths are relative to `root`, or absolute (a worktree's session reads the main working tree's .tasks/).
   const abs = (path: string) => (path.startsWith('/') ? path : `${root}/${path}`)
@@ -190,7 +191,7 @@ function world(on: On, files: Record<string, string>, root = '/repo', mtimes: Re
   on('session.root', () => ({ value: root }))
   on('session.cwd', () => ({ value: o.cwd ?? root }))
   on('session.id', () => ({ value: seen.session }))
-  on('agent.list', () => ({ value: seen.live.map(id => ({ id, description: '', type: 'quorum:code-reviewer', status: 'running' as const, kind: 'local_agent', taskStatus: 'running' as const, label: '', startTime: 0, cwd: o.cwd ?? root, tokenCount: 0, tokenSamples: [0], hasRow: true })) }))
+  on('agent.list', () => { seen.listed++; if (seen.listFails) return { deny: 'test' }; return { value: seen.live.map(id => ({ id, description: '', type: 'quorum:code-reviewer', status: 'running' as const, kind: 'local_agent', taskStatus: 'running' as const, label: '', startTime: 0, cwd: o.cwd ?? root, tokenCount: 0, tokenSamples: [0], hasRow: true })) } })
   // Each period of $.clock.every is one dispatch; refusing the first ends that interval, so this counts intervals.
   if (o.clock !== false) on('clock.every', () => { seen.ticks++; return { deny: 'test' } })
   // A $.clock.after timer fires at once on the fixed clock.
@@ -6922,7 +6923,22 @@ function heldQuestions(on: On) {
   on('tool.call', { tool: 'AskUserQuestion' }, () => new Promise<{ result: Record<string, never> }>(resolve => { open.push(() => resolve({ result: {} })) }))
   return { answer: () => open.shift()?.(), count: () => open.length }
 }
-const ask = ($: Engine, agentId?: string) => $.tool.call({
+// Once `isArmed` is set, the next write of the atom `key` waits for `release`, which is null again once called: a
+// test's way into the middle of a refresh (`run`: between its write of the task and its write of the run) or of a
+// re-read's settling of the agent list (`agents`).
+function heldWrites(on: On, key: 'run' | 'agents') {
+  const hold: { isArmed: boolean; release: (() => void) | null } = { isArmed: false, release: null }
+  const register = on as unknown as (event: string, matcher: unknown, hook: unknown) => void
+  register('state.set', { plugin: 'quorum', key }, async (_: unknown, e: unknown, next: (e: unknown) => Promise<unknown>) => {
+    if (hold.isArmed) {
+      hold.isArmed = false
+      await new Promise<void>(resolve => { hold.release = () => { hold.release = null; resolve() } })
+    }
+    return next(e)
+  })
+  return hold
+}
+const ask =($: Engine, agentId?: string) => $.tool.call({
   tool: 'AskUserQuestion',
   questions: [{ question: 'Approve the plan?', header: 'Plan', options: [{ label: 'Yes', description: 'Approve it' }, { label: 'No', description: 'Revise it' }], multiSelect: false }],
   ...(agentId ? { agentId } : {}),
@@ -7998,6 +8014,7 @@ test('a turn that ends on a question is announced when the run starts to wait', 
   files[RUN_MARKER] = RUN_SINCE
   await readAgain($)
   await startTurn($)
+  seen.live.push('r1')
   await $.agent.spawn({ tool_use_id: 'r1', ...RESEARCHER_BG })
   forget(seen)
   await endTurn($)
@@ -8152,17 +8169,8 @@ test('a halt or an escalation in a run is announced once, with no status toast',
   const md = { text: calm('IN_REVIEW') }
   const files = inRun('IN_REVIEW')
   Object.defineProperty(files, STATE_MD, { enumerable: true, get: () => { const act = atRead.next; atRead.next = null; act?.(); return md.text } })
-  // Once armed, the next write of the `run` atom waits for `hold.release`: the test's way to let a second refresh
-  // reach its own writes while the first is between its two.
-  const hold: { isArmed: boolean; release: (() => void) | null } = { isArmed: false, release: null }
-  const register = on as unknown as (event: string, matcher: unknown, hook: unknown) => void
-  register('state.set', { plugin: 'quorum', key: 'run' }, async (_: unknown, e: unknown, next: (e: unknown) => Promise<unknown>) => {
-    if (hold.isArmed) {
-      hold.isArmed = false
-      await new Promise<void>(resolve => { hold.release = resolve })
-    }
-    return next(e)
-  })
+  // Armed, it lets a second refresh reach its own writes while the first is between its two.
+  const hold = heldWrites(on, 'run')
   const { seen, clock } = runWorld(on, files)
   await $.session.start(START)
   const to = async (status: string) => {
@@ -8536,9 +8544,12 @@ test("the run's end is announced with the task's status", async ($, on) => {
   expect(seen.toasts).toEqual([])
 
   // Where it stopped, in this order: `PR drafted` once the task's pr.md exists, whatever the status; `plan approved`
-  // for BUILDING before the build started (state.md has no base_sha, or a null one); else the status. Each with the
-  // task on show, and with it taken off show before the marker went.
+  // for BUILDING before the build started (state.md has no base_sha, or a null one), or `spec written` for such a
+  // task on the fast path (`fast: true`: it has no plan); else the status. Each with the task on show, and with it
+  // taken off show before the marker went.
   const NO_BASE = calm('BUILDING').replace('base_sha: abc123\n', '')
+  const fast = (text: string) => text.replace('risk: MEDIUM\n', 'risk: MEDIUM\nfast: true\n')
+  expect(fast(NO_BASE)).toContain('fast: true')
   const PR_MD = '.tasks/export-csv/pr.md'
   expect(NO_BASE).not.toContain('base_sha')
   const stateReads = () => seen.reads.filter(path => path === `/repo/${STATE_MD}`).length
@@ -8547,6 +8558,11 @@ test("the run's end is announced with the task's status", async ($, on) => {
     [calm('BUILDING').replace('base_sha: abc123', 'base_sha: null'), false, 'plan approved'],
     [calm('BUILDING'), false, 'BUILDING'],
     [calm('PLANNING').replace('base_sha: abc123\n', ''), false, 'PLANNING'],
+    [fast(NO_BASE), false, 'spec written'],
+    [fast(calm('BUILDING').replace('base_sha: abc123', 'base_sha: null')), false, 'spec written'],
+    [fast(calm('BUILDING')), false, 'BUILDING'],
+    [NO_BASE.replace('risk: MEDIUM\n', 'risk: MEDIUM\nfast: false\n'), false, 'plan approved'],
+    [fast(NO_BASE), true, 'PR drafted'],
     [NO_BASE, true, 'PR drafted'],
     [calm('READY'), true, 'PR drafted'],
     [calm('AWAITING-HUMAN'), true, 'PR drafted'],
@@ -8573,11 +8589,16 @@ test("the run's end is announced with the task's status", async ($, on) => {
       if (isShown) expect({ where, reads: stateReads() - before }).toEqual({ where, reads: text.includes('status: BUILDING') ? 3 : 2 })
     }
   }
-  // The rule alone: pr.md first, then BUILDING with no base_sha, and no other status reads `plan approved`.
-  expect(stoppedAt('BUILDING', false, false)).toBe('plan approved')
-  expect(stoppedAt('BUILDING', false, true)).toBe('BUILDING')
-  expect(stoppedAt('PLANNING', false, false)).toBe('PLANNING')
-  expect(stoppedAt('HALTED', true, false)).toBe('PR drafted')
+  // The rule alone: pr.md first, then BUILDING with no base_sha (`spec written` on the fast path), and no other
+  // status reads `plan approved` or `spec written`.
+  expect(stoppedAt('BUILDING', false, false, false)).toBe('plan approved')
+  expect(stoppedAt('BUILDING', false, false, true)).toBe('spec written')
+  expect(stoppedAt('BUILDING', false, true, false)).toBe('BUILDING')
+  expect(stoppedAt('BUILDING', false, true, true)).toBe('BUILDING')
+  expect(stoppedAt('PLANNING', false, false, false)).toBe('PLANNING')
+  expect(stoppedAt('IN_REVIEW', false, false, true)).toBe('IN_REVIEW')
+  expect(stoppedAt('HALTED', true, false, false)).toBe('PR drafted')
+  expect(stoppedAt('BUILDING', true, false, true)).toBe('PR drafted')
   // The build starts while the run goes on: the end reads the status once state.md has a base_sha.
   files['.git/HEAD'] = ON_TASK
   files[STATE_MD] = NO_BASE
@@ -9101,20 +9122,22 @@ test('no state of the run is told by color alone', async ($, on) => {
 test('a run whose agents are still working is going, not waiting', async ($, on) => {
   const held = heldQuestions(on)
   on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.tool_use_id }))
-  // Once armed, the next write of the `run` atom waits for `hold.release`: the test's way into the middle of a re-read.
-  const hold: { isArmed: boolean; release: (() => void) | null } = { isArmed: false, release: null }
-  const register = on as unknown as (event: string, matcher: unknown, hook: unknown) => void
-  register('state.set', { plugin: 'quorum', key: 'run' }, async (_: unknown, e: unknown, next: (e: unknown) => Promise<unknown>) => {
-    if (hold.isArmed) {
-      hold.isArmed = false
-      await new Promise<void>(resolve => { hold.release = resolve })
-    }
-    return next(e)
-  })
+  // Armed, it holds a re-read at its refresh: the test's way into the middle of one.
+  const hold = heldWrites(on, 'run')
+  // Armed, it holds a re-read where it settles the agent list against the engine's.
+  const settling = heldWrites(on, 'agents')
   const files = inRun('PLANNING')
   const { seen, clock } = runWorld(on, files)
   await $.session.start(START)
-  const spawn = (id: string, subagentType: string = RESEARCHER_BG.subagentType) => $.agent.spawn({ tool_use_id: id, ...RESEARCHER_BG, subagentType })
+  // An agent the engine runs is on its own list (`seen.live`) from its start to its end.
+  const spawn = (id: string, subagentType: string = RESEARCHER_BG.subagentType) => {
+    seen.live.push(id)
+    return $.agent.spawn({ tool_use_id: id, ...RESEARCHER_BG, subagentType })
+  }
+  const endAgent = (id: string, reason: 'answer' | 'error' | 'aborted' = 'answer') => {
+    seen.live = seen.live.filter(live => live !== id)
+    return endTurn($, reason, id)
+  }
   // The run as the band (140 columns), the Run card's last row and the Now card's run lines read.
   const reads = async () => {
     const d = await $.ui.mount(paneAt(44))
@@ -9151,7 +9174,7 @@ test('a run whose agents are still working is going, not waiting', async ($, on)
   expect(seen.toasts).toEqual([])
   // The agent ends with no turn started since: the task is read once more, as after a turn's end, and the run then
   // reads as waiting, announced once.
-  await endTurn($, 'answer', 'r1')
+  await endAgent('r1')
   await later(REREAD_MS - 1)
   expect(await reads()).toEqual(GOING)
   expect(seen.notified).toEqual([])
@@ -9164,11 +9187,11 @@ test('a run whose agents are still working is going, not waiting', async ($, on)
 
   // Two agents: only after the second ends.
   await turnWith('s1', 's2')
-  await endTurn($, 'answer', 's1')
+  await endAgent('s1')
   await later(20 * REREAD_MS)
   expect(await reads()).toEqual(GOING)
   expect(seen.notified).toEqual([])
-  await endTurn($, 'answer', 's2')
+  await endAgent('s2')
   await later(REREAD_MS)
   expect(await reads()).toEqual(WAITING)
   expect(seen.notified).toEqual([WAITING_PLAN])
@@ -9177,7 +9200,7 @@ test('a run whose agents are still working is going, not waiting', async ($, on)
   // re-read's delay, the run goes on and nothing is announced.
   await turnWith('p1')
   await startTurn($)
-  await endTurn($, 'answer', 'p1')
+  await endAgent('p1')
   await later(20 * REREAD_MS)
   expect(await reads()).toEqual(GOING)
   expect(seen.notified).toEqual([])
@@ -9185,7 +9208,7 @@ test('a run whose agents are still working is going, not waiting', async ($, on)
   await later(REREAD_MS)
   expect(seen.notified).toEqual([WAITING_PLAN])
   await turnWith('p2')
-  await endTurn($, 'answer', 'p2')
+  await endAgent('p2')
   await later(REREAD_MS - 1)
   await startTurn($)
   await later(20 * REREAD_MS)
@@ -9196,7 +9219,7 @@ test('a run whose agents are still working is going, not waiting', async ($, on)
   await spawn('f1')
   await later(20 * REREAD_MS)
   let before = taskReads()
-  await endTurn($, 'answer', 'f1')
+  await endAgent('f1')
   await later(20 * REREAD_MS)
   expect(taskReads()).toBe(before)
   await spawn('f2')
@@ -9204,7 +9227,7 @@ test('a run whose agents are still working is going, not waiting', async ($, on)
   await later(20 * REREAD_MS)
   forget(seen)
   before = taskReads()
-  await endTurn($, 'answer', 'f2')
+  await endAgent('f2')
   await later(20 * REREAD_MS)
   expect(taskReads()).toBe(before)
   expect(seen.notified).toEqual([])
@@ -9220,22 +9243,51 @@ test('a run whose agents are still working is going, not waiting', async ($, on)
   held.answer()
   await asked
   expect(await reads()).toEqual(GOING)
-  await endTurn($, 'answer', 'd1')
+  await endAgent('d1')
   await later(20 * REREAD_MS)
   expect(seen.notified).toEqual([WAITING_PLAN])
 
-  // An agent that isn't Quorum's doesn't hold the wait back, and its end doesn't put the re-read off.
+  // An agent that isn't Quorum's, still running at the re-read (the engine's list holds it), doesn't hold the wait
+  // back, and its end sets no read and announces nothing more.
   await startTurn($)
   await spawn('g1', 'general-purpose')
   forget(seen)
   await endTurn($)
+  await later(REREAD_MS)
+  expect(seen.live).toEqual(['g1'])
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  before = taskReads()
+  await endAgent('g1')
+  await later(20 * REREAD_MS)
+  expect(taskReads()).toBe(before)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  // One that ends before the turn's re-read doesn't put that re-read off.
+  await startTurn($)
+  await spawn('g2', 'general-purpose')
+  forget(seen)
+  await endTurn($)
   await later(100)
-  await endTurn($, 'answer', 'g1')
+  await endAgent('g2')
   await later(REREAD_MS - 100)
   expect(await reads()).toEqual(WAITING)
   expect(seen.notified).toEqual([WAITING_PLAN])
   await later(20 * REREAD_MS)
   expect(seen.notified).toEqual([WAITING_PLAN])
+
+  // A last agent that ends with an error or an interrupt starts the wait as one that ends with an answer does.
+  for (const reason of ['error', 'aborted'] as const) {
+    await turnWith(`x-${reason}`)
+    await endAgent(`x-${reason}`, reason)
+    await later(REREAD_MS - 1)
+    expect({ reason, ...(await reads()) }).toEqual({ reason, ...GOING })
+    expect(seen.notified).toEqual([])
+    await later(1)
+    expect({ reason, ...(await reads()) }).toEqual({ reason, ...WAITING })
+    expect(seen.notified).toEqual([WAITING_PLAN])
+    await later(20 * REREAD_MS)
+    expect(seen.notified).toEqual([WAITING_PLAN])
+  }
 
   // An agent that ends before the turn's re-read: one message, RUN_REREAD_MS after the agent's end.
   await startTurn($)
@@ -9243,14 +9295,14 @@ test('a run whose agents are still working is going, not waiting', async ($, on)
   forget(seen)
   await endTurn($)
   await later(100)
-  await endTurn($, 'answer', 'q1')
+  await endAgent('q1')
   await later(REREAD_MS - 1)
   expect(seen.notified).toEqual([])
   await later(20 * REREAD_MS)
   expect(seen.notified).toEqual([WAITING_PLAN])
 
-  // An agent that ends while the turn's re-read is reading: that re-read starts the wait, and the read the agent's
-  // end set announces nothing more.
+  // An agent that ends while the turn's re-read is reading: that re-read starts no wait and leaves it to the one
+  // the agent's end set, RUN_REREAD_MS after that end (the turn the agent's report starts comes first).
   await startTurn($)
   await spawn('h1')
   forget(seen)
@@ -9258,25 +9310,127 @@ test('a run whose agents are still working is going, not waiting', async ($, on)
   hold.isArmed = true
   await later(REREAD_MS)
   expect(hold.release).not.toBeNull()
-  await endTurn($, 'answer', 'h1')
+  await endAgent('h1')
   hold.release?.()
+  await later(REREAD_MS - 1)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await later(1)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  await later(20 * REREAD_MS)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  // The same with the agent's report starting a turn within the delay: the run goes on, and nothing is announced.
+  await startTurn($)
+  await spawn('h2')
+  forget(seen)
+  await endTurn($)
+  hold.isArmed = true
+  await later(REREAD_MS)
+  expect(hold.release).not.toBeNull()
+  await endAgent('h2')
+  hold.release?.()
+  await later(REREAD_MS - 1)
+  await startTurn($)
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+
+  // An unended agent the engine no longer runs (its end never reached the dashboard) doesn't hold the wait back:
+  // the re-read that would start the wait asks the engine's own list, and the wait starts there. That agent's end,
+  // should it come late, announces nothing more.
+  await spawn('z1')
+  seen.live = []
+  forget(seen)
+  let listed = seen.listed
+  await endTurn($)
+  await later(REREAD_MS - 1)
+  expect(seen.notified).toEqual([])
+  expect(seen.listed).toBe(listed)
+  await later(1)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  expect(seen.listed).toBe(listed + 1)
+  await endTurn($, 'answer', 'z1')
   await later(20 * REREAD_MS)
   expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  // With another the engine still runs, the run is going until that one ends.
+  await startTurn($)
+  await spawn('z2')
+  await spawn('z3')
+  seen.live = ['z3']
+  forget(seen)
+  await endTurn($)
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await endAgent('z3')
+  await later(REREAD_MS)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  // The engine's list refusing to answer: the dashboard's own list stands, so the run is going while it holds a
+  // running agent, and waits once that agent has ended.
+  await startTurn($)
+  await spawn('z6')
+  seen.listFails = true
+  forget(seen)
+  listed = seen.listed
+  await endTurn($)
+  await later(20 * REREAD_MS)
+  expect(seen.listed).toBe(listed + 1)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await endAgent('z6')
+  await later(REREAD_MS)
+  expect(seen.listed).toBe(listed + 2)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  seen.listFails = false
+  // A re-read that starts no wait (a turn started before it) doesn't ask the engine.
+  await startTurn($)
+  await spawn('z4')
+  seen.live = []
+  forget(seen)
+  await endTurn($)
+  await later(REREAD_MS - 1)
+  await startTurn($)
+  listed = seen.listed
+  await later(20 * REREAD_MS)
+  expect(seen.listed).toBe(listed)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  // A turn that starts while the re-read asks the engine: no wait is started.
+  await spawn('z5')
+  seen.live = []
+  await endTurn($)
+  settling.isArmed = true
+  await later(REREAD_MS)
+  expect(settling.release).not.toBeNull()
+  await startTurn($)
+  settling.release?.()
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await endTurn($)
+  await later(REREAD_MS)
   expect(seen.notified).toEqual([WAITING_PLAN])
 
   // The marker gone when the last agent ends: the run's end alone.
   await turnWith('m1')
   delete files[RUN_MARKER]
-  await endTurn($, 'answer', 'm1')
+  listed = seen.listed
+  await endAgent('m1')
   await later(20 * REREAD_MS)
   expect(seen.notified).toEqual(['export-csv: run ended · PLANNING'])
+  expect(seen.listed).toBe(listed)
 
   // The task ESCALATED when the last agent ends: the escalation's message alone.
   files[RUN_MARKER] = RUN_SINCE
   await readAgain($)
   await turnWith('e1')
   files[STATE_MD] = calm('ESCALATED')
-  await endTurn($, 'answer', 'e1')
+  await endAgent('e1')
   await later(20 * REREAD_MS)
   expect(seen.notified).toEqual([ESCALATED_TEXT])
   expect(seen.toasts).toEqual([])
