@@ -91,7 +91,7 @@ says stop, after the stage `--until` names, or after 12 stages in one run (then 
 | `DRAFT-AWAITING-VISUAL-SIGNOFF`, `PLANNING` | `plan` | the slug, plus `--yes` as given unless the risk is HIGH | `plan` |
 | `BUILDING`, `base_sha` not set | `build` | the slug, plus `--worktree` as given | `build` |
 | `BUILDING`, `base_sha` set, and `quorum-plan next` prints a step (a sliced build that stopped partway) | `build` | the slug | `build` |
-| `BUILDING`, `base_sha` set, every step built | `simplify-diff`, then `review-loop` | none | `build` (before the review loop) |
+| `BUILDING`, `base_sha` set, every step built | first `rm -f .tasks/<slug>/.blind-mode-active` and stop any server a cut-off early blind test left running; then `simplify-diff`; then, for a MEDIUM or HIGH task, `blind-test` (its early blind test: the status is still `BUILDING`); then `review-loop`. A LOW or fast-path task goes from `simplify-diff` to `review-loop` | none | `build` (after `simplify-diff`, before the early blind test) |
 | `IN_REVIEW` | `review-loop` | none | `review` |
 | `CONVERGED` | `blind-test` | none | `blind` |
 | `BLIND-TEST` | an earlier blind test was cut off: `rm -f .tasks/<slug>/.blind-mode-active .tasks/.blind-mode-active`, stop any server it left running, `quorum-state set status CONVERGED`, say so, and follow `blind-test` | none | `blind` |

@@ -115,4 +115,4 @@ printed to stderr, if it printed one. Then start `quorum:prover`:
 Report file: `.tasks/<slug>/proof-build.md`, and show it. If any row fails, say which, and offer to
 start the builder again with the failures.
 
-The next steps are `/quorum:simplify-diff`, then `/quorum:review-loop`.
+The next steps are `/quorum:simplify-diff`, then `/quorum:review-loop`; for a MEDIUM or HIGH task the early blind test (`/quorum:blind-test`) comes first, between the two.

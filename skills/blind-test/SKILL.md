@@ -1,6 +1,6 @@
 ---
 name: blind-test
-description: Run Quorum's last automated layers on a CONVERGED MEDIUM or HIGH task. A security-only review (HIGH, or MEDIUM with security_on_medium), then a blind user who can't read the source tries the task's goal through the running app, plus a live WCAG 2.2 check for UI changes and a triage of the friction it reports. Problems go back to /quorum:review-loop; a clean run prints the final summary and waits for your review.
+description: Run Quorum's last automated layers on a CONVERGED MEDIUM or HIGH task. A security-only review (HIGH, or MEDIUM with security_on_medium), then a blind user who can't read the source tries the task's goal through the running app, plus a live WCAG 2.2 check for UI changes and a triage of the friction it reports. Problems go back to /quorum:review-loop; a clean run prints the final summary and waits for your review. Also runs early, on a built MEDIUM or HIGH task before review round 1: the blind user and the triage only, with its blockers fixed before the reviewers read the code.
 disable-model-invocation: true
 argument-hint: "[--models]"
 ---

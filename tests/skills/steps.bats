@@ -115,6 +115,9 @@ skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/blind-<run>.md`
 skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/a11y-<run>.md`
 skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/triage-<run>.md`
 skills/blind-test/steps.md|Report file: `.tasks/<slug>/proof-final.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/early-<n>.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/early-triage-<n>.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/security-skipped.md`
 skills/pr-draft/steps.md|Report file: `.tasks/<slug>/pr.md`
 skills/research/steps.md|Report file: `<research dir>/research/verify.md`
 skills/review/SKILL.md|Report file: `.tasks/<id>/run-<N>/<file>`
@@ -171,4 +174,98 @@ SITES
     grep -qF 'only this, and its `Report file:` line' "$REPO_ROOT/$f" || { echo "$f: a bare prompt loses its Report file line"; return 1; }
   done
   grep -qF "Agents' reports go to the files the steps name: the hook saves them" "$REPO_ROOT/skills/run/SKILL.md"
+}
+
+# One section of a file: from the line that starts with $2 to the line before the next "## " heading.
+section() {
+  awk -v h="$2" 'index($0, h) == 1 { f = 1; print; next } f && /^## / { exit } f' "$REPO_ROOT/$1"
+}
+
+# The same, as one line with single spaces, so a pinned sentence may wrap anywhere.
+section_line() { section "$1" "$2" | tr '\n' ' ' | tr -s ' '; }
+
+@test "a built MEDIUM or HIGH task goes to simplify-diff, the early blind test, then review-loop" {
+  row=$(grep -F '| `BUILDING`, `base_sha` set, every step built |' "$REPO_ROOT/skills/run/SKILL.md")
+  [ "$(printf '%s\n' "$row" | wc -l | tr -d ' ')" -eq 1 ]
+  stage=$(printf '%s' "$row" | awk -F '|' '{ print $3 }')
+  until=$(printf '%s' "$row" | awk -F '|' '{ print $5 }')
+  # The left-over marker goes first, then the three stages in this order.
+  [[ "$stage" == *'rm -f .tasks/<slug>/.blind-mode-active'*'stop any server'*'`simplify-diff`'*'MEDIUM or HIGH'*'`blind-test`'*'early blind test'*'`review-loop`'* ]]
+  [[ "$stage" == *'A LOW or fast-path task goes from `simplify-diff` to `review-loop`'* ]]
+  [[ "$until" == *'`build` (after `simplify-diff`, before the early blind test)'* ]]
+  # The other rows keep their stage and their --until name.
+  grep -qF '| `IN_REVIEW` | `review-loop` | none | `review` |' "$REPO_ROOT/skills/run/SKILL.md"
+  grep -qF '| `CONVERGED` | `blind-test` | none | `blind` |' "$REPO_ROOT/skills/run/SKILL.md"
+  # The stage commands' own next-step lines say the same.
+  for f in skills/build/steps.md skills/simplify-diff/steps.md skills/pipeline-laws/SKILL.md; do
+    grep -qF '`/quorum:review-loop`; for a MEDIUM or HIGH task the early blind test (`/quorum:blind-test`) comes first' "$REPO_ROOT/$f" \
+      || { echo "$f doesn't put the early blind test before the review loop"; return 1; }
+  done
+  grep -F '| `BUILDING` |' "$REPO_ROOT/skills/pipeline-laws/SKILL.md" | grep -qF 'early blind test'
+  for s in blind-test review-loop; do
+    grep '^description:' "$REPO_ROOT/skills/$s/SKILL.md" | grep -qi 'early' || { echo "$s/SKILL.md's description doesn't name the early run"; return 1; }
+  done
+}
+
+@test "the blind-test steps have the early run" {
+  steps=skills/blind-test/steps.md
+  early=$(section_line "$steps" '## Early run (from `BUILDING`)')
+  [ -n "$early" ]
+  for want in 'quorum-state set early_blind_sha' 'quorum-state set early_blind clean' 'quorum-state set early_blind blocked' \
+    'blind/early-<n>.md' 'blind/early-triage-<n>.md' 'blind/server-early-<n>.log' 'blind/early-[0-9]*.md' \
+    "Don't set \`BLIND-TEST\` and don't touch \`blind_runs\`" 'to `pending_findings`' 'has a `Result:` line' \
+    '## Early blind test <n>' 'quorum-state set status IN_REVIEW' '/quorum:review-loop'; do
+    [[ "$early" == *"$want"* ]] || { echo "the early run doesn't say: $want"; return 1; }
+  done
+  # It runs the blind user and the triage only: no security pass, no live accessibility pass, no counted run.
+  [[ "$early" == *'Skip the security pass (section 1) and the live accessibility pass'* ]]
+  if printf '%s\n' "$early" | grep -E 'incr blind_runs|set status (BLIND-TEST|HALTED|AWAITING-HUMAN)'; then
+    echo "the early run counts a run, or sets a status other than IN_REVIEW"; return 1
+  fi
+  # The readers of blind/ are told what an early file is.
+  grep -qF 'Files named `blind/early-*` are from the early blind test' "$REPO_ROOT/skills/pr-draft/steps.md"
+  grep -qF 'If `state.md` logs `## Blind test skipped`' "$REPO_ROOT/skills/pr-draft/steps.md"
+  grep -qF 'suggest no lesson for those' "$REPO_ROOT/$steps"
+  grep -F '.tasks/<slug>/blind/' "$REPO_ROOT/skills/codify-lesson/SKILL.md" | grep -qF 'not one in an `early-*` file'
+}
+
+@test "the early run starts when the build is done, sliced or not" {
+  pre=$(section_line skills/blind-test/steps.md '## 0. Preconditions')
+  [[ "$pre" == *'`quorum-plan sliced` fails (one builder built the whole plan), or `quorum-plan next` prints nothing (every step of a sliced plan is built)'* ]]
+  for want in '`BUILDING`' '`base_sha` set' 'a MEDIUM or HIGH risk' '`quorum-state get fast` not `true`' '`CONVERGED`' \
+    'say which command comes next and stop'; do
+    [[ "$pre" == *"$want"* ]] || { echo "section 0 doesn't say: $want"; return 1; }
+  done
+}
+
+@test "the later run skips the blind user only after a clean early run with nothing but test paths changed, and doesn't count it" {
+  steps="$REPO_ROOT/skills/blind-test/steps.md"
+  pre=$(section_line skills/blind-test/steps.md '## 0. Preconditions')
+  skip=${pre#*'**Skipping the blind user.**'}
+  [ "$skip" != "$pre" ]
+  for want in '`quorum-state get early_blind` is `clean`' '`git diff --name-only <early_blind_sha>..HEAD` succeeds' \
+    'every path it prints is a test path' 'the task is not a UI change' 'Markdown is never a test path' \
+    '`test`, `tests`, `__tests__`, `e2e`, `cypress` or `spec`' '`.test.` or `.spec.` or ends in `.bats`' \
+    '**A skipped run is not counted.**' 'Leave the status `CONVERGED` and `blind_runs` as they are' \
+    '## Blind test skipped' "section 4's halt doesn't apply"; do
+    [[ "$skip" == *"$want"* ]] || { echo "the skip rule doesn't say: $want"; return 1; }
+  done
+  # The skip is decided before the run is counted or the status set.
+  at=$(grep -n -m1 -F '**Skipping the blind user.**' "$steps" | cut -d: -f1)
+  set_at=$(grep -n -m1 -F 'quorum-state set status BLIND-TEST' "$steps" | cut -d: -f1)
+  incr_at=$(grep -n -m1 -F 'quorum-state incr blind_runs' "$steps" | cut -d: -f1)
+  [ "$at" -lt "$set_at" ]
+  [ "$at" -lt "$incr_at" ]
+  # The summary after a skip takes the early run's report and triage.
+  [[ "$(section_line skills/blind-test/steps.md '## 5. Stage 8 summary')" == *'After a skipped run the blind report is `blind/early-<n>.md` and the triage is `blind/early-triage-<n>.md`'* ]]
+}
+
+@test "pending findings record no round while round is 0" {
+  one=$(section skills/review-loop/steps.md '## 1. Pending findings first')
+  # One record in the section, and its step carries the condition.
+  [ "$(printf '%s\n' "$one" | grep -c 'quorum-branch record')" -eq 1 ]
+  step=$(printf '%s\n' "$one" | awk '/^2\. / { f = 1 } /^3\. / { f = 0 } f' | tr '\n' ' ' | tr -s ' ')
+  [[ "$step" == *'`quorum-branch record`'*'but only when `quorum-state get round` is above 0'* ]]
+  [[ "$step" == *'At round 0'*'record nothing, so round 1 reviews `base_sha..HEAD`'* ]]
+  [[ "$one" == *'the early run or the later one'* ]]
 }

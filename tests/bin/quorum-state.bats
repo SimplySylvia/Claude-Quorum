@@ -271,6 +271,30 @@ proof() {
   run "$BIN/quorum-state" --task demo set research_decision maybe; [ "$status" -eq 1 ]
 }
 
+@test "early_blind and early_blind_sha record the early blind test" {
+  "$BIN/quorum-state" --task demo init MEDIUM
+  "$BIN/quorum-state" --task demo set early_blind_sha abc1234
+  [ "$("$BIN/quorum-state" --task demo get early_blind_sha)" = abc1234 ]
+  "$BIN/quorum-state" --task demo set early_blind blocked
+  [ "$("$BIN/quorum-state" --task demo get early_blind)" = blocked ]
+  "$BIN/quorum-state" --task demo set early_blind clean
+  [ "$("$BIN/quorum-state" --task demo get early_blind)" = clean ]
+  # Anything else is refused, and the value before it stays.
+  for bad in maybe CLEAN "" "clean blocked"; do
+    run "$BIN/quorum-state" --task demo set early_blind "$bad"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"early_blind must be clean or blocked"* ]]
+  done
+  [ "$("$BIN/quorum-state" --task demo get early_blind)" = clean ]
+  # Both sit after blind_runs in the file, and setting them leaves that counter and the status alone.
+  [ "$(grep -A2 '^blind_runs:' .tasks/demo/state.md)" = "blind_runs: 0"$'\n'"early_blind_sha: abc1234"$'\n'"early_blind: clean" ]
+  [ "$("$BIN/quorum-state" --task demo get status)" = BUILDING ]
+  # A task that never had an early run reads as empty, and init doesn't write the keys.
+  "$BIN/quorum-state" --task other init MEDIUM
+  run "$BIN/quorum-state" --task other get early_blind; [ "$status" -eq 0 ]; [ -z "$output" ]
+  ! grep -q '^early_blind' .tasks/other/state.md
+}
+
 @test "root skips resolving the root, and incr passes it on" {
   "$BIN/quorum-state" --task demo init MEDIUM
   # A copy whose quorum-active-task always fails: only --root can tell it where the task lives.

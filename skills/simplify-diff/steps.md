@@ -30,4 +30,4 @@ variables in a git command: Claude Code refuses a command it can't show stays in
 5. If you changed anything, commit it as one commit following the repo's commit message style (for example
    "Simplify <slug>"). Show `git diff --stat <base_sha>` before and after.
 
-The next step is `/quorum:review-loop`.
+The next step is `/quorum:review-loop`; for a MEDIUM or HIGH task the early blind test (`/quorum:blind-test`) comes first.

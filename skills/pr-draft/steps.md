@@ -39,8 +39,10 @@ again without starting it anew saves over the same file: remove the file before 
 
    > Task `<slug>`. Base commit `<quorum-state get base_sha>`. Draft the PR title and description, and list any
    > commits that must not ship. Read `CLAUDE.md`, `.tasks/<slug>/rd.md`, `state.md`, `proof-final.md`, and
-   > `.tasks/<slug>/blind/` if it exists. <With skipped checks: "These checks were skipped, not passed: <ids and
-   > reasons>. List them as not run.">
+   > `.tasks/<slug>/blind/` if it exists. Files named `blind/early-*` are from the early blind test, which ran
+   > before review: its blockers were fixed before round 1, so cite it as an early check, not as a test of the final
+   > code. If `state.md` logs `## Blind test skipped`, there is no blind-user report on the final code: say so.
+   > <With skipped checks: "These checks were skipped, not passed: <ids and reasons>. List them as not run.">
 
 4. **Save and show.** Report file: `.tasks/<slug>/pr.md`. Make the description alone (everything after the `---`
    line) from that saved file with a command, not from the reply:

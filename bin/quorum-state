@@ -25,7 +25,10 @@
 # check files (hooks/protect-checks.sh) the user approved changing during the task: the plan's Checks changes, or
 # one the user unlocked themselves. `built_steps` lists the plan.md steps built so far, when a large plan is built a
 # step at a time (bin/quorum-plan). `research_decision` says whether the task's research changed a decision in its
-# spec (`changed`) or only backed the request (`confirmed`), to tell whether research pays for itself. `map` and
+# spec (`changed`) or only backed the request (`confirmed`), to tell whether research pays for itself.
+# `early_blind_sha` and `early_blind` record the early blind test, the one run after the build and before review
+# round 1 (skills/blind-test/steps.md): the commit it ran at, and `clean` (the blind user reported, and nothing went
+# to pending_findings) or `blocked`. `map` and
 # `map_task` name the map and the task in its tasks.md the task started from (/quorum:spec-and-eval --from-map), so
 # bin/quorum-map can tell which of the map's tasks have started.
 # A standalone review (/quorum:review) keeps its state in .tasks/review-<id>/ with `kind: review`, the `range` it
@@ -44,7 +47,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 git() { "$HERE/quorum-git" "$@"; }
 # shellcheck source=libexec/git-probe.sh
 . "$HERE/../libexec/git-probe.sh"
-ORDER="slug kind range session risk fast bug map map_task status worktree round base_sha round_shas stop_blocks signoff plan_rounds plan_approved pending_findings unlocked built_steps blind_runs escalated_from reviewer_model helper_model research_decision pr"
+ORDER="slug kind range session risk fast bug map map_task status worktree round base_sha round_shas stop_blocks signoff plan_rounds plan_approved pending_findings unlocked built_steps blind_runs early_blind_sha early_blind escalated_from reviewer_model helper_model research_decision pr"
 LISTS=" round_shas pending_findings unlocked built_steps "
 COUNTERS=" round stop_blocks plan_rounds blind_runs map_task "
 STATUSES=" DRAFT-AWAITING-VISUAL-SIGNOFF PLANNING BUILDING IN_REVIEW CONVERGED BLIND-TEST READY AWAITING-HUMAN HALTED ESCALATED REVIEWING FIXING REVIEWED INTERRUPTED "
@@ -185,6 +188,7 @@ validate_scalar() { # key value
     fast|bug) case "$2" in true|false) ;; *) die "$1 must be true or false" ;; esac ;;
     map) printf '%s' "$2" | grep -Eq '^[a-z0-9][a-z0-9.-]*$' || die "map must be a map slug" ;;
     research_decision) case "$2" in changed|confirmed) ;; *) die "research_decision must be changed or confirmed" ;; esac ;;
+    early_blind) case "$2" in clean|blocked) ;; *) die "early_blind must be clean or blocked" ;; esac ;;
     worktree) case "$2" in /*) ;; *) die "worktree must be an absolute path" ;; esac ;;
     range) printf '%s' "$2" | grep -Eq '^[^[:space:]]+$' || die "range must be one git range, with no spaces" ;;
     session) printf '%s' "$2" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_-]*$' || die "session must be a session id: letters, digits, - and _" ;;

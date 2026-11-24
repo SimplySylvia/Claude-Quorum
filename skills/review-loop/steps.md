@@ -51,11 +51,14 @@ again without starting it anew saves over the same file: remove the file before 
 
 ## 1. Pending findings first
 
-If `quorum-state get pending_findings` lists anything (from `/quorum:blind-test`), fix those before reviewing:
+If `quorum-state get pending_findings` lists anything (from `/quorum:blind-test`, the early run or the later one),
+fix those before reviewing:
 
 1. Write the items, one per block, to `.tasks/<slug>/review/pending-<n>.md`. These come from the running app, so they
    have no `file:line`; don't run `quorum-findings check` on them. The builder finds the cause.
-2. `quorum-branch record` (so the next review sees only the builder's changes).
+2. `quorum-branch record` (so the next review sees only the builder's changes), but only when
+   `quorum-state get round` is above 0. At round 0 the findings come from the early blind test and nothing has been
+   reviewed yet: record nothing, so round 1 reviews `base_sha..HEAD`, the build and this fix together.
 3. Start the builder (step 4 below) with that file as its findings. Then `quorum-state clear pending_findings`.
 
 ## 2. Each round
