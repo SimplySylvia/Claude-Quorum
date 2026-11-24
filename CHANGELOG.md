@@ -7,6 +7,18 @@ copy with `/plugin marketplace update`.
 
 ### Added
 
+- **Agents' reports are saved by a hook.** A new `SubagentStop` hook, `hooks/save-report.sh`, writes a stopping
+  agent's report, byte for byte, to the file the last `Report file: <path>` line of its prompt names (a line at
+  column 0; the path is relative, under `.tasks/` of the main working tree or of the task's own worktree). The
+  steps of `spec-and-eval`, `plan`, `build`, `review-loop`, `blind-test`, `pr-draft`, `research`, `review` and
+  `map` end each agent's prompt with that line in place of retyping the reply: they remove the file first, wait up
+  to 10 seconds for it once the agent has handed back, and save the reply by hand only if it still isn't there (an
+  older Claude Code, or the hook is off). The hook refuses a path outside `.tasks/`, one with a `:`, an empty
+  part, or a part that starts or ends with a dot, the names `rd.md`, `eval.md` and `state.md` in any letter case,
+  and a path that is a folder; it writes nothing for an empty report, and it never blocks a stop. `candidates.md`,
+  `pr-body.md` and `disputed.md` are made from the saved files. Two new files appear in a task's folder:
+  `review/builder.md`, the fix builder's last report, and `plan-prev.md`, the plan as it was while the planner
+  revises it.
 - **The dashboard shows a `/quorum:run`.** While the session is in a run, the band's Next button gives way to the
   run's words: `autopilot · next stop: plan approval` while it goes, and `autopilot · waiting for you: plan approval`
   in amber and bold while it waits on you, with shorter forms under 110 and under 90 columns (`auto · next: …`,
@@ -60,6 +72,26 @@ copy with `/plugin marketplace update`.
 - **`quorum-run enter` takes `--until <stage>` and `--yes`.** `/quorum:run` passes the flags you gave it, and they're
   written to the run's marker (`.tasks/.run-sessions/<session id>`) under its start time, so the dashboard knows
   where the run stops next. An unknown flag or stage is refused and leaves an existing marker unchanged.
+
+### Changed
+
+- **A blind user tries the build before review: the early blind test.** A MEDIUM or HIGH task now goes build,
+  `simplify-diff`, the early blind test, then the review loop, so round 1 reviews a change that already works; a
+  LOW or fast-path task goes as before. `/quorum:blind-test` on a built task that is still `BUILDING` is the
+  early run: the blind user and the friction triage only (no security pass, no live accessibility check), with
+  the reports in `blind/early-<n>.md` and `blind/early-triage-<n>.md`. Its blockers and the friction the change
+  caused go to the review loop, which fixes them first; round 1 then reviews `base_sha..HEAD`, the whole build
+  and that fix together. The early run never halts the task and doesn't count toward the two blocked runs that
+  do. `/quorum:run --until build` stops after `simplify-diff`, before the early blind test. `state.md` has two
+  new keys: `early_blind` (`clean` or `blocked`) and `early_blind_sha`.
+- **The later blind user is skipped when the early run already covers the code.** After the review converges, the
+  blind user doesn't run again when the early run was `clean`, every path changed since `early_blind_sha` is a
+  test path (or none changed; Markdown is never a test path), and the task is not a UI change. A skipped run is
+  not counted in `blind_runs`: the status stays `CONVERGED`, `state.md` logs `## Blind test skipped`, a security
+  pass that is due still runs (`blind/security-skipped.md`), the summary takes the early report and triage, and
+  the dashboard shows no Blind test row at the PR handoff. The PR writer is told that `blind/early-*` files are
+  an early check, not a test of the final code, and to say so when the later blind user was skipped. No lesson
+  is suggested for an early run's blocker, since no reviewer had seen the code.
 
 ## 0.12.0 (2026-11-18)
 

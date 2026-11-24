@@ -42,8 +42,11 @@
   doesn't change, or on a line with a lint-ignore comment. It keeps `[PRE-EXISTING]` ones, and says why for each
   drop.
 - **Hard caps.** At most 3 review rounds, then `HALTED` with a post-mortem and two redesign options.
-- **Quiet outside a task.** Apart from the secret guard, the hooks do nothing unless a task is building, in review,
-  or escalated, a blind test is running, or the session is running `/quorum:run` or working on a map.
+- **Quiet outside a task.** Apart from the secret guard and the report hook, the hooks do nothing unless a task is
+  building, in review, or escalated, a blind test is running, or the session is running `/quorum:run` or working on
+  a map. The report hook runs when any agent stops, task or no task: if the agent's prompt has a `Report file:`
+  line, it writes the agent's report to that one file under `.tasks/`, and does nothing else. It never writes
+  `rd.md`, `eval.md`, `state.md`, or a path with a part that starts or ends with a dot, and it never blocks a stop.
 - **Asks before writing** to `CLAUDE.md`, `REVIEW.md`, or your global `~/.claude/CLAUDE.md`, with a diff first.
 - **Local data only.** Blind tests and `eval.md` checks use local, temporary, or synthetic data, never production.
 

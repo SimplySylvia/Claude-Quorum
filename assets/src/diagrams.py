@@ -201,7 +201,9 @@ def draw_map(theme):
     s.arrow(f"M{vx - 3:.1f},{fy + CHIP_H / 2} H{gx + gw + 3:.1f}", color="back")
 
     # 5 · Security & blind test.
-    t = band("blind", "6", "Security & blind test", "/quorum:blind-test", 100, ["MEDIUM/HIGH only"])
+    t = band("blind", "6", "Security & blind test", "/quorum:blind-test", 130, ["MEDIUM/HIGH only",
+                                                                                "early run before review:",
+                                                                                "blind user and triage only"])
     s.row(CONTENT, t + 28, [("security-reviewer", "HIGH", False), ("blind-user", "can't read source", False),
                             ("a11y-auditor: live", "UI change", False), ("friction-triager", "if friction", False),
                             ("prover", "no blockers", False)])
@@ -264,7 +266,8 @@ def draw_map(theme):
     # Forward flow between bands, down the left of the content column.
     spine = CONTENT - 20
     for upper, lower, label in (("init", "spec", None), ("spec", "plan", "IMPORTANT spec findings fixed"),
-                                ("plan", "build", "plan approved"), ("build", "review", None),
+                                ("plan", "build", "plan approved"),
+                                ("build", "review", "MEDIUM/HIGH: early blind test first"),
                                 ("review", "blind", "converged · LOW: prover, then READY"), ("blind", "ship", None)):
         uy, uh = bands[upper]
         s.arrow(f"M{spine},{uy + uh - 8} V{bands[lower][0] + 8}")
@@ -676,7 +679,7 @@ def draw_stages(theme):
 
 
 # /quorum:run: the stages it chains, and where it stops. Each stage: (name, [(kind, text)]), kind "ask" (it asks
-# you and waits) or "halt" (it stops; you decide what next).
+# you and waits) or "halt" (it stops; you decide what next). RUN_TAGS: the small "when it runs" line in a stage's box.
 RUN_STAGES = [
     ("Spec", [("ask", "one proposal: slug, tier, research, docs; models once per repo. --yes: all but HIGH"),
               ("ask", "a follow-up round only if your answers open new questions")]),
@@ -684,10 +687,12 @@ RUN_STAGES = [
               ("ask", "plan approval, with its open questions. --yes approves a clean plan, except HIGH")]),
     ("Build", []),
     ("Simplify", []),
+    ("Early blind", []),
     ("Review loop", [("halt", "HALTED after the round cap")]),
     ("Blind test", [("halt", "HALTED if fixes don't converge")]),
     ("PR draft", [("ask", "MEDIUM/HIGH: your review. Never pushes or opens the PR")]),
 ]
+RUN_TAGS = {"Early blind": "MEDIUM/HIGH"}
 
 
 def draw_run(theme):
@@ -714,7 +719,10 @@ def draw_run(theme):
     for i, (name, gates) in enumerate(RUN_STAGES):
         x = LEFT + i * (bw + gap)
         s.rect(x, by, bw, bh, "chip")
-        s.text(x + bw / 2, by + 27, name, size=LABEL, weight=600, anchor="middle")
+        tag = RUN_TAGS.get(name)
+        s.text(x + bw / 2, by + (20 if tag else 27), name, size=LABEL, weight=600, anchor="middle")
+        if tag:
+            s.text(x + bw / 2, by + 36, tag, size=TAG, color="muted", anchor="middle")
         if i:
             s.arrow(f"M{x - gap + 3:.1f},{by + bh / 2} H{x - 3:.1f}")
         gy, above = by + bh + 26, by + bh
@@ -730,18 +738,22 @@ def draw_run(theme):
             gy += 24 + len(lines) * 14 + 18
             bottom = max(bottom, gy)
 
-    # Blind-test blockers go back to the review loop, over the top of the boxes.
-    rx = LEFT + 4 * (bw + gap) + bw / 2
-    bx = LEFT + 5 * (bw + gap) + bw / 2
-    s.arrow(f"M{bx:.1f},{by - 2} V{by - 16} H{rx:.1f} V{by - 3}", color="back")
-    s.text((rx + bx) / 2, by - 21, "blockers", size=TAG, color="back", anchor="middle")
+    # Blockers go to the review loop, over the top of the boxes: the early blind test's before round 1, and the
+    # later blind test's back to it.
+    ex = LEFT + 4 * (bw + gap) + bw / 2
+    rx = LEFT + 5 * (bw + gap) + bw / 2
+    bx = LEFT + 6 * (bw + gap) + bw / 2
+    s.arrow(f"M{ex:.1f},{by - 2} V{by - 16} H{rx - 10:.1f} V{by - 3}", color="back")
+    s.text((ex + rx - 10) / 2, by - 21, "early blockers", size=TAG, color="back", anchor="middle")
+    s.arrow(f"M{bx:.1f},{by - 2} V{by - 16} H{rx + 10:.1f} V{by - 3}", color="back")
+    s.text((rx + 10 + bx) / 2, by - 21, "blockers", size=TAG, color="back", anchor="middle")
 
     ly = bottom + 8
     badge(LEFT + 12, ly, "ask")
     s.text(LEFT + 28, ly + 4, "stops and asks you", size=TAG + 0.5, color="muted")
     badge(LEFT + 182, ly, "halt")
     s.text(LEFT + 198, ly + 4, "stops: you decide what next", size=TAG + 0.5, color="muted")
-    s.text(W - LEFT, ly + 4, "LOW tasks skip the blind test and end READY.", size=TAG + 0.5, color="muted",
+    s.text(W - LEFT, ly + 4, "LOW tasks skip both blind tests and end READY.", size=TAG + 0.5, color="muted",
            anchor="end")
     ly += 24
     s.text(LEFT + 4, ly + 4, "--until <stage> stops after a stage; /quorum:run again continues from the task's status, "
@@ -756,11 +768,13 @@ def draw_run(theme):
         ly += 22
         s.text(LEFT + 4, ly + 4, flag, size=TAG + 0.5, mono=True, weight=600)
         s.text(LEFT + 4 + mono_w("--deep-research", TAG + 0.5) + 10, ly + 4, text, size=TAG + 0.5, color="muted")
-    return s.svg(int(ly + 16), "/quorum:run: spec, plan, build, simplify, review loop, blind test, PR draft, in order. "
+    return s.svg(int(ly + 16), "/quorum:run: spec, plan, build, simplify, the early blind test for MEDIUM and HIGH tasks, review loop, "
+                 "blind test, PR draft, in order. "
                  "It stops to ask at the spec (one proposal of slug, tier, research, and docs, and the models the first time in a repo; --yes accepts all but a HIGH tier; a follow-up round only if your answers open new questions) "
                  "and the plan (mockup sign-off for UI, plan approval with the plan's open questions; --yes approves a clean plan except for HIGH), "
                  "and for your review of MEDIUM and HIGH tasks after the PR draft. It stops if the review loop or the "
-                 "blind test halts. Blind-test blockers go back to the review loop. It never pushes or opens the PR. "
+                 "blind test halts. The early blind test's blockers go to the review loop before round 1, and the later "
+                 "blind test's go back to it. LOW tasks skip both blind tests. It never pushes or opens the PR. "
                  "--fast takes a LOW task through without spec reviewers or a plan stage, with one reviewer; "
                  "--worktree builds the task in its own git worktree; --bug reproduces the bug first and proves it "
                  "fixed; --deep-research runs lensed researchers in parallel and checks every claim; --map starts "
