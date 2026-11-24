@@ -85,9 +85,12 @@ tasks, reviews, and maps; research isn't on the dashboard.
 While this session is in a `/quorum:run`, from the run's start until it ends, the band and the pane say so, and the
 run's stops are [announced](#announcements). A run is in one of three states:
 
-- **Going:** the run is working, and starts the next stage itself.
-- **Waiting:** the run asked you a question, or its turn ended and it's your move. After a turn's end the dashboard
-  takes about half a second to say so, while it reads the task again.
+- **Going:** the run is working, and starts the next stage itself. A run whose turn ended while its Quorum agents
+  are still at work in the background is going too, until the last of them has ended.
+- **Waiting:** the run asked you a question, or its turn ended with no Quorum agent at work and it's your move. An
+  open question reads as waiting whether agents are at work or not. After a turn's end, or after the last agent's
+  when the turn ended first, the dashboard takes about half a second to say so, while it reads the task again; a
+  turn that starts in that time, as the one an agent's report starts, keeps the run going.
 - **Stopped:** the task is `ESCALATED` or `HALTED`, or the run's last turn ended on an API error, a refusal, or an
   interrupt (Esc). A turn's stop clears when the next turn starts; a status's stop stays until the status changes.
 
@@ -219,12 +222,14 @@ is announced once, with the task's slug in front:
 | The task escalates | `csv-export: run stopped · ESCALATED · fix the checks, then /quorum:run` |
 | The run's turn dies on an API error | `csv-export: run stopped · API error · /quorum:run continues it` |
 | The run's turn is refused | `csv-export: run stopped · refused · /quorum:run continues it` |
-| The run ends | `csv-export: run ended · AWAITING-HUMAN`, with the task's status |
+| The run ends | `csv-export: run ended · AWAITING-HUMAN`, with where it stopped: `PR drafted`, `plan approved`, or the task's status |
 
 - **A question** is announced when its dialog opens, once for each dialog, and names the gate of the task on show.
   A turn that ends with the run still there, as on a question in plain text, is announced with the same words when
   the run starts to read as waiting, about half a second after the turn's end, unless a new turn has started or the
-  run has ended by then.
+  run has ended by then. While a Quorum agent is still at work the run is going, so nothing is announced; the same
+  half a second after the last one ends, the run reads as waiting and is announced, unless a turn has started or
+  the run has ended by then.
 - **A halt or an escalation** is announced when the status of the task on show changes to `HALTED` or `ESCALATED`,
   each time it does, in place of the status toast. It's the only message for that moment: no waiting message
   follows it at the turn's end, and none for the dead turn or the run's end while the task is still `HALTED` or
@@ -232,8 +237,12 @@ is announced once, with the task's slug in front:
 - **A turn that dies** is announced when it ends, while the run is still there.
 - **The run's end** is announced when the dashboard finds the run gone, whether it ended by itself or you ran
   `quorum-run leave`. It is then the only message: a turn that dies as the run ends gets no message of its own.
+  It says where the run stopped: `run ended · PR drafted` once the task's `pr.md` exists, whatever the status;
+  `run ended · plan approved` for a `BUILDING` task whose build hasn't started (its `state.md` has no `base_sha`),
+  as after `--until plan`; otherwise the task's status.
 - **The slug** is the task on show's. With none on show it is the last task the run showed, with the status it had
-  then: the stages take a finished task off show before the run ends, and the run's-end message still names it.
+  and where it had stopped as last read then: the stages take a finished task off show before the run ends, and the
+  run's-end message still names it.
   A run with no task says the same without the slug: `the run is waiting for you`,
   `run stopped · API error · /quorum:run continues it`, `run ended`.
 
@@ -251,6 +260,8 @@ long as the stop lasts.
   the run's next turn starts. A halt, an escalation, a turn that dies and the run's end are announced even then.
   A session that starts, or is resumed, already in a run has no such quiet start.
 - **An interrupt (Esc).** You did it. The band and the Run card still read the run as stopped.
+- **A turn that ends while the run's Quorum agents are at work.** The run is going; it is announced as waiting
+  only if the last agent ends and no turn starts.
 - **A sub-agent's question, or a sub-agent's turn that dies.**
 - **A task already `HALTED` or `ESCALATED`** when it first comes on show: only a change to one of the two is told.
 - **A session that starts, is cleared or is resumed** after its run went: that isn't a run ending.

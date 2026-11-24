@@ -19,7 +19,7 @@ import {
 import { awaitingFrom, awaitingOf, cellWidth, changeHeader, cutEnd, confidenceRow, footprint, glue, iconsOn, isBigTree, isEditShown, markText, markWords, roundKept, runEnds, slashes, stepFindings, stepRows, trackFindings, treeHeader, treeRows, wrap } from './tree'
 import type { StepLine, TreeChange, TreeEdit, TreePart } from './tree'
 import { isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskRow, taskState, ticketOrder, ticketRow, ticketSummary, wrapWhole } from './map'
-import { BUTTON_FRAME, endedText, fitRun, gateNow, parseRunMarker, runCardRows, runCommand, runForms, runToast, runView, stoppedText, stripControls, waitingText, withSlug } from './run'
+import { BUTTON_FRAME, endedText, fitRun, gateNow, parseRunMarker, runCardRows, runCommand, runForms, runToast, runView, stoppedAt, stoppedText, stripControls, waitingText, withSlug } from './run'
 import type { RunTurn } from './run'
 
 const PANE = 'quorum-dashboard'
@@ -71,15 +71,23 @@ let runTurn: RunTurn = { asking: 0, ended: null, isIdle: false }
 // The quiet start: from entering the run until a Quorum agent starts, the task on show changes, or the next
 // main-session turn starts. The person has just typed the command, so its questions aren't announced.
 let isQuiet = false
-// The last task on show in a run outside the quiet start, with the status it had then. Memory only.
-let lastShown: { slug: string; status: string } | null = null
+// A run's task as a read found it: its slug, its status, and where a run that ends on it stopped (stoppedAt).
+type RunTask = { slug: string; status: string; where: string }
+// The last task on show in a run outside the quiet start, as it read then. Memory only.
+let lastShown: RunTask | null = null
+// Whether the task on show at the last decided read had a base_sha (true with none on show, and after a reload).
+// Not a field of the task atom, and the next read may find that task off show. Memory only.
+let wasBased = true
 // The session id the last decided read was made under. A `/clear` and a resume go on under a new id with no
 // `session.start`, and the first read under one counts no read before it. Memory only.
 let runSession: string | null = null
 // The end of the last refresh's write-and-decide section: the next one starts after it. Memory only.
 let deciding: Promise<unknown> = Promise.resolve()
-// The run's task: the task on show, else the last one shown since the quiet start ended; null for none.
-const runTaskOf = (t: Snapshot | null): { slug: string; status: string } | null => (t ? { slug: t.slug, status: t.status } : isQuiet ? null : lastShown)
+// The task `t` as a run's task, `hasBase` saying whether its state.md has a base_sha.
+const shownAs = (t: Snapshot, hasBase: boolean): RunTask => ({ slug: t.slug, status: t.status, where: stoppedAt(t.status, t.prDrafted, hasBase) })
+// The run's task: the task on show, else the last one shown since the quiet start ended; null for none. Only the
+// run's end reads `where`, and it gives `hasBase`.
+const runTaskOf = (t: Snapshot | null, hasBase = true): RunTask | null => (t ? shownAs(t, hasBase) : isQuiet ? null : lastShown)
 // Run `work` once every `work` given before it has ended, whether it failed or not. A failed one rejects only its
 // own caller.
 function inOrder<T>(work: () => Promise<T>): Promise<T> {
@@ -92,7 +100,8 @@ function inOrder<T>(work: () => Promise<T>): Promise<T> {
 let turnNo = 0
 // How long after a main-session turn ends, in a run, the task is read once more: only then does a turn that ended
 // with an answer read as waiting on the person, which is announced there (no second timer), and a status the Stop
-// hook wrote late is still seen. From the trial
+// hook wrote late is still seen. A Quorum agent still running holds the wait back, and the end of one sets the
+// same re-read, this long after it: the turn its report starts comes first. From the trial
 // in .tasks/map-release-0-13/trials/11-result.md (main working tree), on Claude Code 2.1.330, headless, Windows 11:
 // (a) the Stop hook's write lands before `turn.complete`: the last hook's write came 47 to 63 ms before it, and
 //     `turn.complete` fired only after the last Stop hook had finished. So the delay (a) needs is the least, 500 ms.
@@ -672,6 +681,9 @@ async function refresh($: EngineInterface, maxRounds: number, forcePr = false, o
   const sessionRoot = await $.session.root()
   const { tasksRoot } = await gitPaths($, sessionRoot)
   const marker = await readRun($, tasksRoot, session)
+  // Whether the build has started, for where a run's end says it stopped: state.md's base_sha, which the task atom
+  // doesn't hold. Read only for a BUILDING task.
+  const hasBase = after?.status !== 'BUILDING' || scalar(parseFrontmatter((await readOr($, `${tasksRoot}/.tasks/${after.slug}/state.md`)) ?? ''), 'base_sha') !== ''
   const { isStatusChange } = await inOrder(async () => {
     // Each write answers the value it replaced, through a holder: the engine's scan takes an atom only where it is
     // named, so no helper can do the swap for both.
@@ -701,8 +713,9 @@ async function refresh($: EngineInterface, maxRounds: number, forcePr = false, o
       lastShown = null
     }
     // The task atom outlives a reload, so a fresh read doesn't take the run's task from it.
-    if ((marker || ran) && !isQuiet) lastShown = after ? { slug: after.slug, status: after.status } : was && !isFresh ? { slug: was.slug, status: was.status } : lastShown
-    const mine = runTaskOf(after)
+    if ((marker || ran) && !isQuiet) lastShown = after ? shownAs(after, hasBase) : was && !isFresh ? shownAs(was, wasBased) : lastShown
+    wasBased = hasBase
+    const mine = runTaskOf(after, hasBase)
     if (after && isStatusChange) {
       if ((marker || wasInRun) && (after.status === 'HALTED' || after.status === 'ESCALATED')) {
         // In a run at this read or the one before: announced, with no status toast.
@@ -718,9 +731,10 @@ async function refresh($: EngineInterface, maxRounds: number, forcePr = false, o
     // A turn that died in a run, the quiet start included. A marker found gone at this read gives the run's end
     // alone, and a halt or an escalation its own message alone.
     if (o.died && marker && !(mine && isStuck(mine.status))) announce($, stoppedText(mine?.slug ?? '', o.died))
-    // The run's end. A halt or an escalation was announced already: the status says so, and nothing is remembered.
+    // The run's end, with where it stopped. A halt or an escalation was announced already: the status says so, and
+    // nothing is remembered.
     if (ran && !marker) {
-      if (!(mine && isStuck(mine.status))) announce($, endedText(mine?.slug ?? '', mine?.status ?? ''))
+      if (!(mine && isStuck(mine.status))) announce($, endedText(mine?.slug ?? '', mine?.where ?? ''))
       isQuiet = false
       lastShown = null
     }
@@ -838,9 +852,11 @@ function noteTurnEnd($: EngineInterface, reason: RunTurn['ended'], turn: number)
   redraw($)
 }
 
-// After the main session's turn `turn` ended: in a run set the one re-read of the task, RUN_REREAD_MS on, without
-// waiting for it. Only at that re-read does an answered turn start to read as waiting, and only if no turn started
-// since and the run is still there. The wait is announced there, once, after the quiet start and unless the run's
+// After the main session's turn `turn` ended, or after a Quorum agent ended once `turn` had ended with an answer:
+// in a run set the one re-read of the task, RUN_REREAD_MS on, without waiting for it (a re-read still pending is
+// replaced). Only at that re-read does an answered turn start to read as waiting, and only if no turn started
+// since, the run is still there, and no Quorum agent is running: until its agents have ended the run is going. The
+// wait starts once for a turn, and is announced there, once, after the quiet start and unless the run's
 // task is HALTED or ESCALATED (that was announced, or is at this read): nothing is awaited between the turn check
 // and the write and the announcement. A turn's end that gets here after a later turn's end set its re-read, or after
 // a session start dropped it, sets none: nothing is awaited between that check and the write. Never throws.
@@ -859,7 +875,8 @@ async function setReread($: EngineInterface, turn: number, maxRounds: number) {
           await refresh($, maxRounds)
           const isInRun = (await read($, run)) !== null
           const t = await read($, task)
-          if (turn === turnNo && runTurn.ended === 'answer' && isInRun) {
+          const isWorking = (await read($, agents)).some(a => a.endedAt === null)
+          if (turn === turnNo && runTurn.ended === 'answer' && !runTurn.isIdle && isInRun && !isWorking) {
             runTurn = { ...runTurn, isIdle: true }
             const mine = runTaskOf(t)
             if (!isQuiet && !(mine && isStuck(mine.status))) announce($, waitingText(mine?.slug ?? '', t ? gateNow(t.status) : ''))
@@ -1011,7 +1028,11 @@ export const register: Register = (on, options) => {
     if (e.agentId !== undefined) {
       const id = e.agentId
       const now = await $.clock.now()
-      keepTicking($, await update($, agents, all => all.map(a => (a.id === id && a.endedAt === null ? { ...a, endedAt: now } : a))))
+      const all = await update($, agents, list => list.map(a => (a.id === id && a.endedAt === null ? { ...a, endedAt: now } : a)))
+      keepTicking($, all)
+      // A Quorum agent ended after the main session's turn ended with an answer: read again as after that turn's
+      // end, and the run starts to wait there if this was the last one running and no turn has started.
+      if (all.some(a => a.id === id) && runTurn.ended === 'answer') await setReread($, turnNo, maxRounds)
     } else {
       // Before the refresh, which awaits: a turn that starts while the task is read resets what this wrote.
       noteTurnEnd($, e.reason, turn)

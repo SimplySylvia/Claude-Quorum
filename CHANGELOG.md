@@ -13,8 +13,9 @@ copy with `/plugin marketplace update`.
   `▸▸ …`; `waiting: …`, `◆ …`). A problem still comes first: beside one the words drop a size, to the short form
   (`▸▸ …`, `◆ …`) under 110 columns. On a band that doesn't fit the words step down, then the slug and the stage
   dots give way for a form that fits whole, or else for the shortest form cut at the end, and the words go only
-  when not even that can be drawn; they never wrap onto a second row. Nothing of the run shows with no task on show
-  or in a map session.
+  when not even that can be drawn; they never wrap onto a second row. A run whose turn ended while its Quorum
+  agents are still at work reads as going, not waiting, until the last of them has ended. Nothing of the run shows
+  with no task on show or in a map session.
 - **The Run card.** During a run it's the first card of the task's pane: `Run · autopilot · since 14:02`, how the run
   was started (`started with --until review --yes`, or `stops only where you must decide`), and the next stop, what
   the run waits on, or why it stopped. A stopped run's first row reads `Run · stopped · started 14:02`, so the time
@@ -32,7 +33,10 @@ copy with `/plugin marketplace update`.
   (`csv-export: run stopped · HALTED · see the post-mortem`,
   `… run stopped · ESCALATED · fix the checks, then /quorum:run`), a turn that dies
   (`… run stopped · API error · /quorum:run continues it`, or `refused`), and the run's end
-  (`csv-export: run ended · AWAITING-HUMAN`). Each is a notification through Claude Code's own notification setting;
+  (`csv-export: run ended · AWAITING-HUMAN`, with where it stopped: `PR drafted` once `pr.md` exists,
+  `plan approved` for a `BUILDING` task whose build hasn't started, else the status). A turn that ends while the
+  run's Quorum agents are at work isn't a question: it's announced only if the last agent ends and no turn
+  starts. Each is a notification through Claude Code's own notification setting;
   there is no Quorum setting for it. When it can't be sent the same text is a toast that stays 15 seconds, and on a
   channel that only rings a bell you get the bell and the toast. The run's opening questions, an interrupt (Esc)
   and a sub-agent's question aren't announced, and nothing is outside a run. See

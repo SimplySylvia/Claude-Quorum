@@ -18,7 +18,7 @@ import {
   MAX_TICKET_DEPTH, isClosed, isFrontier, isHandoffOf, isMapSlug, isSessionId, joinGists, mapPhase, mapStepper, mapWaits, mergedCount, nextStates, nowTicket, openBlockers,
   parseMapMd, parseTaskStates, parseTasksMd, parseTicket, readyTasks, statesOf, taskDots, taskState, ticketOrder, ticketRow, ticketStatus, ticketSummary, wrapWhole,
 } from '../../hooks/dashboard/map'
-import { fitRun, gateNow, nextStop, runForms, runView, stripControls } from '../../hooks/dashboard/run'
+import { fitRun, gateNow, nextStop, runForms, runView, stoppedAt, stripControls } from '../../hooks/dashboard/run'
 import type { ChangedFile, FileList, FindingsView, MapStates, MapTaskRun, MapTicket, MapView, TreeFinding } from '../../types'
 import { DEMO_DONE } from './fixtures/demo-done'
 import { DEMO_MAP, DEMO_MAP_TASKS, DEMO_MAP_TICKETS } from './fixtures/demo-map'
@@ -7798,6 +7798,8 @@ test("an announcement is a notification, or a toast when it wasn't sent", async 
 
 const WAITING_PLAN = 'export-csv: waiting for you · plan approval'
 const WAITING_NO_GATE = 'export-csv: the run is waiting for you'
+// A Quorum agent as a stage of a run starts one: in the background, so the main session's turn ends while it works.
+const RESEARCHER_BG = { prompt: 'Research the task', description: 'researcher', subagentType: 'quorum:researcher', parentModel: 'claude-opus-5-5', provider: { plugin: 'quorum', tier: 'user' }, background: true, fork: false } as const
 // What one question dialog announces: read while the dialog is still open, and unchanged once it is answered.
 async function dialog($: Engine, seen: Seen, clock: { settle: () => Promise<void> }, held: ReturnType<typeof heldQuestions>, agentId?: string) {
   forget(seen)
@@ -7944,6 +7946,7 @@ test('a question dialog in a run is announced once, with its gate', async ($, on
 })
 
 test('a turn that ends on a question is announced when the run starts to wait', async ($, on) => {
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.tool_use_id }))
   const files = inRun('PLANNING')
   const { seen, clock } = runWorld(on, files)
   await $.session.start(START)
@@ -7990,6 +7993,18 @@ test('a turn that ends on a question is announced when the run starts to wait', 
   await clock.advance(REREAD_MS)
   await clock.settle()
   expect(seen.notified).toEqual(['export-csv: run ended · PLANNING'])
+
+  // A Quorum agent still running at the re-read: the run is going, and nothing is announced.
+  files[RUN_MARKER] = RUN_SINCE
+  await readAgain($)
+  await startTurn($)
+  await $.agent.spawn({ tool_use_id: 'r1', ...RESEARCHER_BG })
+  forget(seen)
+  await endTurn($)
+  await clock.advance(10 * REREAD_MS)
+  await clock.settle()
+  expect(seen.notified).toEqual([])
+  expect(seen.toasts).toEqual([])
 })
 
 test('the opening questions of a run are not announced', async ($, on) => {
@@ -8519,6 +8534,83 @@ test("the run's end is announced with the task's status", async ($, on) => {
   await leave()
   expect(seen.notified).toEqual(['run ended'])
   expect(seen.toasts).toEqual([])
+
+  // Where it stopped, in this order: `PR drafted` once the task's pr.md exists, whatever the status; `plan approved`
+  // for BUILDING before the build started (state.md has no base_sha, or a null one); else the status. Each with the
+  // task on show, and with it taken off show before the marker went.
+  const NO_BASE = calm('BUILDING').replace('base_sha: abc123\n', '')
+  const PR_MD = '.tasks/export-csv/pr.md'
+  expect(NO_BASE).not.toContain('base_sha')
+  const stateReads = () => seen.reads.filter(path => path === `/repo/${STATE_MD}`).length
+  const stops: [text: string, hasPr: boolean, where: string][] = [
+    [NO_BASE, false, 'plan approved'],
+    [calm('BUILDING').replace('base_sha: abc123', 'base_sha: null'), false, 'plan approved'],
+    [calm('BUILDING'), false, 'BUILDING'],
+    [calm('PLANNING').replace('base_sha: abc123\n', ''), false, 'PLANNING'],
+    [NO_BASE, true, 'PR drafted'],
+    [calm('READY'), true, 'PR drafted'],
+    [calm('AWAITING-HUMAN'), true, 'PR drafted'],
+  ]
+  for (const [text, hasPr, where] of stops) {
+    for (const isShown of [true, false]) {
+      files['.git/HEAD'] = ON_TASK
+      files[STATE_MD] = text
+      delete files[PR_MD]
+      if (hasPr) files[PR_MD] = '# Export customers as CSV\n'
+      files[RUN_MARKER] = RUN_SINCE
+      await $.session.start(START)
+      await clock.settle()
+      forget(seen)
+      if (!isShown) {
+        files['.git/HEAD'] = ON_MAIN
+        await again()
+      }
+      const before = stateReads()
+      await leave()
+      expect({ where, isShown, notified: seen.notified }).toEqual({ where, isShown, notified: [`export-csv: run ended · ${where}`] })
+      // A read of a task on show checks that its state.md exists and reads it; only for a BUILDING task is it read
+      // once more, for its base_sha.
+      if (isShown) expect({ where, reads: stateReads() - before }).toEqual({ where, reads: text.includes('status: BUILDING') ? 3 : 2 })
+    }
+  }
+  // The rule alone: pr.md first, then BUILDING with no base_sha, and no other status reads `plan approved`.
+  expect(stoppedAt('BUILDING', false, false)).toBe('plan approved')
+  expect(stoppedAt('BUILDING', false, true)).toBe('BUILDING')
+  expect(stoppedAt('PLANNING', false, false)).toBe('PLANNING')
+  expect(stoppedAt('HALTED', true, false)).toBe('PR drafted')
+  // The build starts while the run goes on: the end reads the status once state.md has a base_sha.
+  files['.git/HEAD'] = ON_TASK
+  files[STATE_MD] = NO_BASE
+  delete files[PR_MD]
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  files[STATE_MD] = calm('BUILDING')
+  await again()
+  forget(seen)
+  await leave()
+  expect(seen.notified).toEqual(['export-csv: run ended · BUILDING'])
+  // A task read on show only during the quiet start, and found off show at the read that finds the marker gone:
+  // where it stopped as that one read found it.
+  files[STATE_MD] = NO_BASE
+  await again()
+  files[RUN_MARKER] = RUN_SINCE
+  await enterRun($)
+  await startTurn($)
+  files['.git/HEAD'] = ON_MAIN
+  forget(seen)
+  await leave()
+  expect(seen.notified).toEqual(['export-csv: run ended · plan approved'])
+  // A halted task whose pr.md exists: still silent, by its status.
+  files['.git/HEAD'] = ON_TASK
+  files[STATE_MD] = calm('HALTED')
+  files[PR_MD] = '# Export customers as CSV\n'
+  files[RUN_MARKER] = RUN_SINCE
+  await $.session.start(START)
+  await clock.settle()
+  forget(seen)
+  await leave()
+  expect(seen.notified).toEqual([])
+  expect(seen.toasts).toEqual([])
 })
 
 test('one moment gets one message', async ($, on) => {
@@ -9004,4 +9096,189 @@ test('no state of the run is told by color alone', async ($, on) => {
       expect(s.card).toContain('Run · stopped')
     }
   }
+})
+
+test('a run whose agents are still working is going, not waiting', async ($, on) => {
+  const held = heldQuestions(on)
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.tool_use_id }))
+  // Once armed, the next write of the `run` atom waits for `hold.release`: the test's way into the middle of a re-read.
+  const hold: { isArmed: boolean; release: (() => void) | null } = { isArmed: false, release: null }
+  const register = on as unknown as (event: string, matcher: unknown, hook: unknown) => void
+  register('state.set', { plugin: 'quorum', key: 'run' }, async (_: unknown, e: unknown, next: (e: unknown) => Promise<unknown>) => {
+    if (hold.isArmed) {
+      hold.isArmed = false
+      await new Promise<void>(resolve => { hold.release = resolve })
+    }
+    return next(e)
+  })
+  const files = inRun('PLANNING')
+  const { seen, clock } = runWorld(on, files)
+  await $.session.start(START)
+  const spawn = (id: string, subagentType: string = RESEARCHER_BG.subagentType) => $.agent.spawn({ tool_use_id: id, ...RESEARCHER_BG, subagentType })
+  // The run as the band (140 columns), the Run card's last row and the Now card's run lines read.
+  const reads = async () => {
+    const d = await $.ui.mount(paneAt(44))
+    const now = (await d.findAll({ type: 'Box' })).filter(b => /^now-run:\d+$/.test(b.key ?? '')).map(b => b.text)
+    await d.unmount()
+    return { band: (await bandRow($, 140)).words, card: (await runCard($)).rows[2], now }
+  }
+  const GOING = { band: 'autopilot · next stop: plan approval', card: 'next stop: plan approval', now: ['the run goes on by itself', 'next stop: plan approval'] }
+  const WAITING = { band: 'autopilot · waiting for you: plan approval', card: 'waiting for you: plan approval', now: ['waiting for you: plan approval'] }
+  // How many times the task's state.md was asked for: more with every refresh.
+  const taskReads = () => seen.reads.filter(path => path === `/repo/${STATE_MD}`).length
+  // A main-session turn that starts `ids` in the background and ends with them running, read after its re-read.
+  const turnWith = async (...ids: string[]) => {
+    await startTurn($)
+    for (const id of ids) await spawn(id)
+    forget(seen)
+    await endTurn($)
+    await clock.advance(REREAD_MS)
+    await clock.settle()
+  }
+  const later = async (ms: number) => {
+    await clock.advance(ms)
+    await clock.settle()
+  }
+  expect(await reads()).toEqual(GOING)
+
+  // The turn ends with its agent at work: going everywhere after the re-read, and nothing is announced, however
+  // long the agent takes.
+  await turnWith('r1')
+  expect(await reads()).toEqual(GOING)
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  expect(seen.toasts).toEqual([])
+  // The agent ends with no turn started since: the task is read once more, as after a turn's end, and the run then
+  // reads as waiting, announced once.
+  await endTurn($, 'answer', 'r1')
+  await later(REREAD_MS - 1)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await later(1)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  await later(20 * REREAD_MS)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  expect(seen.toasts).toEqual([])
+
+  // Two agents: only after the second ends.
+  await turnWith('s1', 's2')
+  await endTurn($, 'answer', 's1')
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await endTurn($, 'answer', 's2')
+  await later(REREAD_MS)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+
+  // The agent's report starts the next turn: started before the agent ended, and started after it within the
+  // re-read's delay, the run goes on and nothing is announced.
+  await turnWith('p1')
+  await startTurn($)
+  await endTurn($, 'answer', 'p1')
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+  await endTurn($)
+  await later(REREAD_MS)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  await turnWith('p2')
+  await endTurn($, 'answer', 'p2')
+  await later(REREAD_MS - 1)
+  await startTurn($)
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(GOING)
+  expect(seen.notified).toEqual([])
+
+  // An agent that ends in a turn still running, and one that ends after a turn that died, set no read.
+  await spawn('f1')
+  await later(20 * REREAD_MS)
+  let before = taskReads()
+  await endTurn($, 'answer', 'f1')
+  await later(20 * REREAD_MS)
+  expect(taskReads()).toBe(before)
+  await spawn('f2')
+  await endTurn($, 'error')
+  await later(20 * REREAD_MS)
+  forget(seen)
+  before = taskReads()
+  await endTurn($, 'answer', 'f2')
+  await later(20 * REREAD_MS)
+  expect(taskReads()).toBe(before)
+  expect(seen.notified).toEqual([])
+
+  // A dialog opened while an agent runs is announced, and reads as waiting until it is answered.
+  await startTurn($)
+  await spawn('d1')
+  forget(seen)
+  const asked = ask($)
+  await clock.settle()
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  held.answer()
+  await asked
+  expect(await reads()).toEqual(GOING)
+  await endTurn($, 'answer', 'd1')
+  await later(20 * REREAD_MS)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+
+  // An agent that isn't Quorum's doesn't hold the wait back, and its end doesn't put the re-read off.
+  await startTurn($)
+  await spawn('g1', 'general-purpose')
+  forget(seen)
+  await endTurn($)
+  await later(100)
+  await endTurn($, 'answer', 'g1')
+  await later(REREAD_MS - 100)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+  await later(20 * REREAD_MS)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+
+  // An agent that ends before the turn's re-read: one message, RUN_REREAD_MS after the agent's end.
+  await startTurn($)
+  await spawn('q1')
+  forget(seen)
+  await endTurn($)
+  await later(100)
+  await endTurn($, 'answer', 'q1')
+  await later(REREAD_MS - 1)
+  expect(seen.notified).toEqual([])
+  await later(20 * REREAD_MS)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+
+  // An agent that ends while the turn's re-read is reading: that re-read starts the wait, and the read the agent's
+  // end set announces nothing more.
+  await startTurn($)
+  await spawn('h1')
+  forget(seen)
+  await endTurn($)
+  hold.isArmed = true
+  await later(REREAD_MS)
+  expect(hold.release).not.toBeNull()
+  await endTurn($, 'answer', 'h1')
+  hold.release?.()
+  await later(20 * REREAD_MS)
+  expect(await reads()).toEqual(WAITING)
+  expect(seen.notified).toEqual([WAITING_PLAN])
+
+  // The marker gone when the last agent ends: the run's end alone.
+  await turnWith('m1')
+  delete files[RUN_MARKER]
+  await endTurn($, 'answer', 'm1')
+  await later(20 * REREAD_MS)
+  expect(seen.notified).toEqual(['export-csv: run ended · PLANNING'])
+
+  // The task ESCALATED when the last agent ends: the escalation's message alone.
+  files[RUN_MARKER] = RUN_SINCE
+  await readAgain($)
+  await turnWith('e1')
+  files[STATE_MD] = calm('ESCALATED')
+  await endTurn($, 'answer', 'e1')
+  await later(20 * REREAD_MS)
+  expect(seen.notified).toEqual([ESCALATED_TEXT])
+  expect(seen.toasts).toEqual([])
+  expect((await reads()).band).toBe('run stopped')
 })

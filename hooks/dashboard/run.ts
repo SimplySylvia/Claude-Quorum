@@ -68,7 +68,8 @@ export function gateNow(status: string): string {
 }
 
 // What the main session's turn tells of a run, kept in memory by register.tsx: how many of its questions are open,
-// how its last turn ended (null while one runs), and whether the wait after an `answer` end has begun.
+// how its last turn ended (null while one runs), and whether the wait after an `answer` end has begun (it begins at
+// a re-read that finds no Quorum agent running: a turn that ended with its agents at work is a run going on).
 export type RunTurn = { asking: number; ended: 'answer' | 'error' | 'refusal' | 'aborted' | null; isIdle: boolean }
 
 // A run as the band and the pane show it: its state, why it stopped (null unless stopped), where it stops next
@@ -133,9 +134,16 @@ export function stoppedText(slug: string, reason: Exclude<NonNullable<RunView['r
   return withSlug(slug, `run stopped · ${stopRow(reason)}`)
 }
 
-// The announcement of a run's end, with its task's status; `run ended` for a run with no task.
-export function endedText(slug: string, status: string): string {
-  return slug ? withSlug(slug, `run ended · ${status}`) : 'run ended'
+// Where a run stopped, for its end's announcement: `PR drafted` once the task's pr.md exists, `plan approved` for a
+// BUILDING task whose build hasn't started (its state.md has no base_sha), else the status.
+export function stoppedAt(status: string, isPrDrafted: boolean, hasBase: boolean): string {
+  if (isPrDrafted) return 'PR drafted'
+  return status === 'BUILDING' && !hasBase ? 'plan approved' : status
+}
+
+// The announcement of a run's end, with where its task stopped (stoppedAt); `run ended` for a run with no task.
+export function endedText(slug: string, where: string): string {
+  return slug ? withSlug(slug, `run ended · ${where}`) : 'run ended'
 }
 
 // The toast, without the slug, for a status a run goes on from: the status and what the run does next, or the
