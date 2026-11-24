@@ -16,6 +16,15 @@ left without asking, and say so. Don't run git commands that change the working 
 The plan template is `<plugin root>/skills/plan/templates/plan.md`. Keep each round's files in
 `.tasks/<slug>/plan-review/round-<N>/`.
 
+**Reports.** Where a step says `Report file: <path>`, a hook saves that agent's report there, so you don't retype
+it. Before you start the agent, `rm -f <path>`. Make `Report file: <path>` the last line of its prompt, on a line of
+its own with nothing before it and the path bare (no backticks or quotes, and no `//`); the path is the relative one
+you would save to yourself, under `.tasks/` of the folder you work in (the main working tree, or the task's own
+worktree). The hook runs a second or two after the report reaches you, so when the agent has handed back, wait for
+the file to be there and not empty: check `test -s <path>` about once a second, for up to 10 seconds. If it still
+isn't (an older Claude Code, or the hook is off), save the reply verbatim to that path yourself. An agent you ask
+again without starting it anew saves over the same file: remove the file before you ask, and wait the same way.
+
 ## 1. Check the status
 
 `quorum-state get status` must be `PLANNING` or `DRAFT-AWAITING-VISUAL-SIGNOFF`. For any other status, say what it
@@ -39,9 +48,14 @@ up to now. Then start `quorum:planner` with:
 > `.tasks/<slug>/decisions.md`, and `.tasks/<slug>/mockup.html` if they exist. <the template, with TITLE, SLUG,
 > and RISK filled in>
 
-Save its reply verbatim to `.tasks/<slug>/plan.md`. Then `quorum-validate --task <slug> plan`: every step must name
+Report file: `.tasks/<slug>/plan.md`. Then `quorum-validate --task <slug> plan`: every step must name
 the requirements it serves, and every requirement must have a step. If it reports an `ERROR`, start the planner
-once more with those lines as findings to answer, and save its reply over `plan.md`, before the reviewers see it.
+once more with those lines as findings to answer, before the reviewers see it, and
+Report file: `.tasks/<slug>/plan.md`. Don't remove `plan.md` here: the planner revises it. Copy it first
+(`cp .tasks/<slug>/plan.md .tasks/<slug>/plan-prev.md`). When the planner has handed back, the hook has saved the new
+plan if `plan.md` is not empty and differs from the copy (`test -s .tasks/<slug>/plan.md`, and
+`cmp -s .tasks/<slug>/plan.md .tasks/<slug>/plan-prev.md` fails); check about once a second, for up to 10 seconds.
+If the two are still the same, save the reply over `plan.md` yourself.
 
 ## 4. Review the plan
 
@@ -65,21 +79,24 @@ the voter with `reviewer_model`; the planner runs on the session's model.
    | `quorum:a11y-auditor` | plan mode | UI work | `a11y.md` |
    | `quorum:security-reviewer` | plan mode | HIGH, or MEDIUM with `<security_on_medium>` `true` | `security.md` |
 
-   Each gets only this prompt (leave out the persona for the auditors and the security reviewer):
+   Each gets only this, and its `Report file:` line from sub-step 2 (leave out the persona for the auditors and the
+   security reviewer):
 
    > Mode: plan. Persona: <persona>. Task: `<slug>`. Review the implementation plan `.tasks/<slug>/plan.md` before
    > any code is written: does it meet `.tasks/<slug>/rd.md` and `.tasks/<slug>/eval.md`, and is it right for this
    > repo? Read `REVIEW.md` and `CLAUDE.md` first, and the code the plan names. This is plan round <N>.
 
-2. Save each reply **verbatim** to `plan-review/round-<N>/<file>` from the table, and all of them together to
-   `plan-review/round-<N>/candidates.md`.
+2. Report file: `.tasks/<slug>/plan-review/round-<N>/<file>`, one per reviewer, with `<file>` from the table. When
+   all are saved, make `candidates.md` in that folder from the saved files with a command, not from the replies:
+   `awk 1 <the saved files, in the table's order> > candidates.md` (`awk 1`, not `cat`: a saved report may end without a
+   newline).
 3. **Vote.** Start `quorum:verifier-voter` with:
 
    > Task: `<slug>`. Candidate findings on the plan: `.tasks/<slug>/plan-review/round-<N>/candidates.md`. Read
    > `REVIEW.md`, `.tasks/<slug>/rd.md`, and `.tasks/<slug>/plan.md`, check each finding against the plan and the
    > code it names, and vote.
 
-   Save its reply verbatim to `round-<N>/votes.md`, then `quorum-findings cap <nit_cap> votes.md > survivors.md`
+   Report file: `.tasks/<slug>/plan-review/round-<N>/votes.md`, then `quorum-findings cap <nit_cap> votes.md > survivors.md`
    (`nit_cap` is `<nit_cap>`, or 2 if that reads as a placeholder).
 4. `quorum-state log` a block: `## Plan round <N>`, the `quorum-findings summary` line, and the Pattern Categories,
    plus the line `quorum-files record` printed to stderr, if it printed one.
@@ -87,7 +104,13 @@ the voter with `reviewer_model`; the planner runs on the session's model.
 ## 5. Revise or approve
 
 - **`[IMPORTANT]` findings survive and N is 1:** start `quorum:planner` again with the task slug and
-  `survivors.md` as the findings to answer, save its reply over `plan.md`, and go back to step 4.
+  `survivors.md` as the findings to answer, and
+  Report file: `.tasks/<slug>/plan.md`. Don't remove `plan.md` here: the planner revises it. Copy it first
+  (`cp .tasks/<slug>/plan.md .tasks/<slug>/plan-prev.md`). When the planner has handed back, the hook has saved the new
+  plan if `plan.md` is not empty and differs from the copy (`test -s .tasks/<slug>/plan.md`, and
+  `cmp -s .tasks/<slug>/plan.md .tasks/<slug>/plan-prev.md` fails); check about once a second, for up to 10 seconds.
+  If the two are still the same, save the reply over `plan.md` yourself.
+  Then go back to step 4. A later revision (after round 2, or from step 6) is saved the same way.
 - **`[IMPORTANT]` findings survive after round 2:** stop revising. Show the user the surviving findings and the
   planner's open questions, and ask them to decide each one, as a grilling round
   (`<plugin root>/skills/grilling/SKILL.md`): change the spec (`/quorum:spec-and-eval --redesign`), accept the plan

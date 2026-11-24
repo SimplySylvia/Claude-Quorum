@@ -20,6 +20,15 @@ variables in a git command: Claude Code refuses a command it can't show stays in
 unfinished as `INTERRUPTED`, and removes a `--fix` marker it left, which would otherwise point this task's builder
 at the review. If it prints ids, mention them in one line.
 
+**Reports.** Where a step says `Report file: <path>`, a hook saves that agent's report there, so you don't retype
+it. Before you start the agent, `rm -f <path>`. Make `Report file: <path>` the last line of its prompt, on a line of
+its own with nothing before it and the path bare (no backticks or quotes, and no `//`); the path is the relative one
+you would save to yourself, under `.tasks/` of the folder you work in (the main working tree, or the task's own
+worktree). The hook runs a second or two after the report reaches you, so when the agent has handed back, wait for
+the file to be there and not empty: check `test -s <path>` about once a second, for up to 10 seconds. If it still
+isn't (an older Claude Code, or the hook is off), save the reply verbatim to that path yourself. An agent you ask
+again without starting it anew saves over the same file: remove the file before you ask, and wait the same way.
+
 ## 1. Check the status
 
 `quorum-state get status` must be `BUILDING`, and `quorum-state get plan_approved` must be set (`/quorum:plan`
@@ -103,7 +112,7 @@ printed to stderr, if it printed one. Then start `quorum:prover`:
 > those whose Passes when starts with `Final proof only.`: the final proof runs those, so report each with Result
 > `SKIPPED` and Evidence `final proof only`. Read `CLAUDE.md` first.
 
-Save its reply verbatim to `.tasks/<slug>/proof-build.md` and show it. If any row fails, say which, and offer to
+Report file: `.tasks/<slug>/proof-build.md`, and show it. If any row fails, say which, and offer to
 start the builder again with the failures.
 
 The next steps are `/quorum:simplify-diff`, then `/quorum:review-loop`.

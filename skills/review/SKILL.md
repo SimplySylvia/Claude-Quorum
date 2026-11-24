@@ -21,6 +21,15 @@ your proposed tier without asking, and say what you chose).
 **Git:** if a `git` command fails with an `xcode-select` or `xcrun` error (a sandbox hiding the real git), run it
 as `quorum-git`, on your PATH, with the same arguments. Quorum's own helpers already do.
 
+**Reports.** Where a step says `Report file: <path>`, a hook saves that agent's report there, so you don't retype
+it. Before you start the agent, `rm -f <path>`. Make `Report file: <path>` the last line of its prompt, on a line of
+its own with nothing before it and the path bare (no backticks or quotes, and no `//`); the path is the relative one
+you would save to yourself, under `.tasks/` of the folder you work in (the main working tree, or the task's own
+worktree). The hook runs a second or two after the report reaches you, so when the agent has handed back, wait for
+the file to be there and not empty: check `test -s <path>` about once a second, for up to 10 seconds. If it still
+isn't (an older Claude Code, or the hook is off), save the reply verbatim to that path yourself. An agent you ask
+again without starting it anew saves over the same file: remove the file before you ask, and wait the same way.
+
 ## 1. Preconditions
 
 - On a Quorum task's own branch (`quorum-active-task` prints a slug and `git branch --show-current` is
@@ -92,15 +101,17 @@ placeholders for `/quorum:init-pipeline` to fill in). Call this `<RULES>` below.
    | `quorum:a11y-auditor` | mode **diff** | the range changes UI (markup, components, styles: for example `.tsx`, `.jsx`, `.vue`, `.svelte`, `.html`, `.css`) | `a11y.md` |
    | `quorum:security-reviewer` | (none) | HIGH, or MEDIUM with `${user_config.security_on_medium}` `true` | `security.md` |
 
-   Each gets only this prompt (fill in the values; leave out the persona line for the auditors and the security
-   reviewer, and use "Mode: diff" for the a11y auditor):
+   Each gets only this, and its `Report file:` line from step 2 (fill in the values; leave out the persona line for
+   the auditors and the security reviewer, and use "Mode: diff" for the a11y auditor):
 
    > Standalone review. Persona: <persona>. Review the diff range `<range>` (`git diff <range>`) in this repo.
    > There's no task spec or plan: the change's intent is in `.tasks/<id>/intent.md`. Read `<RULES>` and follow it,
    > and `CLAUDE.md` if it exists.
 
-2. Save each reply **verbatim** to `run-<N>/<file>` from the table, and all of them together to
-   `run-<N>/candidates.md`. A reply that's empty, has no `Summary:` line, or fails `quorum-findings check`
+2. Report file: `.tasks/<id>/run-<N>/<file>`, one per reviewer, with `<file>` from the table. When all are saved,
+   make `candidates.md` in that folder from the saved files with a command, not from the replies:
+   `awk 1 <the saved files, in the table's order> > candidates.md` (`awk 1`, not `cat`: a saved report may end without a
+   newline). A reply that's empty, has no `Summary:` line, or fails `quorum-findings check`
    didn't happen: start that reviewer once more; if it fails again, stop, log `## Run <N> stopped` naming the
    reviewer, set the status `INTERRUPTED`, and tell the user. A run never reports with a reviewer missing.
 3. **Scope, then vote.** In `run-<N>/`, `quorum-findings scope <range> candidates.md > in-scope.md 2> out-of-scope.md`
@@ -111,7 +122,7 @@ placeholders for `/quorum:init-pipeline` to fill in). Call this `<RULES>` below.
    > Standalone review. Candidate findings: `.tasks/<id>/run-<N>/in-scope.md`. There's no `rd.md`: the change's
    > intent is in `.tasks/<id>/intent.md`. Read `<RULES>`, check each finding against the code, and vote.
 
-   Save its reply verbatim to `run-<N>/votes.md`. Then, in `.tasks/<id>/run-<N>/`,
+   Report file: `.tasks/<id>/run-<N>/votes.md`. Then, in `.tasks/<id>/run-<N>/`,
    `quorum-findings cap <nit_cap> votes.md > survivors.md` (`nit_cap` is ${user_config.nit_cap}, or 2 if that
    reads as a placeholder). Run `quorum-findings check survivors.md`; if it fails, ask the voter once to fix the
    format.

@@ -22,6 +22,15 @@ Don't run git commands that change the working tree, index, or history here (`st
 asks again). Start the security reviewer and the a11y auditor with `reviewer_model` and the friction triager with
 `helper_model`; the blind user and the prover run on the session's model.
 
+**Reports.** Where a step says `Report file: <path>`, a hook saves that agent's report there, so you don't retype
+it. Before you start the agent, `rm -f <path>`. Make `Report file: <path>` the last line of its prompt, on a line of
+its own with nothing before it and the path bare (no backticks or quotes, and no `//`); the path is the relative one
+you would save to yourself, under `.tasks/` of the folder you work in (the main working tree, or the task's own
+worktree). The hook runs a second or two after the report reaches you, so when the agent has handed back, wait for
+the file to be there and not empty: check `test -s <path>` about once a second, for up to 10 seconds. If it still
+isn't (an older Claude Code, or the hook is off), save the reply verbatim to that path yourself. An agent you ask
+again without starting it anew saves over the same file: remove the file before you ask, and wait the same way.
+
 ## 0. Preconditions
 
 - Status must be `CONVERGED`. Otherwise say which command comes next and stop.
@@ -37,7 +46,7 @@ placeholder, it's off). Start `quorum:security-reviewer` with:
 > Task `<slug>`. Review the diff range `<base_sha>..HEAD` for exploitable vulnerabilities. Read `REVIEW.md`,
 > `CLAUDE.md`, and `.tasks/<slug>/rd.md` first.
 
-Save its reply verbatim to `blind/security-<run>.md`. Every finding in it blocks.
+Report file: `.tasks/<slug>/blind/security-<run>.md`. Every finding in it blocks.
 
 ## 2. Blind test
 
@@ -48,11 +57,11 @@ Save its reply verbatim to `blind/security-<run>.md`. Every finding in it blocks
 3. If the app is a server, start it in the background with its dev command, logging to `blind/server-<run>.log`,
    and wait until it answers. Use local, temporary, or synthetic data only; never production or shared databases.
    A CLI needs no start.
-4. Start `quorum:blind-user` with only this (no file names from the source, no hints about the implementation):
+4. Start `quorum:blind-user` with only this, and its `Report file:` line (no file names from the source, no hints about the implementation):
 
    > Goal: <goal>. Start here: <URL or command>. You're a first-time user; reach the goal through the app.
 
-   Save its report verbatim to `blind/blind-<run>.md`.
+   Report file: `.tasks/<slug>/blind/blind-<run>.md`.
 5. Turn off blind mode: `rm -f .tasks/<slug>/.blind-mode-active`. Do this even if the blind user failed or errored.
 6. **Accessibility, for UI changes** (`rd.md` says "UI change: yes", or `git diff --name-only <base_sha>..HEAD`
    changes markup, components, or styles). With the app still running, start `quorum:a11y-auditor`:
@@ -60,7 +69,7 @@ Save its reply verbatim to `blind/security-<run>.md`. Every finding in it blocks
    > Mode: live. Task `<slug>`. Start here: <URL>. Check the screens in this goal: <goal>. Read `CLAUDE.md`,
    > `REVIEW.md`, and `.tasks/<slug>/rd.md` first.
 
-   Save its reply verbatim to `blind/a11y-<run>.md`. A CLI-only change skips this step.
+   Report file: `.tasks/<slug>/blind/a11y-<run>.md`. A CLI-only change skips this step.
 7. **Tear down, always:** stop the server if you started one, and check `.tasks/<slug>/.blind-mode-active` is gone.
 
 ## 3. Triage friction
@@ -70,7 +79,7 @@ If the blind report has any `FRICTION:` lines, start `quorum:friction-triager`:
 > Task `<slug>`. Diff range `<base_sha>..HEAD`. Blind report: `.tasks/<slug>/blind/blind-<run>.md`. Sort every
 > friction item and draft follow-ups.
 
-Save its reply verbatim to `blind/triage-<run>.md`.
+Report file: `.tasks/<slug>/blind/triage-<run>.md`.
 
 ## 4. Route
 
@@ -99,8 +108,8 @@ test result, the blockers, the triage counts, and the line `quorum-files record`
    > and every row in `.tasks/<slug>/eval.md`, then give each requirement in `.tasks/<slug>/rd.md` a verdict. Read
    > `CLAUDE.md` first.
 
-   Save its reply verbatim to `.tasks/<slug>/proof-final.md`, and show it. `quorum-state` refuses `READY` and `AWAITING-HUMAN`
-   without this file, at HEAD, with no failed check and every requirement MET, so save it before setting the status. If a requirement's verdict is
+   Report file: `.tasks/<slug>/proof-final.md`, and show it. `quorum-state` refuses `READY` and `AWAITING-HUMAN`
+   without this file, at HEAD, with no failed check and every requirement MET, so see that it is saved before setting the status. If a requirement's verdict is
    PARTIAL, MISSING, or CONTRADICTS, it goes back to the review loop: push each to `pending_findings` as one line,
    `[IMPORTANT] <its file:line, or .tasks/<slug>/rd.md> — Pattern Category: Unmet requirement — requirement <n>:
    <the evidence>`, then `quorum-state set status IN_REVIEW`. The loop fixes it first and reviews the fix, under its

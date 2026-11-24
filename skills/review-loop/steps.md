@@ -33,6 +33,15 @@ at the review. If it prints ids, mention them in one line.
 `<arguments>` asks again). Start every reviewer and the voter with `reviewer_model`; the builder and the prover run on
 the session's model.
 
+**Reports.** Where a step says `Report file: <path>`, a hook saves that agent's report there, so you don't retype
+it. Before you start the agent, `rm -f <path>`. Make `Report file: <path>` the last line of its prompt, on a line of
+its own with nothing before it and the path bare (no backticks or quotes, and no `//`); the path is the relative one
+you would save to yourself, under `.tasks/` of the folder you work in (the main working tree, or the task's own
+worktree). The hook runs a second or two after the report reaches you, so when the agent has handed back, wait for
+the file to be there and not empty: check `test -s <path>` about once a second, for up to 10 seconds. If it still
+isn't (an older Claude Code, or the hook is off), save the reply verbatim to that path yourself. An agent you ask
+again without starting it anew saves over the same file: remove the file before you ask, and wait the same way.
+
 ## 0. Preconditions
 
 - Status (`quorum-state get status`) must be `BUILDING` or `IN_REVIEW`. Otherwise say which command comes next
@@ -69,8 +78,8 @@ Let N = `quorum-state get round` + 1. Stop the loop if N > max_rounds (see step 
    | `quorum:code-reviewer` | **Test Adequacy Hunter** | the range changes tests (paths with `test`, `spec`, `__tests__`, `e2e`, `cypress`) | `tests.md` |
    | `quorum:a11y-auditor` | mode **diff** | the range changes UI (markup, components, styles: for example `.tsx`, `.jsx`, `.vue`, `.svelte`, `.html`, `.css`) | `a11y.md` |
 
-   Each gets only this prompt (fill in the values; leave out the persona line for the pattern and docs auditors), never your
-   own notes or the builder's report:
+   Each gets only this, and its `Report file:` line from sub-step 4 (fill in the values; leave out the persona line for
+   the pattern and docs auditors), never your own notes or the builder's report:
 
    > Persona: <persona, or "Mode: diff" for the a11y auditor>. Task: `<slug>`. Review the diff range `<RANGE>`
    > (`git diff <RANGE>`) in this repo. Read `REVIEW.md`, `CLAUDE.md`, `.tasks/<slug>/rd.md`,
@@ -82,8 +91,10 @@ Let N = `quorum-state get round` + 1. Stop the loop if N > max_rounds (see step 
    and in its prompt replace the `plan.md` part with "There's no `plan.md` (fast path): check the change against
    `rd.md`".
 
-4. Save each reviewer's reply **verbatim** to `round-<N>/<file>` from the table, and all of them together to
-   `round-<N>/candidates.md`.
+4. Report file: `.tasks/<slug>/review/round-<N>/<file>`, one per reviewer, with `<file>` from the table. When all
+   are saved, make `candidates.md` in that folder from the saved files with a command, not from the replies:
+   `awk 1 <the saved files, in the table's order> > candidates.md` (`awk 1`, not `cat`: a saved report may end without a
+   newline).
    **Every reviewer must reply.** A reply that's empty, or has no `Summary:` line, or fails
    `quorum-findings check <file>`, didn't happen: start that reviewer once more with the same prompt. If it fails
    again, stop the loop without converging: `quorum-state set round <N - 1>` (so the next run reviews this round
@@ -98,7 +109,7 @@ Let N = `quorum-state get round` + 1. Stop the loop if N > max_rounds (see step 
    > Task: `<slug>`. Candidate findings: `.tasks/<slug>/review/round-<N>/in-scope.md`. Read `REVIEW.md` and
    > `.tasks/<slug>/rd.md`, check each finding against the code, and vote.
 
-   Save its reply verbatim to `round-<N>/votes.md` (it keeps the `## Dropped` lines, which `/quorum:codify-lesson`
+   Report file: `.tasks/<slug>/review/round-<N>/votes.md` (it keeps the `## Dropped` lines, which `/quorum:codify-lesson`
    reads). Then `quorum-findings cap <nit_cap> votes.md > survivors.md`: the kept findings, with only the most confident nits. Run
    `quorum-findings check survivors.md`; if it fails, ask the voter once to fix the format.
 6. **Log the round:** pipe a short block to `quorum-state log`:
@@ -126,17 +137,22 @@ Start `quorum:builder` with:
 > that's wrong instead of fixing it. Run the checks and commit one fix commit. Categories:
 > <`quorum-findings categories <file>`>.
 
-The SubagentStop hook makes it pass `verify-completion.sh` before it hands back. Then run `quorum-files record`, and
-log its commit list with `quorum-state log`, plus the line the record printed to stderr, if it printed one.
+Report file: `.tasks/<slug>/review/builder.md`; each start of the builder saves over the last one's.
 
-**Disputes.** If the builder's report lists findings under **Disputed**, save that section verbatim to
-`round-<N>/disputed.md`, and start `quorum:verifier-voter`, with `reviewer_model`:
+The SubagentStop hook makes it pass `verify-completion.sh` before it hands back, and can send it back to work after a
+first report: the file then holds that earlier report for a moment, so wait until it holds the last one you received.
+Then run `quorum-files record`, and log its commit list with `quorum-state log`, plus the line the record printed to
+stderr, if it printed one.
+
+**Disputes.** If the builder's report lists findings under **Disputed**, make `round-<N>/disputed.md` from the saved
+file, not from the reply: `disputed.md` is the **Disputed** section of `.tasks/<slug>/review/builder.md`. Then start
+`quorum:verifier-voter`, with `reviewer_model`:
 
 > Task: `<slug>`. The builder disputes these kept findings, with evidence: `.tasks/<slug>/review/round-<N>/disputed.md`.
 > Read `REVIEW.md` and `.tasks/<slug>/rd.md`, check each finding and the builder's evidence against the code, and
 > vote KEEP if the finding stands or DROP if the evidence shows it's wrong.
 
-Save its reply verbatim to `round-<N>/disputes.md`. Start the builder once more with the findings it kept ("The
+Report file: `.tasks/<slug>/review/round-<N>/disputes.md`. Start the builder once more with the findings it kept ("The
 voter kept these after your dispute: fix them, or say exactly what stops you"), and `quorum-files record` again when
 it hands back. The ones it dropped are disputes upheld: log how many with the round, and they count toward lessons
 (step 7). The next round's reviewers still check the whole fix, so a wrong drop shows up again.
@@ -169,8 +185,8 @@ Tell the user to pick one and run `/quorum:spec-and-eval --redesign <slug>`. The
    > and every row in `.tasks/<slug>/eval.md`, then give each requirement in `.tasks/<slug>/rd.md` a verdict. Read
    > `CLAUDE.md` first.
 
-   Save its reply verbatim to `.tasks/<slug>/proof-final.md`, and show it. `quorum-state` refuses `READY` and `AWAITING-HUMAN`
-   without this file, at HEAD, with no failed check and every requirement MET, so save it before setting the status. If a requirement's verdict is
+   Report file: `.tasks/<slug>/proof-final.md`, and show it. `quorum-state` refuses `READY` and `AWAITING-HUMAN`
+   without this file, at HEAD, with no failed check and every requirement MET, so see that it is saved before setting the status. If a requirement's verdict is
    PARTIAL, MISSING, or CONTRADICTS, it goes back to the review loop: push each to `pending_findings` as one line,
    `[IMPORTANT] <its file:line, or .tasks/<slug>/rd.md> — Pattern Category: Unmet requirement — requirement <n>:
    <the evidence>`, then `quorum-state set status IN_REVIEW`. The loop fixes it first and reviews the fix, under its

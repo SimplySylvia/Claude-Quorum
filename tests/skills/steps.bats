@@ -77,3 +77,98 @@ VALUES="plugin root|session|arguments|max_rounds|nit_cap|security_on_medium|revi
   done
   cleanup_repo
 }
+
+# The nine files whose steps have an agent's report saved by hooks/save-report.sh.
+REPORT_FILES="skills/spec-and-eval/steps.md skills/plan/steps.md skills/build/steps.md skills/review-loop/steps.md
+skills/blind-test/steps.md skills/pr-draft/steps.md skills/research/steps.md skills/review/SKILL.md skills/map/SKILL.md"
+
+# The **Reports.** paragraph of a file, as one line.
+reports_rule() {
+  awk '/^\*\*Reports\.\*\*/ { f = 1 } f && /^[[:space:]]*$/ { exit } f' "$REPO_ROOT/$1" | tr '\n' ' ' | tr -s ' ' | sed 's/ $//'
+}
+
+# A file without its **Reports.** paragraph: what its steps say.
+reports_sites() {
+  awk '/^\*\*Reports\.\*\*/ { f = 1 } f && /^[[:space:]]*$/ { f = 0 } !f' "$REPO_ROOT/$1"
+}
+
+@test "each of the nine files that save a report names its Report file" {
+  # One line per save site: the file, then the line its step must hold.
+  while IFS='|' read -r f want; do
+    [ -n "$f" ] || continue
+    reports_sites "$f" | grep -qF -- "$want" || { echo "$f has no: $want"; return 1; }
+  done <<'SITES'
+skills/spec-and-eval/steps.md|Report file: `.tasks/<slug>/research.md`
+skills/spec-and-eval/steps.md|Report file: `.tasks/<slug>/spec-review/feasibility.md`
+skills/spec-and-eval/steps.md|Report file: `.tasks/<slug>/spec-review/improver.md`
+skills/plan/steps.md|Report file: `.tasks/<slug>/plan.md`. Then `quorum-validate
+skills/plan/steps.md|Report file: `.tasks/<slug>/plan-review/round-<N>/<file>`
+skills/plan/steps.md|Report file: `.tasks/<slug>/plan-review/round-<N>/votes.md`
+skills/build/steps.md|Report file: `.tasks/<slug>/proof-build.md`
+skills/review-loop/steps.md|Report file: `.tasks/<slug>/review/round-<N>/<file>`
+skills/review-loop/steps.md|Report file: `.tasks/<slug>/review/round-<N>/votes.md`
+skills/review-loop/steps.md|Report file: `.tasks/<slug>/review/builder.md`
+skills/review-loop/steps.md|Report file: `.tasks/<slug>/review/round-<N>/disputes.md`
+skills/review-loop/steps.md|Report file: `.tasks/<slug>/proof-final.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/security-<run>.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/blind-<run>.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/a11y-<run>.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/blind/triage-<run>.md`
+skills/blind-test/steps.md|Report file: `.tasks/<slug>/proof-final.md`
+skills/pr-draft/steps.md|Report file: `.tasks/<slug>/pr.md`
+skills/research/steps.md|Report file: `<research dir>/research/verify.md`
+skills/review/SKILL.md|Report file: `.tasks/<id>/run-<N>/<file>`
+skills/review/SKILL.md|Report file: `.tasks/<id>/run-<N>/votes.md`
+skills/map/SKILL.md|Report file: `.tasks/map-<slug>/research/<NN>.md`
+skills/map/SKILL.md|Report file: `.tasks/map-<slug>/research/<NN>-facts.md`
+skills/map/SKILL.md|Report file: `.tasks/map-<slug>/review/<NN>-feasibility.md`
+skills/map/SKILL.md|Report file: `.tasks/map-<slug>/tasks-review/round-<N>/<file>`
+skills/map/SKILL.md|Report file: `.tasks/map-<slug>/tasks-review/round-<N>/votes.md`
+SITES
+  # No step still has the orchestrator save a reply itself: outside the rule, nothing is saved "verbatim", and
+  # every `Report file:` a step writes names a path (the rule's own `<path>` is not counted above or here).
+  for f in $REPORT_FILES; do
+    if reports_sites "$f" | grep -n -i 'verbatim'; then echo "$f still saves a reply by hand"; return 1; fi
+    if reports_sites "$f" | grep -n -E 'Report file: `(rd|eval|state)\.md|Report file: `[^.<]'; then
+      echo "$f names a report file the hook refuses"; return 1
+    fi
+  done
+}
+
+@test "the nine files give the same Reports rule: remove the file, name it last, wait up to 10 seconds, then save by hand" {
+  first=$(reports_rule skills/spec-and-eval/steps.md)
+  [ -n "$first" ]
+  for want in 'Where a step says `Report file: <path>`' 'Before you start the agent, `rm -f <path>`' \
+    'the last line of its prompt' 'no backticks or quotes' '`test -s <path>`' \
+    'about once a second, for up to 10 seconds' 'save the reply verbatim to that path yourself'; do
+    [[ "$first" == *"$want"* ]] || { echo "the rule doesn't say: $want"; return 1; }
+  done
+  for f in $REPORT_FILES; do
+    [ "$(reports_rule "$f")" = "$first" ] || { echo "$f words the Reports rule differently"; return 1; }
+    # The rule comes before the first step that uses it.
+    rule=$(grep -n -m1 '^\*\*Reports\.\*\*' "$REPO_ROOT/$f" | cut -d: -f1)
+    site=$(grep -n 'Report file: `' "$REPO_ROOT/$f" | grep -v '<path>' | head -1 | cut -d: -f1)
+    [ "$rule" -lt "$site" ] || { echo "$f gives the Reports rule after its first use"; return 1; }
+  done
+}
+
+@test "a planner revising plan.md has it copied aside and compared, not removed" {
+  steps="$REPO_ROOT/skills/plan/steps.md"
+  # Both revise sites: after a quorum-validate ERROR, and after a review round.
+  [ "$(grep -c "Don't remove \`plan.md\` here" "$steps")" -eq 2 ]
+  [ "$(grep -c 'cp .tasks/<slug>/plan.md .tasks/<slug>/plan-prev.md' "$steps")" -eq 2 ]
+  [ "$(grep -c 'cmp -s .tasks/<slug>/plan.md .tasks/<slug>/plan-prev.md' "$steps")" -eq 2 ]
+  [ "$(grep -c 'Report file: `.tasks/<slug>/plan.md`' "$steps")" -eq 3 ]
+}
+
+@test "files derived from a report are made from the saved file, and a bare prompt keeps its Report file line" {
+  for f in skills/review-loop/steps.md skills/plan/steps.md skills/review/SKILL.md skills/map/SKILL.md; do
+    grep -E 'candidates\.md' "$REPO_ROOT/$f" | grep -q '`awk 1 ' || { echo "$f doesn't make candidates.md with a command"; return 1; }
+  done
+  grep -F 'pr-body.md' "$REPO_ROOT/skills/pr-draft/steps.md" | grep -qF "sed '1,/^---\$/d' .tasks/<slug>/pr.md > .tasks/<slug>/pr-body.md"
+  grep -F 'disputed.md' "$REPO_ROOT/skills/review-loop/steps.md" | grep -qF '**Disputed** section of `.tasks/<slug>/review/builder.md`'
+  for f in skills/review-loop/steps.md skills/blind-test/steps.md; do
+    grep -qF 'only this, and its `Report file:` line' "$REPO_ROOT/$f" || { echo "$f: a bare prompt loses its Report file line"; return 1; }
+  done
+  grep -qF "Agents' reports go to the files the steps name: the hook saves them" "$REPO_ROOT/skills/run/SKILL.md"
+}

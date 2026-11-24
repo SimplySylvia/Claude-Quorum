@@ -13,6 +13,15 @@ obvious. You read the code to understand the request and reproduce the problem; 
 goes through the stages: they're what proves it. In a `/quorum:run` session, a hook blocks source edits until the
 build starts.
 
+**Reports.** Where a step says `Report file: <path>`, a hook saves that agent's report there, so you don't retype
+it. Before you start the agent, `rm -f <path>`. Make `Report file: <path>` the last line of its prompt, on a line of
+its own with nothing before it and the path bare (no backticks or quotes, and no `//`); the path is the relative one
+you would save to yourself, under `.tasks/` of the folder you work in (the main working tree, or the task's own
+worktree). The hook runs a second or two after the report reaches you, so when the agent has handed back, wait for
+the file to be there and not empty: check `test -s <path>` about once a second, for up to 10 seconds. If it still
+isn't (an older Claude Code, or the hook is off), save the reply verbatim to that path yourself. An agent you ask
+again without starting it anew saves over the same file: remove the file before you ask, and wait the same way.
+
 `<arguments>` may also contain `--yes` (only when the user typed it): then accept your proposed slug, tier, and
 spec without asking, and say what you chose.
 
@@ -130,13 +139,13 @@ LOW only with `--research`. `--no-research` skips it, and so does the fast path 
    sub-step 3. Deep mode is for a new dependency, a choice between architectures, a security-sensitive integration,
    or a field the repo has no precedent in; for anything less, one researcher is enough, and you may say so.
 2. Start `quorum:researcher` with the request in your own words, without internal names you don't need, and
-   nothing from production data:
+   nothing from production data (sub-step 3 names its report file):
 
    > Task `<slug>`. Question: what's the best way to <the request> in this repo? <Any focus the user gave.> Read
    > `CLAUDE.md` and `REVIEW.md` first, and `.tasks/<slug>/history.md` if it has anything: what went wrong in this
    > repo before.
 
-3. Save its reply verbatim to `.tasks/<slug>/research.md`. Show the user the options and the recommendation, and
+3. Report file: `.tasks/<slug>/research.md`. Show the user the options and the recommendation, and
    ask which approach the spec should take, as a grilling round: the approach (the recommendation first), plus each
    item under the research's **Assumptions to confirm**, each with what you'd assume. A confirmed assumption can
    become a requirement or an edge case; one the user rejects or leaves open never goes into the spec as fact.
@@ -192,13 +201,14 @@ LOW only with `--research`. `--no-research` skips it, and so does the fast path 
 1. **Models.** Step 3 resolved both; every later command reuses them. (A redesign that reaches this step without
    them resolves them now, as step 3 says.)
 2. Start two `quorum:spec-reviewer`s **in one message, in parallel**, with `reviewer_model`, personas
-   **Feasibility Critic** and **Spec Improver**. Each gets only:
+   **Feasibility Critic** and **Spec Improver**. Each gets only this, and its `Report file:` line (sub-step 3):
 
    > Persona: <persona>. Task: `<slug>`. Review `.tasks/<slug>/rd.md` and `.tasks/<slug>/eval.md` before any
    > code is written. Read `CLAUDE.md`, `REVIEW.md`, and `.tasks/<slug>/research.md` and
    > `.tasks/<slug>/decisions.md` if they exist.
 
-3. Save the replies verbatim to `.tasks/<slug>/spec-review/feasibility.md` and `improver.md`.
+3. Report file: `.tasks/<slug>/spec-review/feasibility.md` for the Feasibility Critic, and
+   Report file: `.tasks/<slug>/spec-review/improver.md` for the Spec Improver.
 4. Fix every `[IMPORTANT]` in `rd.md` or `eval.md`, or ask the user about any you think is wrong. Apply the
    `[NIT]` suggestions you agree with. A finding only the user can settle (what a requirement should mean, whether
    something is in scope, a trade-off between two requirements) goes to them as one grilling round, with each

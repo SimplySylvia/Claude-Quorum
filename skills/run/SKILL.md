@@ -119,7 +119,8 @@ says stop, after the stage `--until` names, or after 12 stages in one run (then 
   loop, which reaches that stage by its status. A stage's steps that say "stop" end that stage, not the run, unless
   the status didn't change (a precondition failed): then stop the run, say why, and what fixes it, and run
   `quorum-run leave` (section 4).
-- **Keep the chat short.** Agents' replies go to the files the steps name, verbatim, as always. In the chat, show a
+- **Keep the chat short.** Agents' reports go to the files the steps name: the hook saves them, and you save one by hand only where
+  a step finds its file missing. In the chat, show a
   gate's content in full (the research options, the spec review, the plan, the summary before human review), and
   for everything else one line per stage: what ran and its result, for example
   `▸ Review round 1: 1 IMPORTANT kept (Unescaped CSV fields) → builder`.
