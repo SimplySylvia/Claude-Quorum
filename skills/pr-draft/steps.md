@@ -50,8 +50,12 @@ and wait the same way.
 
 4. **Save and show.** Report file: `.tasks/<slug>/pr.md`. Make the description alone (everything after the `---`
    line) from that saved file with a command, not from the reply:
-   `sed '1,/^---$/d' .tasks/<slug>/pr.md > .tasks/<slug>/pr-body.md`. Check that both are there
-(`ls .tasks/<slug>/pr.md .tasks/<slug>/pr-body.md`) before going on. Show the reply.
+   `sed '1,/^---$/d' .tasks/<slug>/pr.md > .tasks/<slug>/pr-body.md`.
+   Check that both are there and not empty (`test -s .tasks/<slug>/pr.md`, then `test -s .tasks/<slug>/pr-body.md`)
+   before going on. An empty `pr-body.md` means the saved reply has no line that is `---` alone (a trailing space,
+   or no such line): don't go on with an empty description, since `gh pr create --body-file` would open a PR without
+   one. Ask the PR writer again for its format, with `---` alone on the line before the description (remove `pr.md`
+   first, as **Reports.** says), and run the command again. Show the reply.
 5. **Next steps for the user,** without running them:
    - If commits are listed under "Drop before merging", give the exact command to remove them (for example
      `git rebase --onto <sha> <sha>^`, or an interactive rebase they run themselves), and say to rerun the fast

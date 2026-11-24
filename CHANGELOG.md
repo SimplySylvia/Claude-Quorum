@@ -87,6 +87,10 @@ copy with `/plugin marketplace update`.
   and that fix together. The early run never halts the task and doesn't count toward the two blocked runs that
   do. `/quorum:run --until build` stops after `simplify-diff`, before the early blind test. `state.md` has two
   new keys: `early_blind` (`clean` or `blocked`) and `early_blind_sha`.
+  An early run that was cut off leaves its `.blind-mode-active` marker on a task that is still `BUILDING`, so each
+  stage that starts from there (`build`, `simplify-diff`, `review-loop`, the early run itself, and the row of
+  `/quorum:run`) removes a left-over marker and stops a left-over server before it reads the code or starts an
+  agent.
 - **The later blind user is skipped when the early run already covers the code.** After the review converges, the
   blind user doesn't run again when the early run was `clean`, every path changed since `early_blind_sha` is a
   test path (or none changed; Markdown is never a test path), and the task is not a UI change. A skipped run is

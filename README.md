@@ -118,7 +118,8 @@ Every option, agent, and setting is in the [Reference](guides/reference.md).
 - **Every requirement gets a verdict,** with the `file:line` that does the work.
 - **Secrets stay out.** Reading credential files and committing what looks like a key are blocked.
 - **Maps don't build.** A map session can only write its own plans.
-- **Quiet outside a task.** Apart from the secret guard, the hooks do nothing unless a task is running.
+- **Quiet outside a task.** Apart from the secret guard and the report hook, which only saves an agent's report to
+  the file its prompt names, the hooks do nothing unless a task is running.
 
 The full list, and what the guards don't catch, is in [Guardrails and known limits](guides/guardrails.md).
 

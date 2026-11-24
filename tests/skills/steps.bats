@@ -200,6 +200,13 @@ SITES
     grep -E 'candidates\.md' "$REPO_ROOT/$f" | grep -q '`awk 1 ' || { echo "$f doesn't make candidates.md with a command"; return 1; }
   done
   grep -F 'pr-body.md' "$REPO_ROOT/skills/pr-draft/steps.md" | grep -qF "sed '1,/^---\$/d' .tasks/<slug>/pr.md > .tasks/<slug>/pr-body.md"
+  # An empty pr-body.md (a reply with no `---` line) fails the check, and the step says what to do then.
+  save=$(grep -n -m1 -F '**Save and show.**' "$REPO_ROOT/skills/pr-draft/steps.md" | cut -d: -f1)
+  save=$(awk -v n="$save" 'NR > n && /^5\. / { exit } NR >= n' "$REPO_ROOT/skills/pr-draft/steps.md" | tr '\n' ' ' | tr -s ' ')
+  for want in '`test -s .tasks/<slug>/pr.md`' '`test -s .tasks/<slug>/pr-body.md`' \
+    'An empty `pr-body.md` means the saved reply has no line that is `---` alone' "don't go on with an empty description"; do
+    [[ "$save" == *"$want"* ]] || { echo "the PR draft's save step doesn't say: $want"; return 1; }
+  done
   grep -F 'disputed.md' "$REPO_ROOT/skills/review-loop/steps.md" | grep -qF '**Disputed** section of `.tasks/<slug>/review/builder.md`'
   for f in skills/review-loop/steps.md skills/blind-test/steps.md; do
     grep -qF 'only this, and its `Report file:` line' "$REPO_ROOT/$f" || { echo "$f: a bare prompt loses its Report file line"; return 1; }
@@ -238,6 +245,23 @@ section_line() { section "$1" "$2" | tr '\n' ' ' | tr -s ' '; }
   done
 }
 
+@test "every stage that starts from BUILDING removes a blind marker a cut-off blind test left" {
+  # A cut-off early run leaves the marker with the status still BUILDING, which four stages accept by hand. The
+  # run table's row (pinned above) covers /quorum:run only, so each of them says the same words, before it reads
+  # the code or starts an agent.
+  marker='**A left-over blind marker.** If `.tasks/<slug>/.blind-mode-active` is there, a blind test of this task was cut off: `rm -f .tasks/<slug>/.blind-mode-active`, stop any server it left running, and say so in one line. While it is there the source guard keeps this session and its agents from reading the code. If you know a blind test of this task is running in another session right now, leave the marker and stop instead: two stages can'"'"'t work on one task at once.'
+  [[ "$(section_line skills/build/steps.md '## 1. Check the status')" == *"$marker"* ]] || { echo "build's status check doesn't remove a left-over marker"; return 1; }
+  [[ "$(section_line skills/review-loop/steps.md '## 0. Preconditions')" == *"$marker"* ]] || { echo "review-loop's preconditions don't remove a left-over marker"; return 1; }
+  # simplify-diff has no sections: the words sit in step 1, before the step that reads the change.
+  simplify=$(awk '/^1\. / { f = 1 } /^2\. / { f = 0 } f' "$REPO_ROOT/skills/simplify-diff/steps.md" | tr '\n' ' ' | tr -s ' ')
+  [[ "$simplify" == *"$marker"* ]] || { echo "simplify-diff's step 1 doesn't remove a left-over marker"; return 1; }
+  # The early run removes it before it turns blind mode on again (section 2), in its first sub-step.
+  early=$(section skills/blind-test/steps.md '## Early run (from `BUILDING`)' | awk '/^1\. / { f = 1 } /^2\. / { f = 0 } f' | tr '\n' ' ' | tr -s ' ')
+  [[ "$early" == *"$marker"* ]] || { echo "the early run's first sub-step doesn't remove a left-over marker"; return 1; }
+  # A status no stage starts from by hand is still the run table's to recover.
+  grep -F '| `BLIND-TEST` |' "$REPO_ROOT/skills/run/SKILL.md" | grep -qF 'rm -f .tasks/<slug>/.blind-mode-active .tasks/.blind-mode-active'
+}
+
 @test "the blind-test steps have the early run" {
   steps=skills/blind-test/steps.md
   early=$(section_line "$steps" '## Early run (from `BUILDING`)')
@@ -245,6 +269,7 @@ section_line() { section "$1" "$2" | tr '\n' ' ' | tr -s ' '; }
   for want in 'quorum-state set early_blind_sha' 'quorum-state set early_blind clean' 'quorum-state set early_blind blocked' \
     'blind/early-<n>.md' 'blind/early-triage-<n>.md' 'blind/server-early-<n>.log' 'blind/early-[0-9]*.md' \
     "Don't set \`BLIND-TEST\` and don't touch \`blind_runs\`" 'to `pending_findings`' 'has a `Result:` line' \
+    'every `CAUSED` item of the triage' 'only when nothing was pushed and the blind user returned a report' \
     '## Early blind test <n>' 'quorum-state set status IN_REVIEW' '/quorum:review-loop'; do
     [[ "$early" == *"$want"* ]] || { echo "the early run doesn't say: $want"; return 1; }
   done

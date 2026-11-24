@@ -16,6 +16,11 @@ variables in a git command: Claude Code refuses a command it can't show stays in
 
 1. Status must be `BUILDING` or `IN_REVIEW`, and `base_sha` must be set (`quorum-state get base_sha`). Otherwise
    say which command comes next and stop.
+   **A left-over blind marker.** If `.tasks/<slug>/.blind-mode-active` is there, a blind test of this task was cut
+   off: `rm -f .tasks/<slug>/.blind-mode-active`, stop any server it left running, and say so in one line. While it
+   is there the source guard keeps this session and its agents from reading the code. If you know a blind test of
+   this task is running in another session right now, leave the marker and stop instead: two stages can't work on
+   one task at once.
 2. Read `.tasks/<slug>/rd.md` and `eval.md`. Then read the whole change: `git diff <base_sha>` (committed and
    uncommitted) and `git diff --stat <base_sha>`.
 3. Remove, only within lines this task added or changed:

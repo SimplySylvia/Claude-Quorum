@@ -52,6 +52,11 @@ and wait the same way.
   (`pipeline-laws` has the stage map) and stop.
 - `base_sha` must be set and the working tree clean (`git status --porcelain --untracked-files=no` empty). If not,
   say so and stop.
+- **A left-over blind marker.** If `.tasks/<slug>/.blind-mode-active` is there, a blind test of this task was cut
+  off: `rm -f .tasks/<slug>/.blind-mode-active`, stop any server it left running, and say so in one line. While it
+  is there the source guard keeps this session and its agents from reading the code. If you know a blind test of
+  this task is running in another session right now, leave the marker and stop instead: two stages can't work on one
+  task at once.
 
 ## 1. Pending findings first
 

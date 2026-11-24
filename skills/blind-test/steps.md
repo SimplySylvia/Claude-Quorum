@@ -73,6 +73,11 @@ works. This run never halts the task and prints no summary.
 1. Don't set `BLIND-TEST` and don't touch `blind_runs`: the status stays `BUILDING` until the last sub-step, and
    `blind_runs` counts only the later runs. `<n>` is one more than the number of `.tasks/<slug>/blind/early-[0-9]*.md`
    files (the triage files, `early-triage-<n>.md`, are not counted).
+   **A left-over blind marker.** If `.tasks/<slug>/.blind-mode-active` is there, a blind test of this task was cut
+   off: `rm -f .tasks/<slug>/.blind-mode-active`, stop any server it left running, and say so in one line. While it
+   is there the source guard keeps this session and its agents from reading the code. If you know a blind test of
+   this task is running in another session right now, leave the marker and stop instead: two stages can't work on
+   one task at once.
 2. Skip the security pass (section 1) and the live accessibility pass (section 2, sub-step 6): both read the
    reviewed code, so they wait for the later run.
 3. Run section 2's sub-steps 1 to 5 and 7, with the server log in `blind/server-early-<n>.log` and, in place of
