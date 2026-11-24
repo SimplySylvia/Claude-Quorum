@@ -107,6 +107,15 @@
             "timeout": 1800
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/save-report.sh",
+            "timeout": 10
+          }
+        ]
       }
     ]
   },
